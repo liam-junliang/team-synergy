@@ -1,100 +1,131 @@
 # Team Synergy
 
-> 以“项目共同状态”为中心的轻量多 Agent 项目协作平台。
+**English** | [简体中文](README.zh-CN.md)
 
-Team Synergy 让不同的人、不同的设备和各自的编码 Agent 围绕同一套可验证的项目事实协作。平台不追求 Agent 群聊或自动调度，而是把需求、决策、任务、产物、证据和审计沉淀为项目共同状态；Agent 是可替换的执行者。
+[![CI](https://github.com/liam-junliang/team-synergy/actions/workflows/ci.yml/badge.svg)](https://github.com/liam-junliang/team-synergy/actions/workflows/ci.yml)
 
-## 核心闭环
+> A lightweight collaboration platform where people and their coding agents work from one verified project state.
+
+Team Synergy keeps requirements, decisions, tasks, artifacts, evidence, and audit trails in a shared project state. It is not an agent chat room or an autonomous scheduler: agents are replaceable executors, and only explicit submissions change the project's official state.
+
+## Why
+
+Coding agents are fast, but their work is hard to trust when context lives in chat, local notes, or one person's head. Team Synergy gives every participant — human or agent — the same versioned facts:
+
+- Requirements and decisions are versioned, not lost in threads.
+- Work is split into tasks with owners, acceptance criteria, and evidence.
+- Each agent run gets its own isolated workspace and identity.
+- Completion is explicit: artifacts and evidence are published, then verified.
+
+## Core loop
 
 ```text
-想法 → 需求议题 → 需求文档 → 需求项
-→ 任务（分派给人）→ 负责人授权 Agent 领取
-→ 独立 Run / 工作区 → 开发、自测、证据
-→ 验证 → 关闭
+Idea → requirement discussion → requirement document → requirement
+→ task assigned to a person → their agent claims it
+→ isolated run/workspace → implementation, self-test, evidence
+→ independent verification → closed
 ```
 
-## 组成
+## Architecture
 
-| 目录 | 作用 |
+```mermaid
+flowchart LR
+  subgraph Shared["Control plane (shared)"]
+    Web["Web workspace"] --> API["Core API"]
+    API --> DB[("PostgreSQL")]
+  end
+  subgraph Local["Local execution (per member)"]
+    CLI["tsp CLI"] --> Agentd["agentd"]
+    Agentd --> Agent["Coding agent"]
+    CLI --> Worktree["Run workspace"]
+  end
+  CLI --> API
+```
+
+The control plane owns project facts; the local execution plane owns files and processes. The CLI never connects to PostgreSQL directly. Web, CLI, and agents all go through the same Core API, so permissions and state transitions are enforced once.
+
+| Layer | Responsibility |
 | --- | --- |
-| `apps/core-api` | 控制面 HTTP API，项目状态的唯一真相源 |
-| `apps/web` | Web 工作台：项目、需求、计划、设计、任务、测试、缺陷、交接 |
-| `apps/cli` | `tsp` 命令行客户端：领取任务、读写资料、本地执行 |
-| `apps/agentd` | 本地 Run 会话托管 |
-| `packages/contracts` | 共享类型、状态枚举与校验契约 |
-| `packages/domain` | 任务状态机、Run 绑定与领域规则 |
-| `packages/application` | 用例、权限、事务与审计 |
-| `packages/persistence` | Drizzle Schema、PostgreSQL 迁移 |
-| `packages/integrations` | Git worktree、工作区与交接快照 |
+| Web | React 19 + Vite + TanStack Query; projects, requirements, plan, design, tasks, testing, defects, handovers |
+| Core API | Fastify HTTP API; authentication, permissions, use cases, audit, error semantics |
+| Application / Domain | Task state machine, run bindings, ownership, evidence gates, versioned documents |
+| Persistence | Drizzle schema and ordered PostgreSQL migrations |
+| CLI | `tsp`: device login, task claim/submit, documents, workspace and repository operations |
+| agentd | Local run-session supervisor |
+| Integrations | Git worktree, workspace metadata, handover snapshots |
 
-## 快速开始
+Design rules:
 
-前置：Node.js 22+、pnpm 10.33+、PostgreSQL 16。
+- Project state is the source of truth; private reasoning is not.
+- A task/run is the isolation unit; each run has its own workspace and identity.
+- Artifacts require explicit publication; completion requires evidence.
+- Web, CLI, and agents share one API and one permission model.
+- Complexity is added only for observed problems.
 
-```powershell
-# 1. 准备数据库（本地示例）
+## Repository layout
+
+| Path | Contents |
+| --- | --- |
+| `apps/core-api` | Control-plane HTTP API and the single source of project state |
+| `apps/web` | Web workspace for projects, requirements, plan, design, tasks, testing, defects, and handovers |
+| `apps/cli` | `tsp` command-line client |
+| `apps/agentd` | Local run-session supervisor |
+| `packages/contracts` | Shared types, status enums, and validation contracts |
+| `packages/domain` | Task state machine, run bindings, and domain rules |
+| `packages/application` | Use cases, permissions, transactions, and audit |
+| `packages/persistence` | Drizzle schema and PostgreSQL migrations |
+| `packages/integrations` | Git worktree, workspace, and handover integration |
+
+## Quick start
+
+Prerequisites: Node.js 22+, pnpm 10.33+, PostgreSQL 16.
+
+```bash
+# 1. Prepare the databases
 psql -U postgres -c "CREATE DATABASE acp;"
 psql -U postgres -c "CREATE DATABASE acp_test;"
 
-# 2. 安装依赖
+# 2. Install dependencies
 pnpm install
 
-# 3. 配置连接（本地默认 postgres:postgres）
-$env:ACP_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/acp'
+# 3. Point Core API at PostgreSQL (local default)
+export ACP_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/acp'
 
-# 4. 启动
+# 4. Start the control plane and the web workspace
 pnpm --filter @team-synergy/core-api dev   # http://127.0.0.1:8080
 pnpm --filter @team-synergy/web dev        # http://127.0.0.1:5173
 ```
 
-Windows 下也可以在仓库根目录执行 `pnpm dev` 同时启动两个服务。
+On Windows, set the variable with `$env:ACP_DATABASE_URL='...'`, or run `pnpm dev` from the repository root to start both services.
 
-数据库名 `acp` 与部分 `ACP_` 环境变量是历史代号，暂保持不变。
+The database name `acp` and the `ACP_` environment prefix are historical names and are kept for compatibility.
 
 ## CLI
 
-```powershell
+```bash
 pnpm --filter @team-synergy/cli build
 node apps/cli/dist/index.js --help
 
-# 绑定当前设备（浏览器授权）
+# Bind this device through browser authorization
 tsp auth login --api http://127.0.0.1:5173/api --name "my laptop"
 tsp task list --assigned-to me
 ```
 
-CLI 发布包由 `.github/workflows/cli-release.yml` 在推送 `cli-v*` tag 时构建，输出各平台的自包含安装包。
+CLI release packages are built by `.github/workflows/cli-release.yml` when a `cli-v*` tag is pushed. Each platform receives a self-contained archive with its own Node runtime.
 
-## 提交信息
+## Testing
 
-提交信息遵循 Conventional Commits：`<type>(<scope>): <subject>`。
-
-- 允许的 type：`feat`、`fix`、`docs`、`style`、`refactor`、`perf`、`test`、`build`、`ci`、`chore`、`revert`。
-- 示例：`fix(web): keep document header sticky while scrolling`、`feat(cli): add task handover command`。
-- 破坏性变更在 type/scope 后加 `!`，并在 footer 写 `BREAKING CHANGE:`。
-
-首次 clone 后启用本地校验：
-
-```powershell
-git config core.hooksPath .githooks
-```
-
-也可以运行 `pnpm commit:check` 检查当前 HEAD；CI 同样会校验提交信息。
-
-## 测试
-
-```powershell
+```bash
 pnpm -r build
 pnpm -r typecheck
 pnpm -r --workspace-concurrency=1 test
 ```
 
-`typecheck` 依赖各 workspace 包已生成的 `dist` 类型声明，因此先执行 build。
+`typecheck` needs the generated `dist` type declarations, so build first. Tests use the separate `acp_test` database and must run serially so packages do not clean or migrate the same test database concurrently.
 
-测试使用独立的 `acp_test` 库，必须串行执行，避免多个包同时清理或迁移同一测试库。
+## Status
 
-## 状态
-
-MVP 阶段。已实现任务闭环、需求与文档、计划、设计、测试、缺陷、交接、权限、技能库和代码规格接入；Agent Client Protocol 与 MCP 尚未完成。设计文档暂未随仓库发布。
+Early MVP. The task loop, requirements and documents, plan, design, testing, defects, handovers, permissions, skills, and existing-code intake are implemented. Agent Client Protocol and MCP are not finished yet. Design documents are not published with this repository.
 
 ## License
 
