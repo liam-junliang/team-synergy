@@ -1,0 +1,79 @@
+project:
+  id: team-synergy
+  name: Team Synergy
+  stage: architecture_baseline
+  objective: >-
+    为不同人、不同设备和不同 Agent 工具提供轻量、可验证、可追踪的项目协作能力。
+
+principles:
+  - project_state_is_authoritative
+  - task_run_is_the_isolation_unit
+  - private_reasoning_is_not_project_state
+  - artifacts_require_explicit_publication
+  - completion_requires_evidence
+  - complexity_is_added_only_for_observed_problems
+
+mvp:
+  profiles:
+    - planner
+    - builder
+    - verifier
+  core_entities:
+    - Project
+    - Feature
+    - Requirement
+    - RequirementRevision
+    - Task
+    - Assignment
+    - Claim
+    - Run
+    - Workspace
+    - Artifact
+    - Evidence
+    - Proposal
+    - Decision
+    - ContextGraphSnapshot
+    - ContextNode
+    - ContextEdge
+    - GraphDelta
+  primary_interface: cli
+  agent_tool_interface: mcp
+  agent_session_interface: agent_client_protocol
+  fallback_agent_interface: cli_adapter
+  execution_mode: human_started_local_agent
+  deployment: local_all_in_one
+  task_store: core_owned
+  product_entry: living_requirements
+  task_responsibility: human_principal
+  task_execution: assignee_authorized_agent_claim
+  builder_terminal_status: submitted
+
+architecture:
+  style: modular_monolith
+  language: typescript
+  runtime: node_lts
+  logical_planes:
+    - project_core_control_plane
+    - local_execution_plane
+  local_database: sqlite
+  shared_database: postgresql
+  workspace_isolation: git_worktree
+  event_delivery: audit_log_and_sse
+  external_integrations: ports_and_adapters
+  context_graph:
+    model: typed_property_graph
+    contract: json_schema
+    storage: relational_tables
+    local_traversal: bounded_bfs_or_recursive_cte
+    documentation_view: mermaid
+    authorization: filter_before_traversal
+    agent_updates: graph_delta_only
+
+deferred:
+  - cloud_to_local_wakeup
+  - persistent_device_bridge
+  - autonomous_agent_scheduling
+  - remote_sandbox
+  - a2a
+  - ag_ui
+  - distributed_workflow_engine

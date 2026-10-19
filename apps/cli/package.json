@@ -1,0 +1,38 @@
+{
+  "name": "@team-synergy/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Team Synergy tsp command-line client",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/liam-junliang/team-synergy.git",
+    "directory": "apps/cli"
+  },
+  "type": "module",
+  "bin": {
+    "tsp": "dist/index.js",
+    "acp": "dist/index.js",
+    "agentctl": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test --test-concurrency=1 tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@team-synergy/contracts": "workspace:*",
+    "@team-synergy/domain": "workspace:*",
+    "@team-synergy/integrations": "workspace:*",
+    "commander": "^14.0.2",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@team-synergy/core-api": "workspace:*",
+    "@team-synergy/persistence": "workspace:*",
+    "@types/node": "^22.17.0",
+    "drizzle-orm": "^0.44.7",
+    "pg": "^8.16.3",
+    "typescript": "^5.9.3"
+  }
+}

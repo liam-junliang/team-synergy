@@ -1,0 +1,94 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { preflightHandoverWorkspace, publishHandoverWorkspace, restoreHandoverWorkspace, verifyHandoverWorkspace } from '../dist/index.js';
+
+function git(repo, ...args) {
+  const result = spawnSync('git', args, { cwd: repo, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout.trim();
+}
+function fixture(t) {
+  const root = mkdtempSync(path.join(tmpdir(), 'acp-portable-test-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const remote = path.join(root, 'remote.git');
+  const source = path.join(root, 'source');
+  const target = path.join(root, 'target');
+  git(root, 'init', '--bare', remote); git(root, 'clone', remote, source);
+  git(source, 'config', 'core.autocrlf', 'false');
+  git(source, 'config', 'user.name', 'Test'); git(source, 'config', 'user.email', 'test@example.invalid');
+  writeFileSync(path.join(source, 'edit.txt'), 'base\n');
+  writeFileSync(path.join(source, 'delete.txt'), 'delete me\n');
+  git(source, 'add', '.'); git(source, 'commit', '-m', 'Initial fixture'); git(source, 'push', 'origin', 'HEAD');
+  git(root, 'clone', remote, target);
+  git(target, 'config', 'core.autocrlf', 'false');
+  return { root, source, target, remote };
+}
+test('portable snapshot preserves source staged/unstaged state and restores exact tree on another clone', (t) => {
+  const { root, source, target } = fixture(t);
+  writeFileSync(path.join(source, 'edit.txt'), 'staged\n'); git(source, 'add', 'edit.txt');
+  writeFileSync(path.join(source, 'edit.txt'), 'final worktree\n');
+  writeFileSync(path.join(source, 'new.txt'), 'new portable file\n');
+  rmSync(path.join(source, 'delete.txt'));
+  writeFileSync(path.join(source, '.env'), 'SECRET=private\n');
+  mkdirSync(path.join(source, '.agent')); writeFileSync(path.join(source, '.agent', 'token'), 'private');
+  mkdirSync(path.join(source, '.tsp', 'skills'), { recursive: true });
+  writeFileSync(path.join(source, '.tsp', 'skills', 'SKILL.md'), 'Private shared package');
+  const before = { head: git(source, 'rev-parse', 'HEAD'), index: readFileSync(path.join(source, '.git', 'index')), status: git(source, 'status', '--porcelain') };
+  const manifest = publishHandoverWorkspace({ repoPath: source, repositoryCode: 'repo-A', handoverCode: 'handover-A' });
+  assert.deepEqual(manifest.files.map((file) => file.path), ['delete.txt', 'edit.txt', 'new.txt']);
+  assert.equal(git(source, 'rev-parse', 'HEAD'), before.head);
+  assert.deepEqual(readFileSync(path.join(source, '.git', 'index')), before.index);
+  assert.equal(git(source, 'status', '--porcelain'), before.status);
+  assert.deepEqual(publishHandoverWorkspace({ repoPath: source, repositoryCode: 'repo-A', handoverCode: 'handover-A' }), manifest);
+  const workspacePath = path.join(root, 'B-worktree');
+  const restored = restoreHandoverWorkspace({ repoPath: target, workspacePath, manifest, attemptCode: 'attempt-A' });
+  assert.equal(readFileSync(path.join(workspacePath, 'edit.txt'), 'utf8'), 'final worktree\n');
+  assert.equal(readFileSync(path.join(workspacePath, 'new.txt'), 'utf8'), 'new portable file\n');
+  assert.throws(() => readFileSync(path.join(workspacePath, 'delete.txt')));
+  assert.throws(() => readFileSync(path.join(workspacePath, '.env')));
+  assert.throws(() => readFileSync(path.join(workspacePath, '.tsp', 'skills', 'SKILL.md')));
+  assert.equal(verifyHandoverWorkspace(workspacePath, manifest), restored.workspace_digest);
+  assert.throws(() => verifyHandoverWorkspace(workspacePath, { ...manifest, required_artifacts: [{ kind: 'git', path: 'absent-report.txt' }] }), { code: 'handover_artifact_missing' });
+  assert.throws(() => verifyHandoverWorkspace(workspacePath, { ...manifest, required_artifacts: [{ kind: 'inline', content: 'report', hash: '0'.repeat(64) }] }), { code: 'handover_artifact_mismatch' });
+  assert.deepEqual(restoreHandoverWorkspace({ repoPath: target, workspacePath, manifest, attemptCode: 'attempt-A' }), restored);
+  const skillsDirectory = path.join(workspacePath, '.agent', 'runs', '01234567890123456789', '.tsp', 'skills', 'review');
+  mkdirSync(skillsDirectory, { recursive: true });
+  writeFileSync(path.join(skillsDirectory, 'SKILL.md'), 'Delivered after separate authorization');
+  assert.equal(verifyHandoverWorkspace(workspacePath, manifest), restored.workspace_digest);
+  writeFileSync(path.join(workspacePath, '.agent', 'unrelated.txt'), 'Not an authorized runtime location');
+  assert.throws(() => verifyHandoverWorkspace(workspacePath, manifest), { code: 'handover_workspace_dirty' });
+  rmSync(path.join(workspacePath, '.agent', 'unrelated.txt'));
+  writeFileSync(path.join(workspacePath, 'edit.txt'), 'B changed this\n');
+  assert.throws(() => restoreHandoverWorkspace({ repoPath: target, workspacePath, manifest, attemptCode: 'attempt-A' }), { code: 'handover_workspace_dirty' });
+});
+test('rejects private paths, traversal, binaries, wrong repository, overwritten directory and mismatched tree', (t) => {
+  const { root, source, target } = fixture(t);
+  writeFileSync(path.join(source, '.env'), 'secret');
+  assert.throws(() => preflightHandoverWorkspace({ repoPath: source, selectedPaths: ['.env'] }), { code: 'handover_private_path' });
+  assert.throws(() => preflightHandoverWorkspace({ repoPath: source, selectedPaths: ['../outside'] }), { code: 'handover_path_invalid' });
+  writeFileSync(path.join(source, 'binary.dat'), Buffer.from([1, 0, 2]));
+  assert.throws(() => preflightHandoverWorkspace({ repoPath: source, selectedPaths: ['binary.dat'] }), { code: 'handover_binary_unsupported' });
+  const manifest = publishHandoverWorkspace({ repoPath: source, repositoryCode: 'repo-A', handoverCode: 'handover-B', selectedPaths: ['edit.txt'] });
+  const workspacePath = path.join(root, 'existing'); mkdirSync(workspacePath); writeFileSync(path.join(workspacePath, 'mine.txt'), 'keep');
+  assert.throws(() => restoreHandoverWorkspace({ repoPath: target, workspacePath, manifest, attemptCode: 'attempt-A' }), { code: 'handover_directory_exists' });
+  assert.equal(readFileSync(path.join(workspacePath, 'mine.txt'), 'utf8'), 'keep');
+  assert.throws(() => restoreHandoverWorkspace({ repoPath: target, workspacePath: path.join(root, 'wrong-tree'), manifest: { ...manifest, snapshot_tree: '0'.repeat(40) }, attemptCode: 'attempt-A' }), { code: 'handover_snapshot_mismatch' });
+  git(target, 'remote', 'set-url', 'origin', path.join(root, 'different.git'));
+  assert.throws(() => restoreHandoverWorkspace({ repoPath: target, workspacePath: path.join(root, 'wrong-repo'), manifest, attemptCode: 'attempt-A' }), { code: 'handover_repository_mismatch' });
+});
+test('fails closed on LFS, submodule and credential-bearing remotes', (t) => {
+  const { source } = fixture(t);
+  writeFileSync(path.join(source, '.gitattributes'), '*.txt filter=lfs\n');
+  assert.throws(() => preflightHandoverWorkspace({ repoPath: source, selectedPaths: [] }), { code: 'handover_lfs_unsupported' });
+  rmSync(path.join(source, '.gitattributes'));
+  git(source, 'update-index', '--add', '--cacheinfo', `160000,${git(source, 'rev-parse', 'HEAD')},module`);
+  git(source, 'commit', '-m', 'Fixture submodule');
+  assert.throws(() => preflightHandoverWorkspace({ repoPath: source, selectedPaths: [] }), { code: 'handover_submodule_unsupported' });
+  git(source, 'reset', '--soft', 'HEAD^');
+  git(source, 'remote', 'set-url', 'origin', 'https://user:private@example.invalid/repo.git');
+  assert.throws(() => preflightHandoverWorkspace({ repoPath: source, selectedPaths: [] }), { code: 'handover_remote_credentials' });
+});

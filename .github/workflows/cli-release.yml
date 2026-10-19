@@ -1,0 +1,84 @@
+name: Platform CLI distribution
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['cli-v*']
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [win32, linux, darwin]
+        arch: [x64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.3'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @team-synergy/cli... --filter @team-synergy/agentd... build
+      - run: node --test scripts/tests/cli-distribution-build.test.mjs
+      - name: Package CLI with verified official Node runtime
+        run: node scripts/build-cli-distribution.mjs --platform ${{ matrix.platform }} --arch ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.platform }}-${{ matrix.arch }}
+          path: output/cli-distribution/
+          if-no-files-found: error
+  native-smoke:
+    needs: build
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2022
+            platform: win32
+            arch: x64
+          - runner: ubuntu-24.04
+            platform: linux
+            arch: x64
+          - runner: macos-15
+            platform: darwin
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.3'
+          architecture: ${{ matrix.arch }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @team-synergy/core-api... build
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-${{ matrix.platform }}-${{ matrix.arch }}
+          path: output/cli-distribution/
+      - name: Install from a platform, update and reject corrupt releases
+        env:
+          TEST_CLI_DIST_DIR: output/cli-distribution
+        run: node --test scripts/tests/cli-install.test.mjs
+  assemble:
+    needs: [build, native-smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.3'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cli-*
+          path: output/cli-parts/
+      - run: node scripts/merge-cli-distribution.mjs output/cli-parts output/cli-distribution
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platform-cli-distribution
+          path: output/cli-distribution/
+          if-no-files-found: error

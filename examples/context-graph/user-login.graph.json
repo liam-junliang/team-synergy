@@ -1,0 +1,411 @@
+{
+  "format_version": "0.1",
+  "graph_id": "graph.user-login",
+  "project_id": "project.demo",
+  "snapshot": 28,
+  "generated_at": "2026-08-12T12:00:00+08:00",
+  "baseline": {
+    "project_snapshot": 18,
+    "git_commit": "a92f81c"
+  },
+  "nodes": [
+    {
+      "id": "actor.end-user",
+      "kind": "actor",
+      "name": "终端用户",
+      "summary": "需要访问自己账号的产品用户。",
+      "verification": "confirmed",
+      "freshness": "current",
+      "owner": "product",
+      "tags": ["business"],
+      "sources": [
+        {
+          "kind": "manual",
+          "uri": "feature-context:FEATURE-12",
+          "revision": "18"
+        }
+      ]
+    },
+    {
+      "id": "capability.account-access",
+      "kind": "business_capability",
+      "name": "账号访问",
+      "summary": "让合法用户安全进入自己的账号。",
+      "verification": "confirmed",
+      "freshness": "current",
+      "owner": "product",
+      "tags": ["business"],
+      "sources": [
+        {
+          "kind": "manual",
+          "uri": "feature-context:FEATURE-12",
+          "revision": "18"
+        }
+      ]
+    },
+    {
+      "id": "usecase.email-login",
+      "kind": "use_case",
+      "name": "邮箱密码登录",
+      "summary": "用户使用邮箱和密码建立登录会话。",
+      "verification": "confirmed",
+      "freshness": "current",
+      "owner": "product",
+      "tags": ["business", "auth"],
+      "sources": [
+        {
+          "kind": "manual",
+          "uri": "feature-context:FEATURE-12",
+          "revision": "18"
+        }
+      ]
+    },
+    {
+      "id": "feature.user-login",
+      "kind": "feature",
+      "name": "用户登录",
+      "summary": "实现邮箱密码登录、统一失败响应和基础限流。",
+      "verification": "confirmed",
+      "freshness": "current",
+      "owner": "auth-team",
+      "tags": ["feature", "auth"],
+      "sources": [
+        {
+          "kind": "document",
+          "uri": "docs/04-workspace-and-context.md#功能上下文包",
+          "revision": "18"
+        }
+      ]
+    },
+    {
+      "id": "rule.no-account-disclosure",
+      "kind": "business_rule",
+      "name": "登录失败不泄露账号状态",
+      "summary": "账号不存在和密码错误必须返回相同的外部错误。",
+      "verification": "confirmed",
+      "freshness": "current",
+      "owner": "security",
+      "tags": ["security", "acceptance"],
+      "sources": [
+        {
+          "kind": "adr",
+          "uri": "decision:LOGIN-ERROR-POLICY",
+          "revision": "3"
+        }
+      ]
+    },
+    {
+      "id": "decision.login-error-policy",
+      "kind": "decision",
+      "name": "统一登录错误策略",
+      "summary": "对外隐藏账号是否存在，对内保留可审计的失败分类。",
+      "verification": "confirmed",
+      "freshness": "current",
+      "owner": "security",
+      "tags": ["decision"],
+      "sources": [
+        {
+          "kind": "adr",
+          "uri": "decision:LOGIN-ERROR-POLICY",
+          "revision": "3"
+        }
+      ]
+    },
+    {
+      "id": "api.post-login",
+      "kind": "api",
+      "name": "POST /api/login",
+      "summary": "接收邮箱和密码并返回登录结果。",
+      "verification": "confirmed",
+      "freshness": "current",
+      "owner": "auth-team",
+      "tags": ["contract", "http"],
+      "sources": [
+        {
+          "kind": "openapi",
+          "uri": "contract:API-CONTRACT-4#/paths/~1api~1login",
+          "revision": "4"
+        }
+      ]
+    },
+    {
+      "id": "service.auth",
+      "kind": "service",
+      "name": "Auth Service",
+      "summary": "处理凭据校验、限流和登录会话创建。",
+      "verification": "inferred",
+      "freshness": "current",
+      "owner": "auth-team",
+      "tags": ["implementation"],
+      "sources": [
+        {
+          "kind": "code_scanner",
+          "uri": "git:services/auth",
+          "revision": "a92f81c"
+        }
+      ]
+    },
+    {
+      "id": "aggregate.user",
+      "kind": "aggregate",
+      "name": "User Aggregate",
+      "summary": "保存用户凭据状态和认证相关属性。",
+      "verification": "inferred",
+      "freshness": "current",
+      "owner": "auth-team",
+      "tags": ["domain"],
+      "sources": [
+        {
+          "kind": "code_scanner",
+          "uri": "git:services/auth/domain/user",
+          "revision": "a92f81c"
+        }
+      ]
+    },
+    {
+      "id": "table.users",
+      "kind": "table",
+      "name": "users",
+      "summary": "持久化用户账号和凭据摘要。",
+      "verification": "inferred",
+      "freshness": "current",
+      "owner": "auth-team",
+      "tags": ["data"],
+      "sources": [
+        {
+          "kind": "database",
+          "uri": "git:migrations/users.sql",
+          "revision": "a92f81c"
+        }
+      ]
+    },
+    {
+      "id": "test.auth-login",
+      "kind": "test",
+      "name": "登录验收测试",
+      "summary": "覆盖成功、错误密码和账号状态不泄露场景。",
+      "verification": "confirmed",
+      "freshness": "current",
+      "owner": "quality",
+      "tags": ["acceptance", "test"],
+      "sources": [
+        {
+          "kind": "test",
+          "uri": "git:tests/auth",
+          "revision": "a92f81c"
+        }
+      ]
+    },
+    {
+      "id": "deployment.auth-service",
+      "kind": "deployment",
+      "name": "auth-service deployment",
+      "summary": "认证服务的部署单元和运行配置。",
+      "verification": "inferred",
+      "freshness": "current",
+      "owner": "operations",
+      "tags": ["deployment"],
+      "sources": [
+        {
+          "kind": "git",
+          "uri": "git:deploy/auth-service",
+          "revision": "a92f81c"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge.actor-uses-capability",
+      "from": "actor.end-user",
+      "relation": "uses",
+      "to": "capability.account-access",
+      "summary": "终端用户使用账号访问能力。",
+      "verification": "confirmed",
+      "freshness": "current",
+      "sources": [
+        {
+          "kind": "manual",
+          "uri": "feature-context:FEATURE-12",
+          "revision": "18"
+        }
+      ]
+    },
+    {
+      "id": "edge.capability-contains-usecase",
+      "from": "capability.account-access",
+      "relation": "contains",
+      "to": "usecase.email-login",
+      "summary": "账号访问包含邮箱密码登录用例。",
+      "verification": "confirmed",
+      "freshness": "current",
+      "sources": [
+        {
+          "kind": "manual",
+          "uri": "feature-context:FEATURE-12",
+          "revision": "18"
+        }
+      ]
+    },
+    {
+      "id": "edge.feature-realizes-usecase",
+      "from": "feature.user-login",
+      "relation": "realizes",
+      "to": "usecase.email-login",
+      "summary": "用户登录功能实现邮箱密码登录用例。",
+      "verification": "confirmed",
+      "freshness": "current",
+      "sources": [
+        {
+          "kind": "manual",
+          "uri": "feature-context:FEATURE-12",
+          "revision": "18"
+        }
+      ]
+    },
+    {
+      "id": "edge.feature-constrained-rule",
+      "from": "feature.user-login",
+      "relation": "constrained_by",
+      "to": "rule.no-account-disclosure",
+      "summary": "登录功能必须遵守账号状态不泄露规则。",
+      "verification": "confirmed",
+      "freshness": "current",
+      "sources": [
+        {
+          "kind": "manual",
+          "uri": "feature-context:FEATURE-12",
+          "revision": "18"
+        }
+      ]
+    },
+    {
+      "id": "edge.rule-governed-decision",
+      "from": "rule.no-account-disclosure",
+      "relation": "governed_by",
+      "to": "decision.login-error-policy",
+      "summary": "业务规则由登录错误策略决策治理。",
+      "verification": "confirmed",
+      "freshness": "current",
+      "sources": [
+        {
+          "kind": "adr",
+          "uri": "decision:LOGIN-ERROR-POLICY",
+          "revision": "3"
+        }
+      ]
+    },
+    {
+      "id": "edge.feature-entry-api",
+      "from": "feature.user-login",
+      "relation": "entry_point",
+      "to": "api.post-login",
+      "summary": "登录 API 是该功能的外部入口。",
+      "verification": "confirmed",
+      "freshness": "current",
+      "sources": [
+        {
+          "kind": "openapi",
+          "uri": "contract:API-CONTRACT-4#/paths/~1api~1login",
+          "revision": "4"
+        }
+      ]
+    },
+    {
+      "id": "edge.api-calls-service",
+      "from": "api.post-login",
+      "relation": "calls",
+      "to": "service.auth",
+      "summary": "登录 API 调用认证服务。",
+      "verification": "inferred",
+      "freshness": "current",
+      "sources": [
+        {
+          "kind": "code_scanner",
+          "uri": "git:services/auth",
+          "revision": "a92f81c"
+        }
+      ]
+    },
+    {
+      "id": "edge.feature-implemented-service",
+      "from": "feature.user-login",
+      "relation": "implemented_by",
+      "to": "service.auth",
+      "summary": "认证服务承载登录功能的主要实现。",
+      "verification": "confirmed",
+      "freshness": "current",
+      "sources": [
+        {
+          "kind": "manual",
+          "uri": "feature-context:FEATURE-12",
+          "revision": "18"
+        }
+      ]
+    },
+    {
+      "id": "edge.service-operates-user",
+      "from": "service.auth",
+      "relation": "operates_on",
+      "to": "aggregate.user",
+      "summary": "认证服务操作用户聚合。",
+      "verification": "inferred",
+      "freshness": "current",
+      "sources": [
+        {
+          "kind": "code_scanner",
+          "uri": "git:services/auth",
+          "revision": "a92f81c"
+        }
+      ]
+    },
+    {
+      "id": "edge.user-stored-users",
+      "from": "aggregate.user",
+      "relation": "stored_in",
+      "to": "table.users",
+      "summary": "用户聚合持久化到 users 表。",
+      "verification": "inferred",
+      "freshness": "current",
+      "sources": [
+        {
+          "kind": "database",
+          "uri": "git:migrations/users.sql",
+          "revision": "a92f81c"
+        }
+      ]
+    },
+    {
+      "id": "edge.rule-verified-test",
+      "from": "rule.no-account-disclosure",
+      "relation": "verified_by",
+      "to": "test.auth-login",
+      "summary": "登录验收测试验证账号状态不泄露规则。",
+      "verification": "confirmed",
+      "freshness": "current",
+      "sources": [
+        {
+          "kind": "test",
+          "uri": "git:tests/auth",
+          "revision": "a92f81c"
+        }
+      ]
+    },
+    {
+      "id": "edge.feature-deployed-auth",
+      "from": "feature.user-login",
+      "relation": "deployed_to",
+      "to": "deployment.auth-service",
+      "summary": "登录功能随认证服务部署单元交付。",
+      "verification": "inferred",
+      "freshness": "current",
+      "sources": [
+        {
+          "kind": "git",
+          "uri": "git:deploy/auth-service",
+          "revision": "a92f81c"
+        }
+      ]
+    }
+  ]
+}

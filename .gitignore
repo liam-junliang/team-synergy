@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+.next/
+coverage/
+*.tsbuildinfo
+
+# Environment and credentials
+.env
+.env.*
+!.env.example
+*.token
+
+# Local documentation and design assets (not part of the public source)
+/docs/
+/prototype-design/
+/assets/
+/HANDOFF.md
+
+# Local runtime state
+/.agent/
+/.tsp/
+/.worktrees/
+/.cache/
+/output/
+/tmp/
+/.tmp/
+/.omx/
+/.reasonix/
+/.playwright-cli/
+/.site-artifacts/
+/prototype-ui/
+acp.sqlite*
+
+# Logs and temporary files
+*.log
+*-out.txt
+debug-*.mjs
+check-*.mjs
+
+# OS
+.DS_Store
+Thumbs.db

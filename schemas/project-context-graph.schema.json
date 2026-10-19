@@ -1,0 +1,276 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://team-synergy.local/schemas/project-context-graph.schema.json",
+  "title": "Project Context Graph",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "graph_id",
+    "project_id",
+    "snapshot",
+    "generated_at",
+    "baseline",
+    "nodes",
+    "edges"
+  ],
+  "properties": {
+    "format_version": {
+      "const": "0.1"
+    },
+    "graph_id": {
+      "$ref": "#/$defs/id"
+    },
+    "project_id": {
+      "$ref": "#/$defs/id"
+    },
+    "snapshot": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project_snapshot", "git_commit"],
+      "properties": {
+        "project_snapshot": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "git_commit": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["focus_nodes", "depth", "direction"],
+      "properties": {
+        "focus_nodes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "depth": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "direction": {
+          "enum": ["both", "incoming", "outgoing"]
+        }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/node"
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/edge"
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._:-]*$",
+      "minLength": 3,
+      "maxLength": 160
+    },
+    "verification": {
+      "enum": ["confirmed", "inferred", "proposed"]
+    },
+    "freshness": {
+      "enum": ["current", "stale", "unknown"]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "uri", "revision"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "document",
+            "adr",
+            "openapi",
+            "asyncapi",
+            "bpmn",
+            "dmn",
+            "database",
+            "git",
+            "code_scanner",
+            "test",
+            "manual",
+            "external"
+          ]
+        },
+        "uri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "summary",
+        "verification",
+        "freshness",
+        "sources"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "enum": [
+            "actor",
+            "business_capability",
+            "use_case",
+            "business_process",
+            "business_rule",
+            "domain",
+            "bounded_context",
+            "aggregate",
+            "feature",
+            "service",
+            "module",
+            "api",
+            "event",
+            "entity",
+            "table",
+            "code_symbol",
+            "test",
+            "deployment",
+            "decision",
+            "task",
+            "artifact",
+            "evidence"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "verification": {
+          "$ref": "#/$defs/verification"
+        },
+        "freshness": {
+          "$ref": "#/$defs/freshness"
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tags": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/source"
+          }
+        }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "from",
+        "relation",
+        "to",
+        "summary",
+        "verification",
+        "freshness",
+        "sources"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "from": {
+          "$ref": "#/$defs/id"
+        },
+        "relation": {
+          "enum": [
+            "uses",
+            "contains",
+            "realizes",
+            "depends_on",
+            "calls",
+            "publishes",
+            "consumes",
+            "reads",
+            "writes",
+            "constrained_by",
+            "governed_by",
+            "verified_by",
+            "implemented_by",
+            "deployed_to",
+            "affected_by",
+            "entry_point",
+            "operates_on",
+            "stored_in",
+            "owns"
+          ]
+        },
+        "to": {
+          "$ref": "#/$defs/id"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "verification": {
+          "$ref": "#/$defs/verification"
+        },
+        "freshness": {
+          "$ref": "#/$defs/freshness"
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/source"
+          }
+        }
+      }
+    }
+  }
+}

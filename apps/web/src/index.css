@@ -1,0 +1,255 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-sm leading-6 text-slate-900 antialiased;
+  }
+}
+
+/* Tailwind preflight owns the control reset. Keep shared styles below utilities. */
+@layer components {
+
+/* The list/search split is shared by standalone document workbenches.
+   Sticky elements need an unpadded scrollport; page padding belongs to its content. */
+.document-library-sidebar {
+  @apply flex max-h-[28rem] min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm;
+  @media (width >= 80rem) {
+    @apply sticky top-0;
+    height: clamp(20rem, calc(100dvh - 15.5rem), 49rem);
+    max-height: calc(100dvh - 12rem);
+  }
+}
+
+.ui-button {
+  @apply inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border px-3 text-xs font-medium leading-4 shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-40;
+}
+
+.ui-button-primary {
+  @apply border-cyan-700 bg-cyan-700 text-white hover:border-cyan-800 hover:bg-cyan-800;
+}
+
+.ui-button-strong {
+  @apply border-slate-900 bg-slate-900 text-white hover:border-slate-700 hover:bg-slate-700;
+}
+
+.ui-button-secondary {
+  @apply border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800;
+}
+
+.ui-button-danger {
+  @apply border-rose-200 bg-white text-rose-700 hover:border-rose-300 hover:bg-rose-50;
+}
+
+.ui-button-warning {
+  @apply border-amber-400 bg-amber-400 text-slate-950 hover:border-amber-300 hover:bg-amber-300;
+}
+
+.ui-button-success {
+  @apply border-emerald-600 bg-emerald-600 text-white hover:border-emerald-700 hover:bg-emerald-700;
+}
+
+.ui-button-compact {
+  @apply h-7 px-2;
+}
+
+.ui-button-roomy {
+  @apply h-9 px-4;
+}
+
+.ui-button-block {
+  @apply w-full;
+}
+
+.ui-icon-button {
+  @apply grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-40;
+}
+
+/* 分区标题、卡片和时间线中的局部操作：低强调、无阴影，不与页面级 CTA 争夺注意力。 */
+.ui-context-action {
+  @apply inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-lg border border-transparent px-2 text-xs font-medium leading-4 text-slate-500 transition hover:border-slate-200 hover:bg-white hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-40;
+}
+
+.ui-context-action-accent {
+  @apply text-cyan-700 hover:border-cyan-200 hover:bg-cyan-50 hover:text-cyan-800;
+}
+
+.ui-context-action-selected {
+  @apply border-cyan-200 bg-cyan-50 text-cyan-800 hover:border-cyan-300 hover:bg-cyan-100;
+}
+
+.ui-context-action-danger {
+  @apply text-slate-400 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700;
+}
+
+.ui-segmented {
+  @apply inline-flex max-w-full flex-wrap items-center gap-0.5 rounded-lg bg-slate-100 p-0.5;
+}
+
+.ui-segmented-item {
+  @apply inline-flex h-7 shrink-0 items-center justify-center whitespace-nowrap rounded-md px-2.5 text-xs font-medium leading-4 text-slate-600 transition hover:bg-white/60 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 disabled:cursor-not-allowed disabled:opacity-40;
+}
+
+.ui-segmented-item[aria-pressed="true"] {
+  @apply bg-white text-slate-900 shadow-sm;
+}
+
+.ui-field-label {
+  @apply block text-xs font-semibold leading-5 text-slate-700;
+}
+
+.ui-help {
+  @apply text-xs leading-5 text-slate-500;
+}
+
+.ui-meta {
+  @apply text-[11px] leading-4 text-slate-500;
+}
+
+.form-control {
+  @apply min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal leading-5 text-slate-900 outline-none transition placeholder:text-slate-500 focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500;
+}
+
+.form-control-compact {
+  @apply h-8 min-h-8 px-2.5 py-1.5 text-xs leading-4;
+}
+
+.form-control[aria-invalid="true"] {
+  @apply border-rose-500 focus:border-rose-600 focus:ring-rose-100;
+}
+
+select.form-control {
+  @apply cursor-pointer appearance-none bg-white pr-10 text-slate-700 hover:border-slate-400 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%2364758b' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E");
+  background-position: right 0.875rem center;
+  background-repeat: no-repeat;
+  background-size: 1rem 1rem;
+}
+
+/* Shared Markdown surface for project documents, revisions and requirements. */
+.markdown-document {
+  @apply min-w-0 max-w-full text-sm leading-6 text-slate-700;
+  overflow-wrap: anywhere;
+}
+
+.markdown-document :where(h1, h2, h3, h4, h5, h6) {
+  @apply font-semibold text-slate-900;
+  margin-block: 1.5rem 0.75rem;
+}
+
+.markdown-document :where([id]) {
+  scroll-margin-top: calc(var(--document-reader-header-height, 0px) + 1.5rem);
+}
+
+.markdown-document h1 { @apply text-2xl leading-8; }
+.markdown-document h2 { @apply text-xl leading-7; }
+.markdown-document h3 { @apply text-base leading-6; }
+.markdown-document :where(h4, h5, h6) { @apply text-sm leading-5; }
+
+.markdown-document :where(p, ul, ol, blockquote, pre, .markdown-table-scroll) {
+  margin-block: 1rem;
+}
+
+.markdown-document > :first-child { margin-top: 0; }
+.markdown-document > :last-child { margin-bottom: 0; }
+.markdown-document ul { list-style-type: disc; padding-left: 1.5rem; }
+.markdown-document ol { list-style-type: decimal; padding-left: 1.5rem; }
+.markdown-document li + li { margin-top: 0.25rem; }
+.markdown-document li :where(p, ul, ol) { margin-block: 0.375rem; }
+.markdown-document li::marker { @apply text-slate-500; }
+.markdown-document .task-list-item { list-style-type: none; }
+.markdown-document .task-list-item input[type="checkbox"] {
+  @apply mr-2 h-3.5 w-3.5 align-middle accent-cyan-700;
+}
+
+.markdown-document a {
+  @apply rounded-sm text-cyan-700 underline decoration-cyan-300 underline-offset-2 hover:text-cyan-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500;
+}
+
+.markdown-document strong { @apply font-semibold text-slate-900; }
+.markdown-document em { font-style: italic; }
+.markdown-document del { text-decoration: line-through; }
+.markdown-document :not(pre) > code {
+  @apply rounded bg-slate-100 px-1 py-0.5 font-mono text-[0.93em] text-cyan-800;
+}
+
+.markdown-document pre {
+  @apply max-w-full overflow-x-auto rounded-lg bg-slate-950 p-4 text-sm leading-6 text-slate-100;
+  overflow-wrap: normal;
+  tab-size: 2;
+}
+
+.markdown-document pre code {
+  @apply block font-mono;
+  white-space: pre;
+}
+
+.markdown-document blockquote {
+  @apply rounded-r-lg border-l-4 border-cyan-300 bg-cyan-50/60 px-4 py-2 text-slate-600;
+}
+.markdown-document blockquote > :first-child { margin-top: 0; }
+.markdown-document blockquote > :last-child { margin-bottom: 0; }
+.markdown-document hr { @apply my-6 border-0 border-t border-slate-200; }
+.markdown-document img { @apply my-3 h-auto max-w-full rounded-lg; }
+
+.markdown-document .markdown-table-scroll {
+  @apply max-w-full overflow-x-auto rounded-lg border border-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500;
+}
+.markdown-document table { @apply w-full border-collapse text-sm leading-6; }
+.markdown-document :where(th, td) { @apply border-b border-r border-slate-200 px-3 py-2 align-top; }
+.markdown-document th { @apply bg-slate-100 font-semibold text-slate-800; }
+.markdown-document :where(th, td):last-child { border-right: 0; }
+.markdown-document tbody tr:last-child td { border-bottom: 0; }
+.markdown-document tbody tr:nth-child(even) { @apply bg-slate-50; }
+.markdown-document :where(th, td) > :first-child { margin-top: 0; }
+.markdown-document :where(th, td) > :last-child { margin-bottom: 0; }
+.markdown-document .footnotes { @apply mt-6 border-t border-slate-200 pt-3 text-xs leading-5 text-slate-500; }
+
+.scroll-region {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.scroll-region::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.scroll-region::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 9999px;
+  background-clip: padding-box;
+  background-color: #cbd5e1;
+}
+
+.scroll-region::-webkit-scrollbar-thumb:hover {
+  background-color: #94a3b8;
+}
+
+.modal-scroll-region {
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 transparent;
+}
+
+.modal-scroll-region::-webkit-scrollbar {
+  width: 10px;
+}
+
+.modal-scroll-region::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.modal-scroll-region::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 9999px;
+  background: #94a3b8;
+  background-clip: padding-box;
+}
+
+.modal-scroll-region::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+  background-clip: padding-box;
+}
+
+}
