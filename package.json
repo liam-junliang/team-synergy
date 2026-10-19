@@ -17,7 +17,9 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint . --max-warnings=80",
-    "test": "pnpm -r --workspace-concurrency=1 test"
+    "test": "pnpm -r --workspace-concurrency=1 test",
+    "commit:check": "node scripts/check-commit-message.mjs --rev HEAD",
+    "hooks:install": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

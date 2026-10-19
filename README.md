@@ -64,6 +64,22 @@ tsp task list --assigned-to me
 
 CLI 发布包由 `.github/workflows/cli-release.yml` 在推送 `cli-v*` tag 时构建，输出各平台的自包含安装包。
 
+## 提交信息
+
+提交信息遵循 Conventional Commits：`<type>(<scope>): <subject>`。
+
+- 允许的 type：`feat`、`fix`、`docs`、`style`、`refactor`、`perf`、`test`、`build`、`ci`、`chore`、`revert`。
+- 示例：`fix(web): keep document header sticky while scrolling`、`feat(cli): add task handover command`。
+- 破坏性变更在 type/scope 后加 `!`，并在 footer 写 `BREAKING CHANGE:`。
+
+首次 clone 后启用本地校验：
+
+```powershell
+git config core.hooksPath .githooks
+```
+
+也可以运行 `pnpm commit:check` 检查当前 HEAD；CI 同样会校验提交信息。
+
 ## 测试
 
 ```powershell

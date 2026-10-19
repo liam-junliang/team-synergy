@@ -39,8 +39,8 @@ acp.sqlite*
 # Logs and temporary files
 *.log
 *-out.txt
-debug-*.mjs
-check-*.mjs
+/debug-*.mjs
+/check-*.mjs
 
 # OS
 .DS_Store
