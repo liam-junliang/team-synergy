@@ -1237,7 +1237,7 @@ export function clearWebSession(): void {
   window.localStorage.removeItem(AUTH_USER_KEY);
 }
 
-export async function fetchEnvelope<T>(path: string, init?: RequestInit): Promise<T> {
+async function fetchResponseEnvelope<T>(path: string, init?: RequestInit): Promise<{ data: T; has_more?: boolean }> {
   const headers = new Headers(init?.headers);
   const token = authToken();
   if (token && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`);
@@ -1249,7 +1249,7 @@ export async function fetchEnvelope<T>(path: string, init?: RequestInit): Promis
   } catch {
     body = null;
   }
-  const envelope = body as { ok: boolean; data: T; error?: { code: string; message: string } } | null;
+  const envelope = body as { ok: boolean; data: T; has_more?: boolean; error?: { code: string; message: string } } | null;
   if (res.status === 401 && envelope?.ok !== true && !path.startsWith('/auth/')) {
     // 未认证/凭据失效：清会话并广播，由 App 回到登录页。
     // /auth/* 路径豁免（password-login 失败返回 401 是正常业务结果，
@@ -1261,7 +1261,11 @@ export async function fetchEnvelope<T>(path: string, init?: RequestInit): Promis
     const detail = envelope?.error;
     throw detail ? new ApiError(detail.code, detail.message, res.status) : new Error(`HTTP ${res.status}: ${path}`);
   }
-  return envelope.data;
+  return envelope;
+}
+
+export async function fetchEnvelope<T>(path: string, init?: RequestInit): Promise<T> {
+  return (await fetchResponseEnvelope<T>(path, init)).data;
 }
 
 function appendQueryParam(query: string, key: string, value?: string): string {
@@ -1835,8 +1839,22 @@ function normalizeProjectArtifact(artifact: RawProjectArtifact): ProjectArtifact
   };
 }
 
-export function listTasks(query = '', projectCode?: string): Promise<TaskSummary[]> {
-  return fetchEnvelope<RawTaskSummary[]>(`/tasks${appendQueryParam(query, 'project_code', projectCode)}`).then((items) => items.map((item) => normalizeTask(item)));
+export async function listTasks(query = '', projectCode?: string): Promise<TaskSummary[]> {
+  const params = new URLSearchParams(appendQueryParam(query, 'project_code', projectCode).replace(/^\?/, ''));
+  const tasks: TaskSummary[] = [];
+  let offset = Number(params.get('offset') ?? 0);
+  // Array consumers need every task for board counts and selection workflows.
+  // Fetch bounded project pages rather than the cross-project task table.
+  const limit = Number(params.get('limit') ?? 500);
+  for (;;) {
+    params.set('limit', String(limit));
+    params.set('offset', String(offset));
+    const result = await fetchResponseEnvelope<RawTaskSummary[]>(`/tasks?${params}`);
+    tasks.push(...result.data.map(normalizeTask));
+    if (!result.has_more) return tasks;
+    if (!result.data.length) throw new ApiError('api_bad_response', '任务分页未前进', 502);
+    offset += result.data.length;
+  }
 }
 
 export function getTask(taskCode: string): Promise<TaskDetail> {

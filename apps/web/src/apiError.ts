@@ -2,12 +2,16 @@ import { getLocale } from './i18n.ts';
 
 // Translate stable service error codes, never arbitrary server/user-provided prose.
 const chineseErrors: Record<string, string> = {
+  api_bad_response: '服务返回的分页数据无效，请刷新后重试。',
+  validation_failed: '请求参数无效，请检查输入后重试。',
   intake_invalid: '请检查候选格式、代码指纹、项目关联与大小限制；可在本机运行 tsp intake validate 获取具体诊断。',
   intake_conflict: '批次、关联目标或请求标识与当前状态冲突。请重新读取批次，核对已完成项后重新审阅。',
   intake_forbidden: '当前项目权限不允许此接入操作；审阅与发布需要项目负责人或管理员权限。',
   intake_not_found: '当前项目中没有可访问的接入批次。',
 };
 const englishErrors: Record<string, string> = {
+  api_bad_response: 'The service returned an invalid page. Reload and try again.',
+  validation_failed: 'Check the request parameters and try again.',
   unauthorized: 'Sign-in failed or your session has expired. Please sign in again.',
   auth_credentials_invalid: 'Incorrect account or password.',
   auth_token_invalid: 'Your session has expired. Please sign in again.',

@@ -291,7 +291,20 @@ export function createApiClient(opts: ApiClientOptions) {
       return request('PATCH', `/design-prototypes/${encodeURIComponent(prototypeCode)}`, body);
     },
     async listTasks(query = ''): Promise<ApiResult<Array<Record<string, unknown>>>> {
-      return request('GET', `/tasks${query}`);
+      const params = new URLSearchParams(query.replace(/^\?/, ''));
+      const tasks: Array<Record<string, unknown>> = [];
+      let offset = Number(params.get('offset') ?? 0);
+      const limit = params.get('limit') ?? '500';
+      for (;;) {
+        params.set('limit', limit);
+        params.set('offset', String(offset));
+        const result = await request<Array<Record<string, unknown>>>('GET', `/tasks?${params}`) as ApiResult<Array<Record<string, unknown>>> & { has_more?: boolean };
+        if (!result.ok) return result;
+        tasks.push(...result.data);
+        if (!result.has_more) return { ok: true, data: tasks };
+        if (!result.data.length) return { ok: false, error: { code: 'api_bad_response', message: '任务分页未前进，请重试' } };
+        offset += result.data.length;
+      }
     },
     async taskHistory(taskCode: string): Promise<ApiResult<Array<Record<string, unknown>>>> {
       return request('GET', `/tasks/${encodeURIComponent(taskCode)}/history`);

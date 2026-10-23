@@ -1,14 +1,14 @@
 import type { FastifyInstance } from 'fastify';
-import { inArray } from 'drizzle-orm';
 import {
   FEATURE_STATUSES,
+  fail,
   createMemberUseCases,
   createProjectUseCases,
   createTaskService,
   createTaskBaselineUseCases,
   createVerificationUseCases,
 } from '@team-synergy/application';
-import { schema, type Db } from '@team-synergy/persistence';
+import type { Db } from '@team-synergy/persistence';
 import {
   ArtifactKindSchema,
   EvidenceResultSchema,
@@ -74,7 +74,7 @@ export function registerTaskRoutes(app: FastifyInstance, db: Db): void {
       baseSnapshot: body.base_snapshot, principalCode: (request.principal ?? '') });
   });
 
-  app.get<{ Querystring: { status?: string; assignee_principal_code?: string; project_code?: string } }>('/tasks', async (request) => {
+  app.get<{ Querystring: { status?: string; assignee_principal_code?: string; project_code?: string; limit?: string; offset?: string } }>('/tasks', async (request) => {
     const statusRaw = request.query.status;
     const status = statusRaw === undefined ? undefined : parseEnum(TaskStatusSchema, statusRaw);
     if (statusRaw !== undefined && !status) {
@@ -83,49 +83,21 @@ export function registerTaskRoutes(app: FastifyInstance, db: Db): void {
     const assignedTo = request.query.assignee_principal_code === 'me'
       ? (request.principal ?? '')
       : request.query.assignee_principal_code;
-    return {
-      ok: true as const,
-      data: await taskService.listTasks({
-        status: status ?? undefined,
-        assignedTo: assignedTo || undefined,
-        projectCode: request.query.project_code,
-        principalCode: request.principal ?? '',
-      }),
-    };
+    try {
+      const integer = (raw: string | undefined, fallback: number) => raw === undefined ? fallback : /^\d+$/.test(raw) ? Number(raw) : NaN;
+      const result = await taskService.listTaskPage({
+        status: status ?? undefined, assignedTo: assignedTo || undefined,
+        projectCode: request.query.project_code, principalCode: request.principal ?? '',
+        limit: integer(request.query.limit, 50), offset: integer(request.query.offset, 0),
+      });
+      return { ok: true as const, ...result };
+    } catch (error) { return fail(error); }
   });
 
-  app.get<{ Querystring: { project_code?: string } }>('/tasks/graph', async (request) => {
-    const visibleTasks = await taskService.listTasks({ projectCode: request.query.project_code, principalCode: request.principal ?? '' });
-    if (visibleTasks.length === 0) {
-      return { ok: true as const, data: { nodes: [], edges: [] } };
-    }
-
-    const codes = visibleTasks.map((task) => task.task_code);
-    const rows = await db.select({ id: schema.tasks.id, code: schema.tasks.code })
-      .from(schema.tasks)
-      .where(inArray(schema.tasks.code, codes));
-    const taskIdToCode = new Map(rows.map((row) => [row.id, row.code]));
-    const taskIds = rows.map((row) => row.id);
-    const dependencies = taskIds.length === 0
-      ? []
-      : await db.select().from(schema.taskDependencies).where(inArray(schema.taskDependencies.task_id, taskIds));
-
-    return {
-      ok: true as const,
-      data: {
-        nodes: visibleTasks.map((task) => ({
-          task_code: task.task_code,
-          title: task.title,
-          status: task.status,
-        })),
-        edges: dependencies.flatMap((dependency) => {
-          const from = taskIdToCode.get(dependency.task_id);
-          const to = taskIdToCode.get(dependency.depends_on_task_id);
-          return from && to ? [{ from, to }] : [];
-        }),
-      },
-    };
-  });
+  app.get<{ Querystring: { project_code?: string } }>('/tasks/graph', async (request) => ({
+    ok: true as const,
+    data: await taskService.taskGraph({ projectCode: request.query.project_code, principalCode: request.principal ?? '' }),
+  }));
 
   app.get<{ Params: { task_code: string } }>('/tasks/:task_code/evidences', async (request) => {
     const result = await taskService.getTaskStatus(request.params.task_code, request.principal ?? '');

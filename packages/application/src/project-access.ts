@@ -1,10 +1,23 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull, isNotNull, ne, or } from 'drizzle-orm';
 import { schema, type Db } from '@team-synergy/persistence';
 import { DomainError } from '@team-synergy/domain';
 import type { MemberRole, TeamRole } from '@team-synergy/contracts';
 
 export type AccessDb = Db | Parameters<Parameters<Db['transaction']>[0]>[0];
 export type ProjectAccess = { role: MemberRole; source: 'owner' | 'explicit' | 'team'; isExternal: boolean };
+
+/** Same read policy as resolveProjectAccess, evaluated for all projects in one query. */
+export async function visibleProjectIds(db: AccessDb, principalId: bigint, projectCode?: string) {
+  const rows = await db.select({ id: schema.projects.id }).from(schema.projects)
+    .innerJoin(schema.users, and(eq(schema.users.id, principalId), eq(schema.users.status, 'active'), isNull(schema.users.deleted_at)))
+    .leftJoin(schema.members, and(eq(schema.members.project_id, schema.projects.id), eq(schema.members.principal_id, principalId)))
+    .leftJoin(schema.teamMembers, and(eq(schema.teamMembers.team_id, schema.projects.team_id), eq(schema.teamMembers.principal_id, principalId)))
+    .where(and(projectCode ? eq(schema.projects.code, projectCode) : undefined, or(
+      eq(schema.projects.owner_principal_id, principalId), isNotNull(schema.members.principal_id),
+      and(isNotNull(schema.teamMembers.principal_id), ne(schema.projects.member_policy, 'private')),
+    )));
+  return rows.map(row => row.id);
+}
 
 export function isProjectManager(role: string | undefined): boolean { return role === 'owner' || role === 'admin'; }
 export function projectCapabilities(role: string | undefined) {

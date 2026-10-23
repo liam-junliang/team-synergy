@@ -38,3 +38,5 @@ export { createSystemSettingsUseCases, type SystemSettingsView } from './system-
 export { createAdminGovernanceUseCases } from './admin-governance-use-cases.js';
 export { createIntakeUseCases } from './intake-use-cases.js';
 export { createSystemAgentUseCases, normalizeSystemAgentProposal } from './system-agent-use-cases.js';
+
+export { listPrincipalDevices } from './device-reads.js';

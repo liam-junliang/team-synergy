@@ -447,3 +447,22 @@ test('看板右侧信息栏组织交付概览、阶段分布和同步状态', as
   assert.match(html, /数据同步/, '应说明任务数据来源及同步状态');
   assert.match(html, />42%</, '完成率应由完成任务数和总任务数计算');
 });
+
+test('project board task API follows bounded project pages and keeps all task summaries', async () => {
+  const { listTasks } = await vite.ssrLoadModule('/src/api.ts');
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async url => {
+    const parsed = new URL(String(url), 'http://localhost');
+    calls.push(parsed);
+    const offset = Number(parsed.searchParams.get('offset'));
+    return new Response(JSON.stringify({ ok: true, data: offset < 3 ? [{ task_code: `TASK-${offset}`, title: `Task ${offset}`, status: 'draft' }] : [], has_more: offset < 2 }),
+      { headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const tasks = await listTasks('?limit=1', 'PROJECT');
+    assert.equal(tasks.length, 3);
+    assert.deepEqual(calls.map(url => url.searchParams.get('offset')), ['0', '1', '2']);
+    assert.ok(calls.every(url => url.searchParams.get('project_code') === 'PROJECT' && url.searchParams.get('limit') === '1'));
+  } finally { globalThis.fetch = originalFetch; }
+});

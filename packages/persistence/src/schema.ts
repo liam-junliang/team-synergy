@@ -943,6 +943,8 @@ export const tasks = pgTable(
     ...codeConstraints('tasks', t),
     uniqueIndex('uq_tasks_legacy_code').on(t.legacy_code),
     index('idx_tasks_feature').on(t.feature_id),
+    index('idx_tasks_created_id').on(t.created_at.desc(), t.id.desc()),
+    index('idx_tasks_feature_created_id').on(t.feature_id, t.created_at.desc(), t.id.desc()),
     index('idx_tasks_status').on(t.status),
     index('idx_tasks_assignee').on(t.assignee_principal_id),
     index('idx_tasks_requirement').on(t.requirement_id),

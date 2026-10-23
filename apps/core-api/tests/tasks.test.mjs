@@ -1,6 +1,7 @@
 import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { eq } from 'drizzle-orm';
+import { createHash } from 'node:crypto';
 import { schema } from '@team-synergy/persistence';
 import { buildServer } from '../dist/server.js';
 import {
@@ -137,6 +138,7 @@ test('GET /tasks returns public-code task fields from the migrated PostgreSQL da
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.json(), {
     ok: true,
+    page: 1, total: 1, has_more: false,
     data: [{
       task_code: task.code,
       title: 'Expose task routes',
@@ -294,4 +296,57 @@ test('claim reuses identity checks and returns claim_assignee_mismatch for anoth
   assert.equal(response.statusCode, 403);
   assert.equal(response.json().ok, false);
   assert.equal(response.json().error.code, 'claim_assignee_mismatch');
+});
+
+test('bounded task HTTP reads meet 40-project / 5000-task query and payload budgets and use ordering index', async () => {
+  const { app, db, builder, feature } = await createFixture();
+  const [baseProject] = await db.select().from(schema.projects).limit(1);
+  const projects = [baseProject, ...await db.insert(schema.projects).values(Array.from({ length: 39 }, (_, i) => ({
+    team_id: baseProject.team_id, owner_principal_id: builder.id, name: `budget-${i}`, created_at: '2026-10-23T00:00:00Z',
+  }))).returning()];
+  const features = [feature, ...await db.insert(schema.features).values(projects.slice(1).map(project => ({
+    project_id: project.id, title: 'budget feature', status: 'active',
+  }))).returning()];
+  for (const f of features) {
+    await db.insert(schema.tasks).values(Array.from({ length: 125 }, (_, i) => ({ feature_id: f.id, title: `Task ${i}`, profile: 'builder',
+      source: 'requirement', status: 'draft', base_snapshot: 0, acceptance: '[]', created_at: '2026-10-23T00:00:00Z' })));
+  }
+  const [device] = await db.insert(schema.devices).values({ principal_id: builder.id, device_name: 'budget client',
+    credential_hash: createHash('sha256').update('execution-budget').digest('hex'), legacy_session_initialized: true,
+    created_at: '2026-10-23T00:00:00Z' }).returning();
+  await db.insert(schema.deviceSessions).values({ device_id: device.id, token_hash: createHash('sha256').update('budget-session').digest('hex'),
+    created_at: '2026-10-23T00:00:00Z', expires_at: '2099-01-01T00:00:00Z' });
+  await db.$client.query('ANALYZE tasks');
+  await db.$client.query('ANALYZE features');
+  const query = db.$client.query.bind(db.$client);
+  const calls = [];
+  db.$client.query = (...args) => { calls.push(args); return query(...args); };
+  let response;
+  try {
+    response = await app.inject({ method: 'GET', url: '/tasks?limit=50', headers: { authorization: 'Bearer budget-session' } });
+  } finally { db.$client.query = query; }
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(response.json().total, 5000);
+  assert.equal(response.json().data.length, 50);
+  assert.equal(response.json().has_more, true);
+  assert.ok(calls.length <= 8, `DB calls ${calls.length}`);
+  assert.ok(Buffer.byteLength(response.body) <= 200 * 1024);
+  const ordered = calls.find(args => (args[0].text ?? args[0]).includes('order by "tasks"."created_at"'));
+  assert.ok(ordered);
+  const plan = await query(`EXPLAIN ${ordered[0].text}`, ordered[1]);
+  const planText = plan.rows.map(row => row['QUERY PLAN']).join('\n');
+  assert.match(planText, /Index Scan.*idx_tasks_created_id/);
+  console.log(`A-01 benchmark: ${calls.length} DB calls, ${Buffer.byteLength(response.body)} bytes, index idx_tasks_created_id`);
+
+  const graph = await app.inject({ method: 'GET', url: `/tasks/graph?project_code=${baseProject.code}`, headers: { 'x-principal-code': builder.code } });
+  assert.equal(graph.json().data.nodes.length, 125, 'graph must not truncate at default task page size');
+  for (const value of ['0', '-1', '1.5', '501', 'abc', '', 'Infinity']) {
+    const invalid = await app.inject({ method: 'GET', url: `/tasks?limit=${value}`, headers: { 'x-principal-code': builder.code } });
+    assert.equal(invalid.statusCode, 422, invalid.body);
+    assert.equal(invalid.json().error.code, 'validation_failed');
+  }
+  const beyond = await app.inject({ method: 'GET', url: '/tasks?limit=50&offset=5000', headers: { 'x-principal-code': builder.code } });
+  assert.deepEqual({ ...beyond.json(), total: 5000 }, { ok: true, data: [], total: 5000, page: 101, has_more: false });
+  const scoped = await app.inject({ method: 'GET', url: `/tasks?limit=50&project_code=${baseProject.code}`, headers: { 'x-principal-code': builder.code } });
+  assert.equal(scoped.json().total, 125);
 });

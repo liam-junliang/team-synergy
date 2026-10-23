@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, count, desc, eq, inArray } from 'drizzle-orm';
 import type { Db } from '@team-synergy/persistence';
 import { schema } from '@team-synergy/persistence';
 import {
@@ -12,14 +12,13 @@ import type { ArtifactKind, Profile, TaskStatus, RequirementBaseline } from '@te
 import { loadRequirementBaseline } from './baseline-use-cases.js';
 import {
   createPublicCode,
-  findProjectByCode,
   findRunByCode,
   findTaskByCode,
   findUserByCode,
 } from './public-code.js';
 import { assertExecutionWrite, assertNoPendingHandover, executionDeviceId } from './execution-guard.js';
 import { designPrototypeContentMetadata, type DesignPrototypeContentMetadata } from './design-prototype-content.js';
-import { assertProjectAccess, effectiveProjectMember, isProjectManager, resolveProjectAccess } from './project-access.js';
+import { assertProjectAccess, effectiveProjectMember, isProjectManager, resolveProjectAccess, visibleProjectIds } from './project-access.js';
 import { captureRunSkills } from './skills-run.js';
 
 export type TaskResult<T> = { ok: true; data: T } | { ok: false; error: { code: string; message: string; details?: unknown } };
@@ -36,6 +35,8 @@ export interface ListTasksFilter {
   assignedTo?: string;
   status?: TaskStatus;
   projectCode?: string;
+  limit?: number;
+  offset?: number;
 }
 
 export interface AssignCommand {
@@ -129,12 +130,6 @@ async function usersByIds(db: Db | DbTx, ids: bigint[]) {
   return new Map(rows.map((row) => [row.id, row]));
 }
 
-async function featuresByIds(db: Db | DbTx, ids: bigint[]) {
-  if (ids.length === 0) return new Map<bigint, typeof schema.features.$inferSelect>();
-  const rows = await db.select().from(schema.features).where(inArray(schema.features.id, ids));
-  return new Map(rows.map((row) => [row.id, row]));
-}
-
 async function lockTaskProject(tx: DbTx, projectId: bigint) {
   const [project] = await tx.select({ team_id: schema.projects.team_id }).from(schema.projects).where(eq(schema.projects.id, projectId)).limit(1);
   if (!project) throw new DomainError('project_not_found', '任务项目不存在');
@@ -143,12 +138,6 @@ async function lockTaskProject(tx: DbTx, projectId: bigint) {
   // invalidate a permission check while this operation waits for the task.
   await tx.select({ id: schema.teams.id }).from(schema.teams).where(eq(schema.teams.id, project.team_id)).for('share');
   await tx.select({ id: schema.projects.id }).from(schema.projects).where(eq(schema.projects.id, projectId)).for('share');
-}
-
-async function defectsByIds(db: Db | DbTx, ids: bigint[]) {
-  if (ids.length === 0) return new Map<bigint, typeof schema.defects.$inferSelect>();
-  const rows = await db.select().from(schema.defects).where(inArray(schema.defects.id, ids));
-  return new Map(rows.map((row) => [row.id, row]));
 }
 
 function parseStringArray(raw: string | null): string[] {
@@ -241,36 +230,39 @@ export function createTaskService(db: Db) {
     return { workspace, run };
   }
 
-  async function listTasks(filter: ListTasksFilter = {}) {
+  async function taskReadScope(filter: ListTasksFilter) {
     const principal = filter.principalCode ? await findUserByCode(db, filter.principalCode) : undefined;
-    if (!principal) return [];
-    const project = filter.projectCode ? await findProjectByCode(db, filter.projectCode) : undefined;
-    if (filter.projectCode && !project) return [];
+    if (!principal) return undefined;
+    const ids = await visibleProjectIds(db, principal.id, filter.projectCode);
+    if (!ids.length) return undefined;
     const assignee = filter.assignedTo ? await findUserByCode(db, filter.assignedTo) : undefined;
-    if (filter.assignedTo && !assignee) return [];
-    const projects = project ? [project] : await db.select().from(schema.projects);
-    const visibleProjects = (await Promise.all(projects.map(async candidate =>
-      await resolveProjectAccess(db, candidate.id, principal.id) ? candidate.id : null,
-    ))).filter((id): id is bigint => id !== null);
-    if (!visibleProjects.length) return [];
-    const featureIds = (await db.select({ id: schema.features.id }).from(schema.features)
-      .where(inArray(schema.features.project_id, visibleProjects))).map(row => row.id);
-    if (!featureIds.length) return [];
-
-    const rows = await db.select().from(schema.tasks).where(and(
+    if (filter.assignedTo && !assignee) return undefined;
+    return and(
+      inArray(schema.features.project_id, ids),
       assignee ? eq(schema.tasks.assignee_principal_id, assignee.id) : undefined,
       filter.status ? eq(schema.tasks.status, filter.status) : undefined,
-      featureIds ? inArray(schema.tasks.feature_id, featureIds) : undefined,
-    ));
-    const featureMap = await featuresByIds(db, [...new Set(rows.map((row) => row.feature_id))]);
-    const userMap = await usersByIds(
-      db,
-      [...new Set(rows.map((row) => row.assignee_principal_id).filter((value): value is bigint => value !== null))],
     );
-    const defectMap = await defectsByIds(
-      db,
-      [...new Set(rows.map((row) => row.defect_id).filter((value): value is bigint => value !== null))],
-    );
+  }
+
+  async function listTaskPage(filter: ListTasksFilter = {}) {
+    const limit = filter.limit ?? 50;
+    const offset = filter.offset ?? 0;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500 || !Number.isSafeInteger(offset) || offset < 0 || offset > 2147483647) {
+      throw new DomainError('validation_failed', 'limit 应为 1 到 500 的整数，offset 应为非负整数');
+    }
+    const page = Math.floor(offset / limit) + 1;
+    const condition = await taskReadScope(filter);
+    if (!condition) return { data: [], page, total: 0, has_more: false };
+    const [countRow] = await db.select({ total: count() }).from(schema.tasks)
+      .innerJoin(schema.features, eq(schema.features.id, schema.tasks.feature_id)).where(condition);
+    const total = countRow?.total ?? 0;
+    const joinedRows = await db.select({ task: schema.tasks, featureCode: schema.features.code,
+      assigneeCode: schema.users.code, defectCode: schema.defects.code }).from(schema.tasks)
+      .innerJoin(schema.features, eq(schema.features.id, schema.tasks.feature_id))
+      .leftJoin(schema.users, eq(schema.users.id, schema.tasks.assignee_principal_id))
+      .leftJoin(schema.defects, eq(schema.defects.id, schema.tasks.defect_id))
+      .where(condition).orderBy(desc(schema.tasks.created_at), desc(schema.tasks.id)).limit(limit).offset(offset);
+    const rows = joinedRows.map(row => row.task);
     const closedAtMap = new Map<bigint, string>();
     const cancelledAtMap = new Map<bigint, string>();
     if (rows.length > 0) {
@@ -291,22 +283,43 @@ export function createTaskService(db: Db) {
       }
     }
 
-    return rows.map((task) => ({
+    const data = joinedRows.map(({ task, featureCode, assigneeCode, defectCode }) => ({
       task_code: task.code,
-      feature_code: featureMap.get(task.feature_id)?.code ?? '',
-      defect_code: task.defect_id ? (defectMap.get(task.defect_id)?.code ?? null) : null,
+      feature_code: featureCode,
+      defect_code: defectCode,
       title: task.title,
       brief: task.brief,
       profile: task.profile,
       source: task.source,
       status: task.status,
-      assignee_principal_code: task.assignee_principal_id ? (userMap.get(task.assignee_principal_id)?.code ?? null) : null,
+      assignee_principal_code: assigneeCode,
       acceptance: parseAcceptance(task.acceptance),
       base_snapshot: task.base_snapshot,
       created_at: task.created_at,
       completed_at: closedAtMap.get(task.id) ?? null,
       cancelled_at: cancelledAtMap.get(task.id) ?? null,
     }));
+    return { data, page, total, has_more: offset + data.length < total };
+  }
+
+  async function listTasks(filter: ListTasksFilter = {}) {
+    return (await listTaskPage(filter)).data;
+  }
+
+  async function taskGraph(filter: ListTasksFilter = {}) {
+    const condition = await taskReadScope(filter);
+    if (!condition) return { nodes: [], edges: [] };
+    const rows = await db.select({ id: schema.tasks.id, task_code: schema.tasks.code,
+      title: schema.tasks.title, status: schema.tasks.status }).from(schema.tasks)
+      .innerJoin(schema.features, eq(schema.features.id, schema.tasks.feature_id)).where(condition);
+    const codes = new Map(rows.map(row => [row.id, row.task_code]));
+    const deps = rows.length ? await db.select().from(schema.taskDependencies)
+      .where(inArray(schema.taskDependencies.task_id, rows.map(row => row.id))) : [];
+    return { nodes: rows.map(({ task_code, title, status }) => ({ task_code, title, status })),
+      edges: deps.flatMap(dep => {
+        const from = codes.get(dep.task_id), to = codes.get(dep.depends_on_task_id);
+        return from && to ? [{ from, to }] : [];
+      }) };
   }
 
   async function assignTask(cmd: AssignCommand) {
@@ -1095,7 +1108,7 @@ export function createTaskService(db: Db) {
     }
   }
 
-  return { listTasks, assignTask, claimTask, getTaskStatus, submitTask, updateTaskContract, cancelTask };
+  return { listTasks, listTaskPage, taskGraph, assignTask, claimTask, getTaskStatus, submitTask, updateTaskContract, cancelTask };
 }
 
 export interface TaskServiceAssignResult {
