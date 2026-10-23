@@ -28,6 +28,13 @@ function rejected(result, operation) {
   return result.error;
 }
 
+test('verified cookie sessions retain shared handover access while legacy declarations stay denied', async () => {
+  const ctx = await seededDb();
+  const identity = { ...ctx.identities.source, authKind: 'cookie' };
+  success(await ctx.handovers.list({ task_code: ctx.task.code, identity }), 'cookie shared handover access');
+  assert.equal(rejected(await ctx.handovers.list({ task_code: ctx.task.code, identity: { ...identity, authKind: 'legacy' } }), 'legacy handover access').code, 'handover_forbidden');
+});
+
 async function seededDb(options = {}) {
   const db = fixture.db;
   const seeded = await seedWorkspaceProject(db, {

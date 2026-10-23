@@ -1198,22 +1198,16 @@ export interface AuthUser {
   must_change_password: boolean;
 }
 
-interface WebLoginResult {
-  device_code: string;
-  device_token: string;
-  user_code: string;
-  device_name: string;
+interface WebSessionResult {
+  user: RawAuthUser;
+  csrf_token: string;
 }
 
-const AUTH_TOKEN_KEY = 'acp.device_token';
 const AUTH_USER_KEY = 'acp.auth_user';
-
-function authToken(): string | null {
-  return typeof window === 'undefined' ? null : window.localStorage.getItem(AUTH_TOKEN_KEY);
-}
+let webCsrfToken: string | null = null;
 
 export function storedAuthUser(): AuthUser | null {
-  if (typeof window === 'undefined' || !authToken()) return null;
+  if (typeof window === 'undefined') return null;
   const raw = window.localStorage.getItem(AUTH_USER_KEY);
   if (!raw) return null;
   try {
@@ -1227,22 +1221,21 @@ export function storedAuthUser(): AuthUser | null {
   }
 }
 
-export function hasWebAuthToken(): boolean {
-  return Boolean(authToken());
-}
-
 export function clearWebSession(): void {
+  webCsrfToken = null;
   if (typeof window === 'undefined') return;
-  window.localStorage.removeItem(AUTH_TOKEN_KEY);
+  // Remove credentials left by earlier versions; never read or migrate them.
+  window.localStorage.removeItem('acp.device_token');
+  window.localStorage.removeItem('tsp:web:client-identity:v1');
   window.localStorage.removeItem(AUTH_USER_KEY);
 }
 
 async function fetchResponseEnvelope<T>(path: string, init?: RequestInit): Promise<{ data: T; has_more?: boolean }> {
   const headers = new Headers(init?.headers);
-  const token = authToken();
-  if (token && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`);
+  const method = (init?.method ?? 'GET').toUpperCase();
+  if (webCsrfToken && !['GET', 'HEAD', 'OPTIONS'].includes(method)) headers.set('X-CSRF-Token', webCsrfToken);
   if (init?.body) headers.set('Content-Type', 'application/json');
-  const res = await fetch(`/api${path}`, { ...init, headers });
+  const res = await fetch(`/api${path}`, { ...init, headers, credentials: 'same-origin' });
   let body: unknown = null;
   try {
     body = await res.json();
@@ -2669,10 +2662,8 @@ export async function getDesignPrototypeFile(prototypeCode: string, revision: nu
   if (!Number.isSafeInteger(revision) || revision < 1) throw new Error(t('设计资料版本无效'));
   const path = `/design-prototypes/${encodeURIComponent(prototypeCode)}/file?revision=${revision}`;
   const headers = new Headers({ 'X-Principal-Code': currentPrincipalCode() });
-  const token = authToken();
-  if (token) headers.set('Authorization', `Bearer ${token}`);
-  // Never use a server-provided download URL with the user's bearer credential.
-  const response = await fetch(`/api${path}`, { headers, redirect: 'error' });
+  // Fixed same-origin paths keep the HttpOnly session away from external URLs.
+  const response = await fetch(`/api${path}`, { headers, credentials: 'same-origin', redirect: 'error' });
   if (!response.ok) {
     if (response.status === 401) {
       clearWebSession();
@@ -2766,25 +2757,22 @@ export function currentPrincipalCode(): string {
 
 const accountPrincipalCode = currentPrincipalCode;
 
-async function persistWebLogin(login: WebLoginResult): Promise<AuthUser> {
-  window.localStorage.setItem(AUTH_TOKEN_KEY, login.device_token);
-  try {
-    const user = normalizeAuthUser(await fetchEnvelope<RawAuthUser>('/auth/whoami'));
-    window.localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
-    return user;
-  } catch (error) {
-    clearWebSession();
-    throw error;
-  }
+function persistWebSession(session: WebSessionResult): AuthUser {
+  webCsrfToken = session.csrf_token;
+  const user = normalizeAuthUser(session.user);
+  window.localStorage.removeItem('acp.device_token');
+  window.localStorage.removeItem('tsp:web:client-identity:v1');
+  window.localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
+  return user;
 }
 
 export async function loginWebSession(input: { account: string; password: string; device_name: string }): Promise<AuthUser> {
   clearWebSession();
-  const login = await fetchEnvelope<WebLoginResult>('/auth/password-login', {
+  const login = await fetchEnvelope<WebSessionResult>('/auth/web/login', {
     method: 'POST',
     body: JSON.stringify({ ...input, device_identity: webClientIdentity() }),
   });
-  return persistWebLogin(login);
+  return persistWebSession(login);
 }
 
 export async function changeWebPassword(newPassword: string, currentPassword?: string): Promise<AuthUser> {
@@ -2796,22 +2784,17 @@ export async function changeWebPassword(newPassword: string, currentPassword?: s
 }
 
 export async function restoreWebSession(): Promise<AuthUser> {
-  const user = normalizeAuthUser(await fetchEnvelope<RawAuthUser>('/auth/whoami'));
-  window.localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
-  if (!user.must_change_password) {
-    // Legacy credentials may not yet have an installation identity. Binding is authenticated,
-    // and a collision must never merge devices or invalidate an otherwise usable login.
-    await fetchEnvelope('/auth/device-identity', { method: 'POST', body: JSON.stringify({ device_identity: webClientIdentity() }) }).catch(() => undefined);
+  try {
+    return persistWebSession(await fetchEnvelope<WebSessionResult>('/auth/web/session'));
+  } catch (error) {
+    clearWebSession();
+    throw error;
   }
-  return user;
 }
 
 export async function logoutWebSession(): Promise<void> {
-  try {
-    await fetchEnvelope('/auth/logout', { method: 'POST', body: JSON.stringify({}) });
-  } finally {
-    clearWebSession();
-  }
+  await fetchEnvelope('/auth/web/logout', { method: 'POST', body: JSON.stringify({}) });
+  clearWebSession();
 }
 
 export function listTeams(): Promise<TeamSummary[]> {

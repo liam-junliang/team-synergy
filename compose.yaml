@@ -32,6 +32,7 @@ services:
       TSP_DATABASE_URL: postgres://team_synergy:${POSTGRES_PASSWORD}@postgres:5432/team_synergy
       TSP_AUTO_MIGRATE: "false"
       NODE_ENV: production
+      TSP_WEB_ORIGIN: ${TSP_WEB_ORIGIN:-http://localhost:5173}
     depends_on:
       migrate:
         condition: service_completed_successfully

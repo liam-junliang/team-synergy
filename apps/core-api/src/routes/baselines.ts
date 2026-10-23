@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { createRequirementBaselineUseCases } from '@team-synergy/application';
 import { PublicCodeSchema } from '@team-synergy/contracts';
 import type { Db } from '@team-synergy/persistence';
-import { unauthorized } from '../auth.js';
+import { hasAuthenticatedSession, unauthorized } from '../auth.js';
 
 const isCode = (value: unknown): value is string => PublicCodeSchema.safeParse(value).success;
 const invalid = () => ({ ok: false as const, error: { code: 'validation_failed', message: '需求基线参数无效' } });
@@ -12,17 +12,17 @@ export function registerRequirementBaselineRoutes(app: FastifyInstance, db: Db):
   const uc = createRequirementBaselineUseCases(db);
   const root = '/projects/:project_code/requirement-baselines';
   app.get<{ Params: { project_code: string } }>(root, async (request, reply) => {
-    if (request.authKind !== 'bearer') return unauthorized(reply);
+    if (!hasAuthenticatedSession(request)) return unauthorized(reply);
     if (!isCode(request.params.project_code)) return invalid();
     return uc.list({ projectCode: request.params.project_code, principalCode: request.principal ?? '' });
   });
   app.get<{ Params: { project_code: string } }>(`${root}/bindings`, async (request, reply) => {
-    if (request.authKind !== 'bearer') return unauthorized(reply);
+    if (!hasAuthenticatedSession(request)) return unauthorized(reply);
     if (!isCode(request.params.project_code)) return invalid();
     return uc.bindings({ projectCode: request.params.project_code, principalCode: request.principal ?? '' });
   });
   app.post<{ Params: { project_code: string }; Body: Record<string, unknown> }>(root, async (request, reply) => {
-    if (request.authKind !== 'bearer') return unauthorized(reply);
+    if (!hasAuthenticatedSession(request)) return unauthorized(reply);
     const body = request.body;
     if (!isCode(request.params.project_code) || !body || Array.isArray(body)
       || Object.keys(body).some(key => !['name', 'scope', 'reason', 'parent_baseline_code', 'requirements'].includes(key))
@@ -38,12 +38,12 @@ export function registerRequirementBaselineRoutes(app: FastifyInstance, db: Db):
       requirements: body.requirements as Array<{ requirement_code: string; revision: number }> });
   });
   app.get<{ Params: { project_code: string; baseline_code: string } }>(`${root}/:baseline_code`, async (request, reply) => {
-    if (request.authKind !== 'bearer') return unauthorized(reply);
+    if (!hasAuthenticatedSession(request)) return unauthorized(reply);
     if (!isCode(request.params.project_code) || !isCode(request.params.baseline_code)) return invalid();
     return uc.get({ projectCode: request.params.project_code, baselineCode: request.params.baseline_code, principalCode: request.principal ?? '' });
   });
   app.get<{ Params: { project_code: string; baseline_code: string }; Querystring: { compare_to?: string } }>(`${root}/:baseline_code/diff`, async (request, reply) => {
-    if (request.authKind !== 'bearer') return unauthorized(reply);
+    if (!hasAuthenticatedSession(request)) return unauthorized(reply);
     const compareTo = request.query.compare_to ?? 'current';
     if (!isCode(request.params.project_code) || !isCode(request.params.baseline_code)
       || (compareTo !== 'current' && !isCode(compareTo)) || Object.keys(request.query).some(key => key !== 'compare_to')) return invalid();

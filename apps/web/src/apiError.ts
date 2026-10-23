@@ -2,6 +2,10 @@ import { getLocale } from './i18n.ts';
 
 // Translate stable service error codes, never arbitrary server/user-provided prose.
 const chineseErrors: Record<string, string> = {
+  csrf_invalid: '会话安全校验失败，请刷新后重试。',
+  csrf_origin_invalid: '请求来源无效，请从平台页面重新登录。',
+  web_auth_https_required: '浏览器登录需要安全连接，请使用 HTTPS。',
+  login_security_invalid: '登录安全查询参数无效。',
   request_body_too_large: '请求内容超过大小限制，请缩小后重试。',
   metrics_unavailable: '运行指标暂不可用，请稍后重试。',
   audit_export_failed: '审计导出失败，请检查管理员身份与服务连接。',
@@ -22,6 +26,10 @@ const chineseErrors: Record<string, string> = {
   intake_not_found: '当前项目中没有可访问的接入批次。',
 };
 const englishErrors: Record<string, string> = {
+  csrf_invalid: 'Session security validation failed. Refresh and try again.',
+  csrf_origin_invalid: 'Invalid request origin. Sign in from the platform page.',
+  web_auth_https_required: 'Browser sign-in requires a secure HTTPS connection.',
+  login_security_invalid: 'Invalid login security query parameters.',
   request_body_too_large: 'The request exceeds the size limit. Reduce it and try again.',
   metrics_unavailable: 'Operational metrics are temporarily unavailable.',
   audit_export_failed: 'Audit export failed. Check administrator access and connectivity.',

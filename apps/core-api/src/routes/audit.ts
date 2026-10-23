@@ -2,11 +2,11 @@ import type { FastifyInstance } from 'fastify';
 import type { Db } from '@team-synergy/persistence';
 import { exportAuditPage } from '@team-synergy/application';
 import { DomainError } from '@team-synergy/domain';
-import { unauthorized } from '../auth.js';
+import { hasAuthenticatedSession, unauthorized } from '../auth.js';
 
 export function registerAuditRoutes(app: FastifyInstance, db: Db) {
   app.get<{ Querystring: { since?: string; cursor?: string; snapshot?: string; limit?: string } }>('/audit/export', async (request, reply) => {
-    if (request.authKind !== 'bearer' || !request.principal) return unauthorized(reply);
+    if (!hasAuthenticatedSession(request) || !request.principal) return unauthorized(reply);
     try {
       const data = await exportAuditPage(db, request.principal, { since: request.query.since ?? '', cursor: request.query.cursor, snapshot: request.query.snapshot,
         limit: request.query.limit === undefined ? undefined : /^\d+$/.test(request.query.limit) ? Number(request.query.limit) : NaN });

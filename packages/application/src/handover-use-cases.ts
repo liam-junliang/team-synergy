@@ -55,7 +55,7 @@ async function actorFor(tx: Tx, identity: HandoverIdentity, mutation: boolean) {
   const [device] = identity.deviceCode ? await tx.select().from(schema.devices).where(and(
     eq(schema.devices.code, identity.deviceCode), eq(schema.devices.principal_id, principal.id),
   )).for('share').limit(1) : [];
-  if (identity.authKind !== 'bearer' || !device || device.revoked_at) throw new DomainError('handover_forbidden', mutation ? '交接操作需要当前用户的设备登录凭据' : '共享上下文读取需要当前用户的设备登录凭据');
+  if (!['bearer', 'cookie'].includes(identity.authKind ?? '') || !device || device.revoked_at) throw new DomainError('handover_forbidden', mutation ? '交接操作需要当前用户的设备登录凭据' : '共享上下文读取需要当前用户的设备登录凭据');
   return { principal, device };
 }
 

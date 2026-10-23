@@ -18,7 +18,7 @@ import {
   TaskStatusSchema,
   PublicCodeSchema,
 } from '@team-synergy/contracts';
-import { unauthorized } from '../auth.js';
+import { hasAuthenticatedSession, unauthorized } from '../auth.js';
 import { executionIdentity } from './handovers.js';
 
 interface StringEnumSchema<T extends string> {
@@ -62,7 +62,7 @@ export function registerTaskRoutes(app: FastifyInstance, db: Db): void {
   const memberUc = createMemberUseCases(db);
 
   app.post<{ Params: { task_code: string }; Body: Record<string, unknown> }>('/tasks/:task_code/baseline', async (request, reply) => {
-    if (request.authKind !== 'bearer') return unauthorized(reply);
+    if (!hasAuthenticatedSession(request)) return unauthorized(reply);
     const body = request.body;
     if (!body || Array.isArray(body) || typeof body !== 'object'
       || Object.keys(body).some(key => !['baseline_code', 'base_snapshot'].includes(key))
@@ -109,7 +109,7 @@ export function registerTaskRoutes(app: FastifyInstance, db: Db): void {
   app.get<{ Params: { task_code: string } }>('/tasks/:task_code', async (request, reply) => {
     const result = await taskService.getTaskStatus(request.params.task_code, request.principal ?? '');
     if (result.ok && result.data.requirement_baseline_code) {
-      if (request.authKind !== 'bearer') return unauthorized(reply);
+      if (!hasAuthenticatedSession(request)) return unauthorized(reply);
     }
     return result;
   });
@@ -122,7 +122,7 @@ export function registerTaskRoutes(app: FastifyInstance, db: Db): void {
   app.post<{ Body: Record<string, unknown> }>('/tasks', async (request, reply) => {
     const body = request.body ?? {};
     if (body.baseline_code !== undefined) {
-      if (request.authKind !== 'bearer') return unauthorized(reply);
+      if (!hasAuthenticatedSession(request)) return unauthorized(reply);
       if (!PublicCodeSchema.safeParse(body.baseline_code).success) return {
         ok: false as const, error: { code: 'validation_failed', message: '需求基线编码无效' },
       };

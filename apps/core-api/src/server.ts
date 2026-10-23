@@ -1,6 +1,7 @@
 import { registerMetrics } from './metrics.js';
 import { registerSecurityHeaders } from './security-headers.js';
 import { registerAuditRoutes } from './routes/audit.js';
+import { registerLoginSecurityRoutes } from './routes/login-security.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -117,6 +118,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   registerAuthMiddleware(app, db);
   registerAuthRoutes(app, db);
   registerAuditRoutes(app, db);
+  registerLoginSecurityRoutes(app, db);
   registerOwnershipRoutes(app, db);
   registerTestingRoutes(app, db);
   registerSkillRoutes(app, db);

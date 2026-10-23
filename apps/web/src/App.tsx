@@ -7,7 +7,7 @@ import LanguageSwitcher from './LanguageSwitcher';
 import { ProjectSwitcher } from './ProjectSwitcher';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Component, lazy, Suspense, useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
-import { cancelTask, getProject, hasWebAuthToken, listFeatures, listMembers, listTasks, getTask, logoutWebSession, restoreWebSession, storedAuthUser, taskHistory, updateTaskContract, type AuthUser, type Feature, type Member, type TaskDetail as TaskDetailData, type TaskSummary, type UpdateTaskContractInput } from './api';
+import { cancelTask, getProject, listFeatures, listMembers, listTasks, getTask, logoutWebSession, restoreWebSession, taskHistory, updateTaskContract, type AuthUser, type Feature, type Member, type TaskDetail as TaskDetailData, type TaskSummary, type UpdateTaskContractInput } from './api';
 import { STATUS_META, BOARD_COLUMNS, PROFILE_META, SOURCE_META, isStale } from './status';
 import { agentWorkspacePath, safeAgentReturnPath, projectWorkspacePath, workspacePathAfterLogin, type ProjectSection, type WorkspaceRoute } from './workspaceRouting';
 import { listenWorkspaceNavigation, navigateWorkspace, readWorkspaceRoute } from './workspaceNavigation';
@@ -273,8 +273,8 @@ export default function App() {
   const { projectCode } = route;
   const queryClient = useQueryClient();
   const [accountOpen, setAccountOpen] = useState(false);
-  const [session, setSession] = useState<AuthUser | null>(() => storedAuthUser());
-  const [checkingSession, setCheckingSession] = useState(() => hasWebAuthToken());
+  const [session, setSession] = useState<AuthUser | null>(null);
+  const [checkingSession, setCheckingSession] = useState(true);
   const view = session?.is_system_admin && route.view === 'teams' ? 'admin' : route.view;
   const inAdminConsole = Boolean(session?.is_system_admin && (view === 'admin' || view === 'account'));
   useEffect(() => {
@@ -294,14 +294,10 @@ export default function App() {
       setCheckingSession(false);
     };
     window.addEventListener('acp:auth-expired', expire);
-    if (hasWebAuthToken()) {
-      void restoreWebSession()
+    void restoreWebSession()
         .then((user) => { if (active) setSession(user); })
         .catch(() => { if (active) setSession(null); })
         .finally(() => { if (active) setCheckingSession(false); });
-    } else {
-      setCheckingSession(false);
-    }
     return () => {
       active = false;
       window.removeEventListener('acp:auth-expired', expire);
@@ -311,10 +307,11 @@ export default function App() {
   async function logout() {
     try {
       await logoutWebSession();
-    } finally {
       queryClient.clear();
       setSession(null);
       navigateWorkspace('/teams', { replace: true });
+    } catch {
+      window.alert(t('退出失败，请检查网络并刷新后重试。'));
     }
   }
 
