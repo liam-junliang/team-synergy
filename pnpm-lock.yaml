@@ -76,6 +76,9 @@ importers:
         specifier: ^4.1.12
         version: 4.4.3
     devDependencies:
+      '@team-synergy/application':
+        specifier: workspace:*
+        version: link:../../packages/application
       '@team-synergy/core-api':
         specifier: workspace:*
         version: link:../core-api

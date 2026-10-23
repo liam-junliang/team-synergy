@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { registerAdminRecoveryCommands } from './admin-recovery.js';
 import { registerAuditCommands } from './audit-export.js';
 import { Command } from 'commander';
 import { createWorkspace, cleanupWorkspace, identifyWorkspace } from '@team-synergy/integrations';
@@ -2694,6 +2695,7 @@ repository
     }
   });
 
+registerAdminRecoveryCommands(program);
 registerAuditCommands(program, requireApiClient);
 registerHandoverCommands(program, task);
 registerArchitectureCommands(program, { requireApiClient, resolveProjectCode, printResult, failResult });
