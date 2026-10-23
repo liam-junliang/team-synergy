@@ -1,0 +1,22 @@
+{
+  "format_version": 1,
+  "decision_date": "2026-10-23",
+  "status": "confirmed_intent_not_applied",
+  "basis": "User explicitly confirmed both existing teams belong to one customer and authorized an agent-chosen name",
+  "customer_intents": [
+    {
+      "key": "customer_01",
+      "proposed_name": "协同示范客户",
+      "name_basis": "agent_chosen_with_user_authorization",
+      "team_codes": ["BEFM16W0V54590HW5SWD", "F4Y89QRY1JZFB13H4XDR"]
+    }
+  ],
+  "database_mutated": false,
+  "tenant_created": false,
+  "memberships_granted": false,
+  "skill_recipient_acceptance_inferred": false,
+  "ready_for_backfill": false,
+  "design_review_completed": true,
+  "design_review_is_not_migration_approval": true,
+  "remaining_gates": ["separate_database_roles", "trusted_customer_context", "confirm_member_and_owner_provenance", "validate_all_structural_and_json_scopes"]
+}

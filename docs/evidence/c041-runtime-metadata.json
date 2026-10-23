@@ -1,0 +1,51 @@
+{
+  "checked_at": "2026-10-23T09:59:40.856Z",
+  "source_commit": "2086de75f703c5715913170929fbb5da5a6a2be9",
+  "migration_head": "0051_core_time_contract",
+  "duration_ms": 234,
+  "status": "pending",
+  "read_complete": true,
+  "ownership_complete": false,
+  "ready_for_backfill": false,
+  "tables": 75,
+  "teams": 2,
+  "projects": 3,
+  "skills": 0,
+  "shares": 0,
+  "installations": 0,
+  "external_project_members": 0,
+  "external_project_owners": 0,
+  "manifests": 0,
+  "receipts": 0,
+  "audit": [
+    {
+      "family": "identity_or_platform_review",
+      "rows": 6,
+      "customer_mapping": "pending"
+    },
+    {
+      "family": "resource_or_delivery_review",
+      "rows": 853,
+      "customer_mapping": "pending"
+    }
+  ],
+  "issues": {
+    "unresolved_project_teams": 0,
+    "unresolved_skill_scopes": 0,
+    "orphaned_skill_revisions": 0,
+    "unresolved_share_scopes": 0,
+    "invalid_or_unpublished_share_versions": 0,
+    "unresolved_installation_scopes": 0,
+    "missing_installation_revisions": 0,
+    "unknown_audit_rows": 0,
+    "unknown_receipt_rows": 0
+  },
+  "fact_digest": "5e4177e09827e5efb76649b34d8ac13a9416e8d60dcb0d2832dd28577726bb37",
+  "confirmed_team_intents_present": 2,
+  "unmapped_additional_teams": 0,
+  "historical_json_inspected": false,
+  "database_mutated": false,
+  "tenant_created": false,
+  "memberships_granted": false,
+  "skill_acceptance_inferred": false
+}
