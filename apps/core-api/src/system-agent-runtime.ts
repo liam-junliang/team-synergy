@@ -1,9 +1,10 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { createRunDirectoryStore } from './system-agent-directories.js';
 
 /** Pinned against the official SDK wire protocol and sdk-minimal composition. */
 export const SYSTEM_AGENT_DSH_VERSION = '0.2.1-rc.2';
@@ -11,6 +12,7 @@ export const SYSTEM_AGENT_RUNTIME_ENV = [
   'TSP_SYSTEM_AGENT_ENABLED', 'TSP_SYSTEM_AGENT_DSH_BIN', 'TSP_SYSTEM_AGENT_WORKSPACE_ROOT',
   'TSP_SYSTEM_AGENT_API_KEY', 'TSP_SYSTEM_AGENT_API_KEY_FILE', 'TSP_SYSTEM_AGENT_DSH_CREDENTIALS_FILE',
   'TSP_SYSTEM_AGENT_MODEL', 'TSP_SYSTEM_AGENT_TIMEOUT_MS', 'TSP_SYSTEM_AGENT_MAX_TOKENS',
+  'TSP_SYSTEM_AGENT_RETAIN_FAILED_RUNS',
 ] as const;
 
 export interface SystemAgentDocumentSnapshot {
@@ -178,35 +180,62 @@ function configuration(env: NodeJS.ProcessEnv): RuntimeConfig {
 
 export interface SystemAgentRuntime {
   status(): SystemAgentRuntimeStatus;
+  cleanup(): Promise<void>;
   generate(input: SystemAgentGenerationInput, options?: { signal?: AbortSignal }): Promise<SystemAgentGeneratedProposal>;
 }
 
 export function createSystemAgentRuntime(env: NodeJS.ProcessEnv = process.env): SystemAgentRuntime {
+  const directories = () => {
+    const keep = boundedInteger(env.TSP_SYSTEM_AGENT_RETAIN_FAILED_RUNS, 0, 0, 20);
+    return env.TSP_SYSTEM_AGENT_WORKSPACE_ROOT ? createRunDirectoryStore(env.TSP_SYSTEM_AGENT_WORKSPACE_ROOT, keep) : undefined;
+  };
   return {
+    async cleanup() {
+      try { await directories()?.cleanup(); }
+      catch { fail('not_configured', '系统 Agent 工作目录清理失败，请检查专用目录配置和权限。'); }
+    },
     status() {
-      try { const config = configuration(env); return { configured: true, engine: 'dsh', version: SYSTEM_AGENT_DSH_VERSION, model: config.model, message: '可生成草稿；正式资料需确认后保存。' }; }
+      try { directories(); const config = configuration(env); return { configured: true, engine: 'dsh', version: SYSTEM_AGENT_DSH_VERSION, model: config.model, message: '可生成草稿；正式资料需确认后保存。' }; }
       catch (error) { return { configured: false, engine: 'dsh', version: SYSTEM_AGENT_DSH_VERSION, model: env.TSP_SYSTEM_AGENT_MODEL || 'deepseek-flash', message: error instanceof SystemAgentRuntimeError ? error.message : '系统 Agent 配置不可用。' }; }
     },
     async generate(input, options = {}) {
       const config = configuration(env);
       const prompt = promptFor(input);
       if (options.signal?.aborted) return fail('cancelled', '系统 Agent 任务已取消。');
-      await mkdir(config.root, { recursive: true });
-      const runDir = await mkdtemp(join(config.root, 'draft-'));
-      const home = join(runDir, 'home');
-      const workspace = join(runDir, 'workspace');
-      const temp = join(runDir, 'tmp');
-      await Promise.all([home, workspace, temp].map(path => mkdir(path, { recursive: true })));
-      const guardPath = join(runDir, 'no-tools.mjs');
-      const patchPath = join(runDir, 'document-draft.patch.yml');
-      await writeFile(guardPath, SYSTEM_AGENT_TOOL_GUARD_MODULE, 'utf8');
-      await writeFile(patchPath, systemAgentProfilePatch(guardPath), 'utf8');
-      // Credentials exist only in the child environment, never the prompt, job files or returned errors.
-      const child = spawn(process.execPath, [config.bin, '--profile', 'sdk-minimal', '--patch', patchPath], {
-        cwd: workspace, env: systemAgentChildEnvironment(env, home, temp, config.apiKey), windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'],
-      });
-      const response = await runSystemAgentProtocol(child, { prompt, cwd: workspace, model: config.model, maxTokens: config.maxTokens, timeoutMs: config.timeout, signal: options.signal });
-      return parseSystemAgentProposal(response, input);
+      const store = directories();
+      if (!store) return fail('not_configured', '系统 Agent 的工作目录未配置。');
+      await store.cleanup();
+      const runDir = await store.begin();
+      let child: ChildProcessWithoutNullStreams | undefined;
+      let failureCode: SystemAgentRuntimeErrorCode | undefined;
+      try {
+        const home = join(runDir, 'home');
+        const workspace = join(runDir, 'workspace');
+        const temp = join(runDir, 'tmp');
+        await Promise.all([home, workspace, temp].map(path => mkdir(path, { recursive: true })));
+        const guardPath = join(runDir, 'no-tools.mjs');
+        const patchPath = join(runDir, 'document-draft.patch.yml');
+        await writeFile(guardPath, SYSTEM_AGENT_TOOL_GUARD_MODULE, 'utf8');
+        await writeFile(patchPath, systemAgentProfilePatch(guardPath), 'utf8');
+        // Credentials exist only in the child environment, never the prompt, job files or returned errors.
+        child = spawn(process.execPath, [config.bin, '--profile', 'sdk-minimal', '--patch', patchPath], {
+          cwd: workspace, env: systemAgentChildEnvironment(env, home, temp, config.apiKey), windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'],
+        });
+        const setupAbort = new AbortController();
+        const signal = options.signal ? AbortSignal.any([options.signal, setupAbort.signal]) : setupAbort.signal;
+        const running = runSystemAgentProtocol(child, { prompt, cwd: workspace, model: config.model, maxTokens: config.maxTokens, timeoutMs: config.timeout, signal });
+        void running.catch(() => undefined);
+        try { await store.child(runDir, child.pid); }
+        catch (error) { setupAbort.abort(); await running.catch(() => undefined); throw error; }
+        return parseSystemAgentProposal(await running, input);
+      } catch (error) {
+        failureCode = error instanceof SystemAgentRuntimeError ? error.code : 'engine_error';
+        throw error;
+      } finally {
+        // Protocol teardown reaps the child first. If termination failed, keep its
+        // owner marker so startup cleanup never removes an active process's files.
+        if (!child || child.exitCode !== null || child.signalCode !== null) await store.finish(runDir, failureCode);
+      }
     },
   };
 }

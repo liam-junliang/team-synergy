@@ -113,6 +113,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   registerIntakeRoutes(app, db);
 
   const systemAgentRuntime = createSystemAgentRuntime();
+  if (ownsDb) app.addHook('onReady', async () => { await systemAgentRuntime.cleanup(); });
   let systemAgentGuidance: ReturnType<typeof loadSystemAgentGuidance> | null = null;
   try { systemAgentGuidance = loadSystemAgentGuidance(); } catch { /* Explicitly unavailable until the packaged Skill is restored. */ }
   const systemAgentStatus = () => {
