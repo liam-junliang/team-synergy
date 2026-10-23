@@ -330,6 +330,20 @@
       "when": 1792720800000,
       "tag": "0047_auth_security_events",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1792724400000,
+      "tag": "0048_core_foreign_keys_expand",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1792728000000,
+      "tag": "0049_core_foreign_keys_validate",
+      "breakpoints": true
     }
   ]
 }

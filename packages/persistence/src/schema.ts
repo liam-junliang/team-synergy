@@ -3,6 +3,7 @@ import {
   boolean,
   check,
   index,
+  foreignKey,
   integer,
   pgTable,
   primaryKey,
@@ -16,7 +17,7 @@ import { sql } from 'drizzle-orm';
 /**
  * Project Core 存储 Schema。
  * 设计依据：docs/02 领域模型、docs/09 图存储、docs/15 成员模型、docs/19 Defect。
- * 软引用策略：跨聚合关系不在库层声明 FK，由 application 用例保证业务完整性。
+ * 核心父子关系使用具名 RESTRICT 外键（ADR-0015）；其余跨聚合弱引用由 application 与巡检保证。
  */
 
 const PUBLIC_CODE_PATTERN_SQL = '^[0-9A-HJKMNP-TV-Z]{20}$';
@@ -709,6 +710,7 @@ export const members = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.principal_id, t.project_id] }),
+    foreignKey({ name: 'fk_members_project', columns: [t.project_id], foreignColumns: [projects.id] }).onDelete('restrict').onUpdate('no action'),
     index('idx_members_project').on(t.project_id),
   ],
 );
@@ -773,7 +775,7 @@ export const deviceSessions = pgTable('device_sessions', {
   token_hash: text('token_hash').notNull(),
   created_at: text('created_at').notNull(),
   expires_at: text('expires_at'), revoked_at: text('revoked_at'),
-}, (t) => [...codeConstraints('device_sessions', t), uniqueIndex('uq_device_sessions_token').on(t.token_hash), index('idx_device_sessions_device').on(t.device_id)]);
+}, (t) => [...codeConstraints('device_sessions', t), foreignKey({ name: 'fk_device_sessions_device', columns: [t.device_id], foreignColumns: [devices.id] }).onDelete('restrict').onUpdate('no action'), uniqueIndex('uq_device_sessions_token').on(t.token_hash), index('idx_device_sessions_device').on(t.device_id)]);
 
 export const deviceAuthorizationRequests = pgTable('device_authorization_requests', {
   id: identityId(),
@@ -808,6 +810,7 @@ export const features = pgTable(
   },
   (t) => [
     ...codeConstraints('features', t),
+    foreignKey({ name: 'fk_features_project', columns: [t.project_id], foreignColumns: [projects.id] }).onDelete('restrict').onUpdate('no action'),
     uniqueIndex('uq_features_legacy_code').on(t.legacy_code),
     index('idx_features_project').on(t.project_id),
     index('idx_features_project_sort').on(t.project_id, t.sort_order),
@@ -953,6 +956,7 @@ export const tasks = pgTable(
   },
   (t) => [
     ...codeConstraints('tasks', t),
+    foreignKey({ name: 'fk_tasks_feature', columns: [t.feature_id], foreignColumns: [features.id] }).onDelete('restrict').onUpdate('no action'),
     uniqueIndex('uq_tasks_legacy_code').on(t.legacy_code),
     index('idx_tasks_feature').on(t.feature_id),
     index('idx_tasks_created_id').on(t.created_at.desc(), t.id.desc()),
@@ -1014,6 +1018,7 @@ export const runs = pgTable(
   },
   (t) => [
     ...codeConstraints('runs', t),
+    foreignKey({ name: 'fk_runs_task', columns: [t.task_id], foreignColumns: [tasks.id] }).onDelete('restrict').onUpdate('no action'),
     uniqueIndex('uq_runs_legacy_code').on(t.legacy_code),
     index('idx_runs_task').on(t.task_id),
     index('idx_runs_status').on(t.status),
