@@ -1,5 +1,6 @@
+import { lockProjectByCode, lockTaskProject } from './aggregate-lock.js';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
-import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type { Db } from '@team-synergy/persistence';
 import { schema } from '@team-synergy/persistence';
 import { DomainError } from '@team-synergy/domain';
@@ -59,11 +60,12 @@ async function actorFor(tx: Tx, identity: HandoverIdentity, mutation: boolean) {
 }
 
 async function accessTask(tx: Tx, taskCode: string, actor: Actor, lock = false, mutation = false) {
+  await lockTaskProject(tx, taskCode);
   const query = tx.select().from(schema.tasks).where(eq(schema.tasks.code, taskCode));
   const [task] = lock ? await query.for('update').limit(1) : await query.limit(1);
   if (!task) throw new DomainError('task_not_found', '任务不存在');
   const [feature] = await tx.select().from(schema.features).where(eq(schema.features.id, task.feature_id)).limit(1);
-  const [project] = feature ? await tx.select().from(schema.projects).where(eq(schema.projects.id, feature.project_id)).for('share').limit(1) : [];
+  const [project] = feature ? await tx.select().from(schema.projects).where(eq(schema.projects.id, feature.project_id)).limit(1) : [];
   const member = project ? await effectiveProjectMember(tx, project.id, actor.principal.id) : undefined;
   if (!project || !member) throw new DomainError('handover_forbidden', '当前用户没有此项目的访问权限');
   await assertProjectAccess(tx, project.id, actor.principal.id, mutation ? 'write' : 'read');
@@ -79,7 +81,8 @@ function contractOf(task: Task) {
   };
 }
 
-// Shared locks on mutable heads serialize revision changes with activation.
+// The shared project fence serializes material changes with activation.
+// Plain MVCC reads avoid waiting on tuple locks held by fenced material writers.
 // Immutable bodies are copied; a later read never follows a head to newer text.
 async function compileContext(tx: Tx, access: Access) {
   const { task, project, feature } = access;
@@ -102,14 +105,14 @@ async function compileContext(tx: Tx, access: Access) {
     sources.push({ kind: 'requirement_baseline', code: requirementBaseline.baseline_code, title: requirementBaseline.name,
       revision: requirementBaseline.version, content: canonicalContextJson(requirementBaseline) });
     for (const item of requirementBaseline.requirements) {
-      const [head] = await tx.select().from(schema.requirements).where(eq(schema.requirements.code, item.requirement_code)).for('share').limit(1);
+      const [head] = await tx.select().from(schema.requirements).where(eq(schema.requirements.code, item.requirement_code)).limit(1);
       versions[`baseline_requirement:${item.requirement_code}`] = head ? digest({ revision: head.current_revision, state: head.state, title: head.title }) : 'missing';
       if (head?.current_revision !== item.revision) baselineConflicts.push({ source: `baseline_requirement:${item.requirement_code}`,
         pinned_revision: item.revision, current_revision: head?.current_revision ?? -1 });
     }
   }
   if (task.requirement_id) {
-    const [head] = await tx.select().from(schema.requirements).where(eq(schema.requirements.id, task.requirement_id)).for('share').limit(1);
+    const [head] = await tx.select().from(schema.requirements).where(eq(schema.requirements.id, task.requirement_id)).limit(1);
     if (!head) throw new DomainError('context_source_missing', '任务需求已不可用');
     const [revision] = await tx.select().from(schema.requirementRevisions).where(task.source_requirement_revision_id
       ? and(eq(schema.requirementRevisions.id, task.source_requirement_revision_id), eq(schema.requirementRevisions.requirement_id, head.id))
@@ -125,7 +128,7 @@ async function compileContext(tx: Tx, access: Access) {
   }
   const [requiredRevision] = task.source_document_revision_id ? await tx.select().from(schema.requirementDocumentRevisions).where(eq(schema.requirementDocumentRevisions.id, task.source_document_revision_id)).limit(1) : [];
   if (task.source_document_revision_id && !requiredRevision) throw new DomainError('context_source_missing', '任务固定需求文档版本不存在');
-  const documents = await tx.select().from(schema.requirementDocuments).where(eq(schema.requirementDocuments.project_id, project.id)).orderBy(asc(schema.requirementDocuments.id)).for('share');
+  const documents = await tx.select().from(schema.requirementDocuments).where(eq(schema.requirementDocuments.project_id, project.id)).orderBy(asc(schema.requirementDocuments.id));
   if (requiredRevision && !documents.some(document => document.id === requiredRevision.document_id && document.state === 'active')) throw new DomainError('context_source_missing', '任务必需需求文档已归档或不属于此项目');
   for (const document of documents) {
     versions[`requirement_document:${document.code}`] = `${document.current_revision}:${document.state}`;
@@ -140,8 +143,8 @@ async function compileContext(tx: Tx, access: Access) {
     sources.push({ kind: 'requirement_document', code: document.code, revision_code: body.code, revision: body.revision, title: document.title, content: body.content });
   }
   const handoffFolders = await tx.select().from(schema.projectDocumentFolders).where(eq(schema.projectDocumentFolders.project_id, project.id))
-    .orderBy(asc(schema.projectDocumentFolders.id)).for('share');
-  const handoffDocs = await tx.select().from(schema.projectDocuments).where(eq(schema.projectDocuments.project_id, project.id)).orderBy(asc(schema.projectDocuments.id)).for('share');
+    .orderBy(asc(schema.projectDocumentFolders.id));
+  const handoffDocs = await tx.select().from(schema.projectDocuments).where(eq(schema.projectDocuments.project_id, project.id)).orderBy(asc(schema.projectDocuments.id));
   const standards = collectProjectStandardsDocuments(project.id, handoffFolders, handoffDocs);
   const standardsIds = new Set(standards.map(document => document.id));
   // Only effective membership affects mandatory reading. Creating an empty
@@ -155,7 +158,7 @@ async function compileContext(tx: Tx, access: Access) {
         standardsIds.has(document.id) ? 'standards' : null].filter((role): role is string => role !== null),
     });
   }
-  const prototypes = await tx.select().from(schema.designPrototypes).where(eq(schema.designPrototypes.project_id, project.id)).orderBy(asc(schema.designPrototypes.id)).for('share');
+  const prototypes = await tx.select().from(schema.designPrototypes).where(eq(schema.designPrototypes.project_id, project.id)).orderBy(asc(schema.designPrototypes.id));
   for (const prototype of prototypes) {
     versions[`prototype:${prototype.code}`] = `${prototype.current_revision}:${prototype.status}`;
     if (prototype.status === 'archived') continue;
@@ -163,13 +166,13 @@ async function compileContext(tx: Tx, access: Access) {
     if (body) sources.push({ kind: 'prototype', code: prototype.code, revision_code: body.code, revision: body.revision, title: prototype.title,
       html_content: body.html_content, content: body.notes_markdown, ...designPrototypeContentMetadata(prototype.code, body) });
   }
-  const topics = await tx.select().from(schema.requirementTopics).where(eq(schema.requirementTopics.project_id, project.id)).orderBy(asc(schema.requirementTopics.id)).for('share');
+  const topics = await tx.select().from(schema.requirementTopics).where(eq(schema.requirementTopics.project_id, project.id)).orderBy(asc(schema.requirementTopics.id));
   for (const topic of topics) {
     const decisions = await tx.select().from(schema.requirementTopicEntries).where(and(eq(schema.requirementTopicEntries.topic_id, topic.id), eq(schema.requirementTopicEntries.entry_type, 'decision'))).orderBy(asc(schema.requirementTopicEntries.id));
     versions[`topic:${topic.code}`] = digest({ status: topic.status, decisions: decisions.map(row => ({ code: row.code, content: row.content, rationale: row.rationale, withdrawn_at: row.withdrawn_at })) });
     for (const decision of decisions) if (!decision.withdrawn_at) sources.push({ kind: 'decision', code: decision.code, topic_code: topic.code, content: decision.content, rationale: decision.rationale, supersedes_code: decisions.find(row => row.id === decision.supersedes_entry_id)?.code ?? null });
   }
-  const repositories = await tx.select().from(schema.projectRepositories).where(eq(schema.projectRepositories.project_id, project.id)).orderBy(asc(schema.projectRepositories.id)).for('share');
+  const repositories = await tx.select().from(schema.projectRepositories).where(eq(schema.projectRepositories.project_id, project.id)).orderBy(asc(schema.projectRepositories.id));
   for (const repository of repositories) versions[`repository:${repository.code}`] = digest({ remote: repository.remote_url, status: repository.status });
   const manifest = ContextManifestSchema.parse({ schema_version: 1, task_contract: { ...contractOf(task), feature_code: feature.code,
     ...(requirementBaseline ? { requirement_baseline_code: requirementBaseline.baseline_code } : {}) },
@@ -262,7 +265,6 @@ export function createHandoverUseCases(db: Db) {
   async function withHandover<T>(command: Command, mutation: boolean, action: (tx: Tx, actor: Actor, access: Access, handover: Handover) => Promise<T>, allowExpiredMutation = false, receiptOperation?: string) {
     try {
       const result = await db.transaction(async tx => {
-        await tx.execute(sql`select pg_advisory_xact_lock_shared(1094930512)`);
         const actor = await actorFor(tx, command.identity, mutation);
         const snapshotCode = command.snapshot_code ?? command.context_snapshot_code;
         const [lookup] = !command.handover_code && snapshotCode ? await tx.select().from(schema.contextSnapshots).where(eq(schema.contextSnapshots.code, snapshotCode)).limit(1) : [];
@@ -299,7 +301,6 @@ export function createHandoverUseCases(db: Db) {
     async prepare(command: Command & { task_code: string; source_run_code: string; target_user_code: string; base_snapshot: number }) {
       try {
         const data = await db.transaction(async tx => {
-          await tx.execute(sql`select pg_advisory_xact_lock_shared(1094930512)`);
           const actor = await actorFor(tx, command.identity, true);
           const access = await accessTask(tx, command.task_code, actor, true, true);
           const requestBody = { task_code: command.task_code, source_run_code: command.source_run_code, target_user_code: command.target_user_code, base_snapshot: command.base_snapshot };
@@ -346,7 +347,7 @@ export function createHandoverUseCases(db: Db) {
       source(handover, actor, required(run, 'run_not_found', '源 Run 不存在')); grant(handover, command.preparation_grant);
       const summary = HandoverSummarySchema.parse(command.summary);
       const workspace = WorkspaceManifestSchema.parse(command.workspace_manifest);
-      const [repository] = await tx.select().from(schema.projectRepositories).where(and(eq(schema.projectRepositories.code, workspace.repository_code), eq(schema.projectRepositories.project_id, access.project.id))).for('share').limit(1);
+      const [repository] = await tx.select().from(schema.projectRepositories).where(and(eq(schema.projectRepositories.code, workspace.repository_code), eq(schema.projectRepositories.project_id, access.project.id))).limit(1);
       if (!repository || repository.status !== 'active' || repository.remote_url.replace(/\.git$/, '').replace(/\/$/, '') !== workspace.remote_url.replace(/\.git$/, '').replace(/\/$/, '')) throw new DomainError('handover_repository_mismatch', '快照必须属于项目登记的有效代码仓库');
       const context = await storeSnapshot(tx, access, actor, handover.source_run_id, summary, workspace, await snapshot(tx, handover));
       const changed = await update(tx, handover, { context_snapshot_id: context.id, workspace_manifest: canonicalContextJson(workspace), drift_approval: null });
@@ -471,7 +472,6 @@ export function createHandoverUseCases(db: Db) {
     get: (command: Command) => withHandover(command, false, (tx, actor, access, handover) => view(tx, access, actor, handover)),
     async list(command: Command & { task_code: string }) {
       try { const data = await db.transaction(async tx => {
-        await tx.execute(sql`select pg_advisory_xact_lock_shared(1094930512)`);
         const actor = await actorFor(tx, command.identity, false); const access = await accessTask(tx, command.task_code, actor);
         const rows = await tx.select().from(schema.taskHandovers).where(eq(schema.taskHandovers.task_id, access.task.id)).orderBy(asc(schema.taskHandovers.id));
         const result = [];
@@ -484,9 +484,9 @@ export function createHandoverUseCases(db: Db) {
     },
     async listProject(command: { project_code: string; identity: HandoverIdentity }) {
       try { const data = await db.transaction(async tx => {
-        await tx.execute(sql`select pg_advisory_xact_lock_shared(1094930512)`);
+        await lockProjectByCode(tx, command.project_code, true);
         const actor = await actorFor(tx, command.identity, false);
-        const [project] = await tx.select().from(schema.projects).where(eq(schema.projects.code, command.project_code)).for('share').limit(1);
+        const [project] = await tx.select().from(schema.projects).where(eq(schema.projects.code, command.project_code)).limit(1);
         const member = project ? await effectiveProjectMember(tx, project.id, actor.principal.id) : undefined;
         if (!project || !member) throw new DomainError('handover_forbidden', '当前用户没有此项目的访问权限');
         const rows = await tx.select({ handover: schema.taskHandovers, task: schema.tasks, feature: schema.features, run: schema.runs })
@@ -514,7 +514,6 @@ export function createHandoverUseCases(db: Db) {
     },
     async getContext(command: Command) {
       try { const data = await db.transaction(async tx => {
-        await tx.execute(sql`select pg_advisory_xact_lock_shared(1094930512)`);
         const actor = await actorFor(tx, command.identity, false);
         const [context] = await tx.select().from(schema.contextSnapshots).where(eq(schema.contextSnapshots.code, command.snapshot_code ?? command.context_snapshot_code ?? '')).limit(1);
         const row = required(context, 'context_not_found', '上下文快照不存在');

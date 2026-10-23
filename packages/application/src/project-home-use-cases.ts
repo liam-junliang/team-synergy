@@ -1,5 +1,6 @@
+import { lockProjectByCode } from './aggregate-lock.js';
 import { assertProjectAccess, effectiveProjectMember, isProjectManager } from './project-access.js';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { schema, type Db } from '@team-synergy/persistence';
 import { DomainError, assertAuditedChange, toAuditEvent } from '@team-synergy/domain';
 import { createPublicCode } from './public-code.js';
@@ -88,7 +89,7 @@ export function createProjectHomeUseCases(db: Db) {
       const bindings = bindingsOf(cmd.bindings);
       const result = await db.transaction(async tx => {
         // Match material writers' lock ordering before taking project/document row locks.
-        await tx.execute(sql`select pg_advisory_xact_lock(1094930512::bigint)`);
+        await lockProjectByCode(tx, cmd.projectCode);
         const [principal] = await tx.select().from(schema.users).where(eq(schema.users.code, cmd.principalCode)).for('share').limit(1);
         const [project] = await tx.select().from(schema.projects).where(eq(schema.projects.code, cmd.projectCode)).for('update').limit(1);
         if (!project || !principal || principal.status !== 'active') throw new DomainError('project_forbidden', '项目不存在或当前用户无权访问');
@@ -104,12 +105,12 @@ export function createProjectHomeUseCases(db: Db) {
           if (code === null) { changes[field] = null; continue; }
           const [document] = await tx.select().from(schema.projectDocuments).where(and(
             eq(schema.projectDocuments.code, code), eq(schema.projectDocuments.project_id, project.id),
-          )).for('share').limit(1);
+          )).limit(1);
           if (!document) throw new DomainError('project_home_document_invalid', '首页只能关联当前项目的文档');
           if (document.status !== 'active') throw new DomainError('project_home_document_archived', '已归档文档不能关联项目首页');
           const [folder] = document.folder_id ? await tx.select().from(schema.projectDocumentFolders).where(
             eq(schema.projectDocumentFolders.id, document.folder_id),
-          ).for('share').limit(1) : [];
+          ).limit(1) : [];
           if (!folder || folder.system_role !== 'overview') {
             throw new DomainError('project_home_document_folder_invalid', '项目说明和参与指引必须来自“项目说明”目录');
           }

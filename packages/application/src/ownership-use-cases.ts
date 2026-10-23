@@ -1,3 +1,4 @@
+import { lockAggregate } from './aggregate-lock.js';
 import { and, asc, desc, eq, inArray, isNull, max, or, sql } from 'drizzle-orm';
 import { schema, type Db } from '@team-synergy/persistence';
 import { DomainError, assertAuditedChange, toAuditEvent } from '@team-synergy/domain';
@@ -114,6 +115,7 @@ export function createOwnershipUseCases(db: Db) {
       const reason = cmd.reason?.trim() || null;
       if (cmd.recovery && !reason) throw new DomainError('ownership_recovery_reason_required', '恢复所有权必须填写原因');
       const data = await db.transaction(async tx => {
+        if (initial.scope === 'project') await lockAggregate(tx, 'project', initial.id);
         const users = await lockUsers(tx, [actor.id, target.id, initial.ownerId!]);
         const currentActor = users.get(actor.id);
         assertActive(currentActor);
@@ -147,6 +149,7 @@ export function createOwnershipUseCases(db: Db) {
       const initialScope = await scopeById(db, initial.scope, initial.scope_id);
       if (!initialScope) throw new DomainError('ownership_scope_not_found', '团队或项目不存在');
       const data = await db.transaction(async tx => {
+        if (initialScope.scope === 'project') await lockAggregate(tx, 'project', initialScope.id);
         const users = await lockUsers(tx, [actor.id, initial.from_principal_id, initial.to_principal_id, initial.initiated_by]);
         const currentActor = users.get(actor.id);
         assertActive(currentActor);
@@ -186,6 +189,7 @@ export function createOwnershipUseCases(db: Db) {
       assertActive(actor);
       if (!target) throw new DomainError('user_not_found', '历史负责人不存在');
       const data = await db.transaction(async tx => {
+        if (initial.scope === 'project') await lockAggregate(tx, 'project', initial.id);
         const users = await lockUsers(tx, [actor.id, target.id]);
         const currentActor = users.get(actor.id);
         assertActive(currentActor);
@@ -249,7 +253,7 @@ export function createOwnershipUseCases(db: Db) {
       const data = await db.transaction(async tx => {
         // Serialize final account closures before user locks, including the
         // last-admin check; two administrators must not close concurrently.
-        if (operation === 'complete') await tx.execute(sql`select pg_advisory_xact_lock(hashtext('account-closure-platform-admins'))`);
+        if (operation === 'complete') await tx.execute(sql`lock table users in share row exclusive mode`);
         const users = await lockUsers(tx, [actor.id]);
         const current = users.get(actor.id);
         assertActive(current);

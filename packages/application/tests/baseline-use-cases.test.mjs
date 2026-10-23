@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { eq, sql } from 'drizzle-orm';
 import { schema } from '@team-synergy/persistence';
 import { createRequirementBaselineUseCases } from '../dist/index.js';
-import { insertFeature, insertRequirement, insertTask, seedWorkspaceProject, useTestDb } from './test-db.mjs';
+import { addProjectMember, insertFeature, insertProject, insertRequirement, insertTask, seedWorkspaceProject, useTestDb } from './test-db.mjs';
 
 const fixture = useTestDb(import.meta.url);
 
@@ -192,4 +192,25 @@ test('演进图绑定保留未绑定任务和交接，交接采用冻结基线�
   assert.equal((await c.uc.bindings(memberArgs)).error.code, 'baseline_access_denied');
   await c.db.delete(schema.members).where(eq(schema.members.principal_id, c.users.owner.id));
   assert.equal((await c.uc.bindings(c.args)).error.code, 'baseline_access_denied');
+});
+
+test('concurrent baseline creation serializes one project and preserves parent conflict', async () => {
+  const c = await seeded();
+  const results = await Promise.all([c.uc.create(c.args), c.uc.create(c.args)]);
+  assert.equal(results.filter(result => result.ok).length, 1);
+  assert.equal(results.find(result => !result.ok).error.code, 'baseline_parent_conflict');
+  assert.equal((await c.db.select().from(schema.requirementBaselines)).length, 1);
+});
+
+
+test('concurrent baseline creation in different projects succeeds independently', async () => {
+  const c = await seeded();
+  const other = await insertProject(c.db, { teamId: c.team.id, name: 'Independent baseline' });
+  await addProjectMember(c.db, { projectId: other.id, principalId: c.users.owner.id, role: 'owner', displayName: 'Owner' });
+  const feature = await insertFeature(c.db, { projectId: other.id, title: 'Independent feature' });
+  const item = await c.add('Independent requirement', 'confirmed', feature.id);
+  const otherArgs = { ...c.args, projectCode: other.code, requirements: [{ requirement_code: item.requirement.code, revision: 1 }] };
+  const results = await Promise.all([c.uc.create(c.args), c.uc.create(otherArgs)]);
+  for (const result of results) assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal((await c.db.select().from(schema.requirementBaselines)).length, 2);
 });

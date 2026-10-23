@@ -354,7 +354,7 @@ test('material fence contention releases governance rows before retrying against
   let intercept = true, running;
   try {
     await blocker.query('BEGIN');
-    await blocker.query('SELECT pg_advisory_xact_lock(1094930512::bigint)');
+    await blocker.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [`project:${ctx.project.id}`]);
     ctx.db.transaction = (fn, ...args) => originalTransaction(tx => {
       const execute = tx.execute.bind(tx);
       tx.execute = async statement => {
@@ -399,7 +399,7 @@ test('a busy material fence returns a bounded retry response and preserves the r
   const ctx = await seeded(), frozen = await reviewed(ctx, await draft(ctx));
   const blocker = await ctx.db.$client.connect();
   try {
-    await blocker.query('BEGIN'); await blocker.query('SELECT pg_advisory_xact_lock(1094930512::bigint)');
+    await blocker.query('BEGIN'); await blocker.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [`project:${ctx.project.id}`]);
     bad(await publish(ctx, frozen), 'intake_conflict');
     const current = ok(await ctx.uc.detail({ ...ctx.command, code: frozen.code }));
     assert.equal(current.status, 'applying'); assert.equal(current.stop_requested, false);

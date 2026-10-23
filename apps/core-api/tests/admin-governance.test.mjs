@@ -174,11 +174,13 @@ test('stale administrator edits cannot restore an archived project or overwrite 
   assert.equal((await f.db.select().from(schema.auditEvents).where(eq(schema.auditEvents.action, 'admin.project.updated'))).length, 1);
 });
 
-async function waitForProjectLock(db, blockerPid, settled) {
+async function waitForProjectLock(db, blockerPid, settled, stage = 'row') {
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
     const { rows } = await db.$client.query(`select pid from pg_stat_activity
-      where $1::integer = any(pg_blocking_pids(pid)) and query like '%"projects"%' and query ilike '%for update%'`, [blockerPid]);
+      where $1::integer = any(pg_blocking_pids(pid))
+        and (($2 = 'row' and query like '%"projects"%' and query ilike '%for update%')
+          or ($2 = 'fence' and query ilike '%pg_advisory_xact_lock%'))`, [blockerPid, stage]);
     if (rows.length) return rows[0].pid;
     assert.equal(settled(), false, 'Project write must reach the lock barrier before completing');
     await new Promise(resolve => setTimeout(resolve, 10));
@@ -217,9 +219,9 @@ for (const operation of ['rename', 'archive', 'repository-create', 'repository-u
           : operation === 'repository-create' ? projects.createProjectRepository({ ...command, name: 'New repo', remoteUrl: 'https://example.com/new.git' })
             : projects.updateProjectRepository({ principalCode: command.principalCode, repositoryCode: repository.code, name: 'Changed repo' }))
         .then(result => { businessSettled = true; return result; });
-      // The business operation has read snapshot 0 and is queued behind the
-      // administrator. After waiting, it must increment the newly locked row.
-      await waitForProjectLock(f.db, adminPid, () => businessSettled);
+      // The business operation has read snapshot 0 and waits on the project fence
+      // before any row locks. It must then increment the newly locked row.
+      await waitForProjectLock(f.db, adminPid, () => businessSettled, 'fence');
       await blocker.query('commit');
       blocking = false;
       const adminResult = await administratorWrite;

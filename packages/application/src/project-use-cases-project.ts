@@ -1,4 +1,5 @@
-import { and, asc, eq, inArray, max, or, sql } from 'drizzle-orm';
+import { lockAggregate } from './aggregate-lock.js';
+import { and, asc, eq, inArray, max, or } from 'drizzle-orm';
 import type { Db } from '@team-synergy/persistence';
 import { schema } from '@team-synergy/persistence';
 import { DomainError, assertAuditedChange, toAuditEvent } from '@team-synergy/domain';
@@ -199,6 +200,7 @@ export function createProjectUseCasesProject(db: Db) {
       const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, project.team_id)).limit(1);
       const changedAt = now();
       const result = await db.transaction(async (tx) => {
+        await lockAggregate(tx, 'project', project.id);
         await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, principal.id)).for('share');
         await tx.select({ id: schema.teams.id }).from(schema.teams).where(eq(schema.teams.id, project.team_id)).for('share');
         const [current] = await tx.select().from(schema.projects).where(eq(schema.projects.id, project.id)).for('update');
@@ -264,6 +266,7 @@ export function createProjectUseCasesProject(db: Db) {
       }
       const changedAt = now();
       const result = await db.transaction(async (tx) => {
+        await lockAggregate(tx, 'project', project.id);
         await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, principal.id)).for('share');
         await tx.select({ id: schema.teams.id }).from(schema.teams).where(eq(schema.teams.id, project.team_id)).for('share');
         const [current] = await tx.select().from(schema.projects).where(eq(schema.projects.id, project.id)).for('update');
@@ -375,7 +378,7 @@ export function createProjectUseCasesProject(db: Db) {
 
       const updatedAt = now();
       const result = await db.transaction(async (tx) => {
-        await tx.execute(sql`select pg_advisory_xact_lock(1094930512::bigint)`);
+        await lockAggregate(tx, 'project', project.id);
         const [currentProject] = await tx.select().from(schema.projects).where(eq(schema.projects.id, project.id)).for('update').limit(1);
         await assertProjectAccess(tx, project.id, principal.id, 'manage');
         if (!currentProject) throw new DomainError('project_document_forbidden', '项目不存在');
@@ -596,6 +599,7 @@ export function createProjectUseCasesProject(db: Db) {
       }
       const changedAt = now();
       const result = await db.transaction(async (tx) => {
+        await lockAggregate(tx, 'project', project.id);
         await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, principal.id)).for('share');
         await tx.select({ id: schema.teams.id }).from(schema.teams).where(eq(schema.teams.id, project.team_id)).for('share');
         const [current] = await tx.select().from(schema.projects).where(eq(schema.projects.id, project.id)).for('update');
@@ -685,6 +689,7 @@ export function createProjectUseCasesProject(db: Db) {
       }
       const changedAt = now();
       await db.transaction(async (tx) => {
+        await lockAggregate(tx, 'project', project.id);
         await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, principal.id)).for('share');
         await tx.select({ id: schema.teams.id }).from(schema.teams).where(eq(schema.teams.id, project.team_id)).for('share');
         const [current] = await tx.select().from(schema.projects).where(eq(schema.projects.id, project.id)).for('update');

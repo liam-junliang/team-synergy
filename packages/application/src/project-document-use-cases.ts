@@ -1,3 +1,4 @@
+import { lockAggregate } from './aggregate-lock.js';
 import { assertProjectAccess, effectiveProjectMember, isProjectManager, type AccessDb } from './project-access.js';
 import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
 import type { Db } from '@team-synergy/persistence';
@@ -555,6 +556,7 @@ export function createProjectDocumentUseCases(db: Db) {
       }
       const updatedAt = now();
       await db.transaction(async (tx) => {
+        await lockAggregate(tx, 'project', document.project_id);
         const [locked] = await tx.select().from(schema.projectDocuments).where(eq(schema.projectDocuments.id, document.id)).for('update');
         if (!locked) throw new DomainError('project_document_not_found', '文档不存在');
         if (cmd.baseRevision !== undefined && locked.revision !== cmd.baseRevision) {

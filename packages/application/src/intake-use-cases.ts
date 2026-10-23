@@ -350,7 +350,7 @@ export function createIntakeUseCases(db: Db) {
       await materialTransaction(async tx => {
         const access = await accessProject(tx, cmd, 'manage', true), batch = await batchOf(tx, access, cmd.code, true);
         if (!batch.stop_requested && batch.status === 'applying') {
-          if (!await tryLockProjectSystemFolders(tx)) throw new IntakeMaterialBusy();
+          if (!await tryLockProjectSystemFolders(tx, access.project.id)) throw new IntakeMaterialBusy();
           await ensureProjectSystemFolders(tx, access.project.id);
         }
       });
@@ -379,7 +379,7 @@ export function createIntakeUseCases(db: Db) {
       const [attempt] = await tx.select().from(schema.intakeAttempts).where(eq(schema.intakeAttempts.id, attemptId)).for('update');
       if (!attempt || attempt.status !== 'running' || batch.stop_requested || batch.status !== 'applying') return false;
       if (attempt.plan_hash !== batch.plan_hash) throw conflict('发布计划已变化');
-      if (!await tryLockProjectSystemFolders(tx)) throw new IntakeMaterialBusy();
+      if (!await tryLockProjectSystemFolders(tx, access.project.id)) throw new IntakeMaterialBusy();
       const rows = await itemsOf(tx, batch);
       // Historical running attempts retain their original resumability; all newly frozen plans carry this basis.
       if (batch.profile || batch.frozen_quality_json) {

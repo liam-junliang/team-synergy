@@ -435,3 +435,19 @@ test('架构系统目录按成员身份幂等补齐，同名普通目录及内�
   assert.deepEqual(after.data.revisions, before.data.revisions);
   assert.equal(after.data.content, before.data.content);
 });
+
+test('same-project document revisions retain optimistic conflicts under the scoped fence', async () => {
+  const ctx = await seededDb();
+  const uc = createProjectDocumentUseCases(ctx.db);
+  const created = await uc.createDocument({ projectCode: ctx.project.code, principalCode: ctx.users.owner.code,
+    kind: 'general', title: 'Concurrent document', content: 'Initial content' });
+  assert.equal(created.ok, true, JSON.stringify(created));
+  const results = await Promise.all(['First', 'Second'].map(title => uc.reviseDocument({
+    documentCode: created.data.document_code, principalCode: ctx.users.owner.code,
+    baseRevision: 1, title, content: title, changeSummary: 'Concurrent edit',
+  })));
+  assert.equal(results.filter(result => result.ok).length, 1);
+  assert.equal(results.find(result => !result.ok).error.code, 'project_document_revision_conflict');
+  const document = await uc.getDocument(created.data.document_code, ctx.users.owner.code);
+  assert.equal(document.data.current_revision, 2);
+});

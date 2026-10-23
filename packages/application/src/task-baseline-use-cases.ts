@@ -1,4 +1,5 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { lockTaskProject } from './aggregate-lock.js';
+import { and, eq } from 'drizzle-orm';
 import { schema, type Db } from '@team-synergy/persistence';
 import { DomainError } from '@team-synergy/domain';
 import { loadRequirementBaseline } from './baseline-use-cases.js';
@@ -13,12 +14,12 @@ export function createTaskBaselineUseCases(db: Db) {
     async bind(command: { taskCode: string; baselineCode: string; principalCode: string; baseSnapshot: number }) {
       try {
         const data = await db.transaction(async tx => {
-          await tx.execute(sql`select pg_advisory_xact_lock_shared(1094930512)`);
+          await lockTaskProject(tx, command.taskCode);
           const [task] = await tx.select().from(schema.tasks).where(eq(schema.tasks.code, command.taskCode)).for('update').limit(1);
           if (!task) throw new DomainError('task_not_found', '任务不存在');
           const [feature] = await tx.select().from(schema.features).where(eq(schema.features.id, task.feature_id)).limit(1);
           const [principal] = await tx.select().from(schema.users).where(eq(schema.users.code, command.principalCode)).for('share').limit(1);
-          const [project] = feature ? await tx.select().from(schema.projects).where(eq(schema.projects.id, feature.project_id)).for('share').limit(1) : [];
+          const [project] = feature ? await tx.select().from(schema.projects).where(eq(schema.projects.id, feature.project_id)).limit(1) : [];
           const member = project && principal ? await effectiveProjectMember(tx, project.id, principal.id) : undefined;
           if (!project || project.status !== 'active' || principal?.status !== 'active' || !isProjectManager(member?.role)) {
             throw new DomainError('baseline_forbidden', '只有项目 Owner 可以绑定需求基线');
@@ -34,7 +35,7 @@ export function createTaskBaselineUseCases(db: Db) {
           if (!loaded) throw new DomainError('baseline_not_found', '需求基线不存在或不属于此项目');
           let revisionId = task.source_requirement_revision_id;
           if (task.requirement_id !== null) {
-            const [requirement] = await tx.select().from(schema.requirements).where(eq(schema.requirements.id, task.requirement_id)).for('share').limit(1);
+            const [requirement] = await tx.select().from(schema.requirements).where(eq(schema.requirements.id, task.requirement_id)).limit(1);
             const item = loaded.baseline.requirements.find(item => item.requirement_code === requirement?.code);
             if (!item) throw new DomainError('baseline_requirement_missing', '基线未包含此任务关联的需求');
             const [revision] = await tx.select().from(schema.requirementRevisions).where(and(

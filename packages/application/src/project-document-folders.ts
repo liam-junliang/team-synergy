@@ -1,3 +1,4 @@
+import { lockAggregate, lockScope } from './aggregate-lock.js';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { schema, type Db } from '@team-synergy/persistence';
 import { DomainError } from '@team-synergy/domain';
@@ -24,14 +25,14 @@ const SYSTEM_FOLDER_ORDER: Record<ProjectSystemFolderRole, number> = {
 
 type FolderWriter = Pick<Db, 'select' | 'insert' | 'update' | 'execute'>;
 
-/** Existing folder initialization uses the shared material fence also installed by migration 0025 triggers. */
-export async function lockProjectSystemFolders(tx: FolderWriter) {
-  await tx.execute(sql`select pg_advisory_xact_lock(1094930512::bigint)`);
+/** Folder initialization shares the project material fence installed by migration 0046. */
+export async function lockProjectSystemFolders(tx: FolderWriter, projectId: bigint) {
+  await lockAggregate(tx, 'project', projectId);
 }
 
 /** Governance callers must use this before any fenced writes, rolling back the whole transaction when busy. */
-export async function tryLockProjectSystemFolders(tx: FolderWriter): Promise<boolean> {
-  const result = await tx.execute(sql`select pg_try_advisory_xact_lock(1094930512::bigint) as acquired`);
+export async function tryLockProjectSystemFolders(tx: FolderWriter, projectId: bigint): Promise<boolean> {
+  const result = await tx.execute(sql`select pg_try_advisory_xact_lock(${lockScope('project', projectId)}) as acquired`);
   return result.rows[0]?.acquired === true;
 }
 
@@ -41,7 +42,7 @@ export async function ensureProjectSystemFolder(
   projectId: bigint,
   role: ProjectSystemFolderRole,
 ): Promise<typeof schema.projectDocumentFolders.$inferSelect> {
-  await lockProjectSystemFolders(tx);
+  await lockProjectSystemFolders(tx, projectId);
   const [existing] = await tx.select().from(schema.projectDocumentFolders).where(and(
     eq(schema.projectDocumentFolders.project_id, projectId), eq(schema.projectDocumentFolders.system_role, role),
   )).limit(1);
