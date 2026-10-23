@@ -1,4 +1,5 @@
 import { registerMetrics } from './metrics.js';
+import { registerSecurityHeaders } from './security-headers.js';
 import { registerAuditRoutes } from './routes/audit.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -111,6 +112,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
     },
   });
 
+  await registerSecurityHeaders(app);
   registerMetrics(app, db);
   registerAuthMiddleware(app, db);
   registerAuthRoutes(app, db);
