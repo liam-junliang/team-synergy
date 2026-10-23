@@ -1,3 +1,4 @@
+import { registerMetrics } from './metrics.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -102,6 +103,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
     },
   });
 
+  registerMetrics(app, db);
   registerAuthMiddleware(app, db);
   registerAuthRoutes(app, db);
   registerOwnershipRoutes(app, db);

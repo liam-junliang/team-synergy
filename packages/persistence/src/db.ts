@@ -1,3 +1,5 @@
+import { instrumentDatabasePool } from './db-observability.js';
+export { observeSlowQueries, withDatabaseRequestContext, type DatabaseRequestContext, type SlowQueryEvent } from './db-observability.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Pool } from 'pg';
@@ -18,6 +20,8 @@ export interface OpenDbOptions {
   migrationsFolder?: string;
   /** 是否自动执行迁移 */
   migrate?: boolean;
+  /** Server-side statement deadline; defaults to TSP_DB_STATEMENT_TIMEOUT_MS or 30 seconds. Zero disables it. */
+  statementTimeoutMs?: number;
 }
 
 export function resolveMigrationsFolder(bundledFolder?: string): string {
@@ -32,10 +36,16 @@ export function resolveMigrationsFolder(bundledFolder?: string): string {
  * - 默认自动执行 drizzle 迁移（幂等，由 __drizzle_migrations 跟踪）
  */
 export async function openDb(options: OpenDbOptions = {}): Promise<Db> {
+  const statementTimeoutMs = options.statementTimeoutMs ?? Number(process.env.TSP_DB_STATEMENT_TIMEOUT_MS ?? 30_000);
+  if (!Number.isSafeInteger(statementTimeoutMs) || statementTimeoutMs < 0 || statementTimeoutMs > 2_147_483_647) {
+    throw new Error('TSP_DB_STATEMENT_TIMEOUT_MS must be an integer from 0 to 2147483647');
+  }
   const pool = new Pool({
     connectionString: options.databaseUrl ?? process.env.TSP_DATABASE_URL ?? DEFAULT_DATABASE_URL,
     connectionTimeoutMillis: 3_000,
+    statement_timeout: statementTimeoutMs,
   });
+  instrumentDatabasePool(pool);
   // pg emits idle-client disconnects outside query promises. Keep liveness alive;
   // the next query obtains a new connection and readiness reports dependency failure.
   pool.on('error', () => {

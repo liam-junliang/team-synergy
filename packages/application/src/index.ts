@@ -41,3 +41,5 @@ export { createSystemAgentUseCases, normalizeSystemAgentProposal } from './syste
 export { createAuthRateLimiter } from './auth-rate-limit.js';
 
 export { listPrincipalDevices } from './device-reads.js';
+export * from './operational-metrics.js';
+
