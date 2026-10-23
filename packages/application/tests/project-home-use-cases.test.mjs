@@ -235,7 +235,7 @@ test('project home migration backfill requires an unambiguous same-project audit
   const addDoc = async (project, title, status = 'active') => (await ctx.db.insert(schema.projectDocuments).values({ project_id: project.id, title, content: title,
     status, created_by: ctx.users.owner.id, updated_by: ctx.users.owner.id, created_at: 't0', updated_at: 't0' }).returning())[0];
   const audit = (project, payload) => ctx.db.insert(schema.auditEvents).values({ entity_type: 'project', entity_id: project.id, principal_id: ctx.users.owner.id,
-    action: 'project.document_created', base_snapshot: 0, payload, timestamp: 't0' });
+    action: 'project.document_created', base_snapshot: 0, payload, timestamp: '2026-01-01T00:00:00.000Z' });
   await audit(ctx.project, JSON.stringify({ document_code: overview.document_code }));
   await addDoc(projects[1], 'Only one generic doc still must not be guessed');
   const first = await addDoc(projects[2], 'Candidate A');

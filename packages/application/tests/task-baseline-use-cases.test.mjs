@@ -50,7 +50,7 @@ test('task baseline: binds exact revision, increments concurrency version and re
 test('task baseline: project members cannot bind and foreign project baselines are rejected', async () => {
   const ctx = await seeded();
   assert.equal((await ctx.uc.bind({ ...ctx.command, principalCode: ctx.users.member.code })).error.code, 'baseline_forbidden');
-  const [other] = await ctx.db.insert(schema.projects).values({ team_id: ctx.team.id, name: 'Other project', created_at: 't0' }).returning();
+  const [other] = await ctx.db.insert(schema.projects).values({ team_id: ctx.team.id, name: 'Other project', created_at: '2026-01-01T00:00:00.000Z' }).returning();
   const otherFeature = await insertFeature(ctx.db, { projectId: other.id, title: 'Other feature' });
   const otherTask = await insertTask(ctx.db, { featureId: otherFeature.id, title: 'Other task', source: 'ad-hoc', profile: 'builder', acceptance: [{ id: 'AC-1', text: 'Other' }] });
   await ctx.db.insert(schema.members).values({ project_id: other.id, principal_id: ctx.users.owner.id, role: 'owner', display_name: 'Owner', created_at: 't0' });

@@ -151,7 +151,7 @@ test('archive blocks delivery without deleting published history; role downgrade
 test('Run snapshots freeze versions, handover copies exact source, revocation rechecks current grants and legacy stays empty', async () => {
   const c = await setup(); const skill = await c.published(); const granted = await c.grant(skill); data(await c.install(skill));
   const feature = await insertFeature(c.db, { projectId: c.targetProject.id, title: 'Task' });
-  const [task] = await c.db.insert(schema.tasks).values({ feature_id: feature.id, title: 'Task', profile: 'builder', source: 'ad-hoc', status: 'draft', acceptance: '[]', base_snapshot: 0, created_at: 't0' }).returning();
+  const [task] = await c.db.insert(schema.tasks).values({ feature_id: feature.id, title: 'Task', profile: 'builder', source: 'ad-hoc', status: 'draft', acceptance: '[]', base_snapshot: 0, created_at: '2026-01-01T00:00:00.000Z' }).returning();
   async function run() { const [row] = await c.db.insert(schema.runs).values({ task_id: task.id, principal_id: c.targetOwner.id, profile: 'builder', status: 'suspended', workspace_id: 1n, base_snapshot: 0, started_at: 't0' }).returning(); return row; }
   const first = await run(); const next = await run(); const legacy = await run();
   await c.db.transaction(tx => captureRunSkills(tx, { projectId: c.targetProject.id, principalId: c.targetOwner.id, runId: first.id }));

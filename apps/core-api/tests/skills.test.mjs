@@ -71,7 +71,7 @@ test('skill HTTP rejects unsafe packages and missing optimistic guards; only sou
 test('skill HTTP cross-team grants deliver only selected revision and revoked share blocks new downloads', async () => {
   const c = await fixture(); const actor = c.users.owner; const targetActor = c.users.outside;
   const targetTeam = await insertTeam(c.db, { name: 'Foreign team', owner_principal_id: targetActor.id, created_at: 't0' });
-  const target = await insertProject(c.db, { team_id: targetTeam.id, name: 'Foreign project', owner_principal_id: targetActor.id, member_policy: 'private', created_at: 't0' });
+  const target = await insertProject(c.db, { team_id: targetTeam.id, name: 'Foreign project', owner_principal_id: targetActor.id, member_policy: 'private', created_at: '2026-01-01T00:00:00.000Z' });
   const skill = data(await request(c, actor, 'POST', '/skills', { scope_type: 'project', scope_code: c.project.code, files: packageFiles }));
   data(await request(c, actor, 'POST', `/skills/${skill.code}/publish`, { revision: 1 }));
   const installPath = `/projects/${target.code}/skills/${skill.code}`;

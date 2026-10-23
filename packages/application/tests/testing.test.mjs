@@ -63,7 +63,7 @@ test('case, requirement, module, repository, asset and task references stay insi
   const requirement = await insertRequirement(c.db, { featureId: c.foreignFeature.id, title: 'Foreign requirement', ownerPrincipalId: c.users.owner.id });
   const [asset] = await c.db.insert(schema.testAssets).values({ project_id: c.foreign.id, title: 'Foreign asset', summary: '', current_revision: 1, owner_principal_id: c.users.owner.id, created_at: 't0', updated_at: 't0' }).returning();
   const [repository] = await c.db.insert(schema.projectRepositories).values({ project_id: c.foreign.id, name: 'Foreign repo', remote_url: 'https://example.com/foreign.git', created_by: c.users.owner.id, created_at: 't0', updated_at: 't0' }).returning();
-  const [task] = await c.db.insert(schema.tasks).values({ feature_id: c.foreignFeature.id, title: 'Foreign task', profile: 'builder', source: 'ad-hoc', status: 'draft', acceptance: '[]', base_snapshot: 0, created_at: 't0' }).returning();
+  const [task] = await c.db.insert(schema.tasks).values({ feature_id: c.foreignFeature.id, title: 'Foreign task', profile: 'builder', source: 'ad-hoc', status: 'draft', acceptance: '[]', base_snapshot: 0, created_at: '2026-01-01T00:00:00.000Z' }).returning();
   const [foreignCase] = await c.db.insert(schema.testCases).values({ project_id: c.foreign.id, title: 'Foreign case', summary: '', current_revision: 1, owner_principal_id: c.users.owner.id, created_at: 't0', updated_at: 't0' }).returning();
   for (const input of [{ module_code: module.code }, { requirement_codes: [requirement.code] }, { asset_codes: [asset.code] }]) rejected(await c.uc.createCase({ ...c.base, input: caseInput(input) }));
   rejected(await c.uc.createAsset({ ...c.base, input: { title: 'Foreign Git', storage_kind: 'git', git: { repository_code: repository.code } } }), 'testing_invalid');
@@ -168,7 +168,7 @@ test('simultaneous case revision attempts create exactly one next revision', asy
 
 test('recording test evidence never verifies or closes the associated task', async () => {
   const c = await setup(); const testCase = data(await c.uc.createCase({ ...c.base, input: caseInput() }));
-  const [task] = await c.db.insert(schema.tasks).values({ feature_id: c.feature.id, title: 'Linked task', profile: 'builder', source: 'ad-hoc', status: 'running', acceptance: '[]', base_snapshot: 0, created_at: 't0' }).returning();
+  const [task] = await c.db.insert(schema.tasks).values({ feature_id: c.feature.id, title: 'Linked task', profile: 'builder', source: 'ad-hoc', status: 'running', acceptance: '[]', base_snapshot: 0, created_at: '2026-01-01T00:00:00.000Z' }).returning();
   data(await c.uc.createExecution({ ...c.base, input: runInput(testCase, { task_code: task.code, results: [{ case_code: testCase.code, case_revision: 1, result: 'pass' }] }) }));
   const [current] = await c.db.select().from(schema.tasks).where(eq(schema.tasks.id, task.id));
   assert.equal(current.status, 'running'); assert.equal(current.base_snapshot, 0);

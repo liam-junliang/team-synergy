@@ -189,7 +189,7 @@ export async function insertProject(db, {
   teamId,
   name = 'acp',
   currentSnapshot = 0,
-  createdAt = 't0',
+  createdAt = '2026-01-01T00:00:00.000Z',
 } = {}) {
   const [project] = await db.insert(schema.projects).values({
     code,

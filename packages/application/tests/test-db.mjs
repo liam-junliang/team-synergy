@@ -139,7 +139,7 @@ export async function insertProject(db, {
   teamId,
   name,
   currentSnapshot = 0,
-  createdAt = 't0',
+  createdAt = '2026-01-01T00:00:00.000Z',
 }) {
   const [project] = await db.insert(schema.projects).values({
     ...(legacyCode ? { legacy_code: legacyCode } : {}),
@@ -226,7 +226,7 @@ export async function insertTask(db, {
   validationSeams = null,
   scope = null,
   baseSnapshot = 0,
-  createdAt = 't0',
+  createdAt = '2026-01-01T00:00:00.000Z',
 }) {
   const [task] = await db.insert(schema.tasks).values({
     ...(legacyCode ? { legacy_code: legacyCode } : {}),

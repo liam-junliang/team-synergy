@@ -99,7 +99,7 @@ test('project home HTTP supports independent updates and rejects bad or cross-pr
   assert.match(retired.json().error.message, /固定.*项目规范.*目录/);
   const preserved = await app.inject({ method: 'GET', url: `${root}/home`, headers: owner.headers });
   assert.equal(preserved.json().data.overview.document_code, overview.document_code);
-  const other = await insertProject(db, { team_id: team.id, name: 'Other project', current_snapshot: 0, created_at: 't0' });
+  const other = await insertProject(db, { team_id: team.id, name: 'Other project', current_snapshot: 0, created_at: '2026-01-01T00:00:00.000Z' });
   const [foreign] = await db.insert(schema.projectDocuments).values({ project_id: other.id, title: 'Other project secret', content: 'private', created_by: owner.id,
     updated_by: owner.id, created_at: 't0', updated_at: 't0' }).returning();
   const invalid = await app.inject({ method: 'PUT', url: `${root}/home`, headers: owner.headers, payload: { guide_document_code: null, overview_document_code: foreign.code } });

@@ -51,7 +51,7 @@ async function seededDb() {
     status: 'draft',
     acceptance: [{ id: 'AC-1', text: '验收标准' }, { id: 'AC-2', text: '第二条' }],
     baseSnapshot: 0,
-    createdAt: 't0',
+    createdAt: '2026-01-01T00:00:00.000Z',
     ...extra,
   });
 
@@ -443,7 +443,7 @@ test('list：--assigned-to 与 --status 过滤', async () => {
   assert.ok(mine.every((task) => task.assignee_principal_code === ctx.users.wang.code));
   const closed = await svc.listTasks({ status: 'closed', principalCode: ctx.users.wang.code });
   assert.deepEqual(closed.map((task) => task.task_code), [ctx.tasks.task303.code]);
-  assert.equal(closed[0].created_at, 't0');
+  assert.equal(closed[0].created_at, '2026-01-01T00:00:00.000Z');
   assert.equal(closed[0].completed_at, '2026-08-17T12:30:00.000Z');
 });
 

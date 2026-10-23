@@ -53,7 +53,7 @@ test('需求用例：成员创建、列表投影、详情关联任务并写入�
     assigneePrincipalId: ctx.users.wang.id,
     acceptance: [{ id: 'AC-1', text: '接口可用' }],
     baseSnapshot: 1,
-    createdAt: 't1',
+    createdAt: '2026-01-01T00:00:01.000Z',
   });
 
   const list = await uc.listRequirements(ctx.project.code, undefined, ctx.users.wang.code);
@@ -262,7 +262,7 @@ test('需求生命周期：Owner 按守卫推进，变更提议重新解锁文�
     status: 'running',
     acceptance: [{ id: 'AC-1', text: '生命周期通过' }],
     baseSnapshot: 1,
-    createdAt: 't1',
+    createdAt: '2026-01-01T00:00:01.000Z',
   });
   const implementing = await uc.transitionRequirement({ requirementCode: created.data.requirement_code, to: 'implementing', principalCode: ctx.users.owner.code });
   assert.equal(implementing.ok, true, JSON.stringify(implementing));
