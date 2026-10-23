@@ -344,6 +344,13 @@
       "when": 1792728000000,
       "tag": "0049_core_foreign_keys_validate",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1792731600000,
+      "tag": "0050_core_time_expand",
+      "breakpoints": true
     }
   ]
 }

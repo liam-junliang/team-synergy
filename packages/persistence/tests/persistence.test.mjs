@@ -146,7 +146,7 @@ async function seedIdentityBase(db) {
   if (!team) {
     const { rows: [row] } = await db.$client.query(
       'INSERT INTO teams (legacy_code, name, created_at) VALUES ($1, $2, $3) RETURNING id, code',
-      ['TEAM-LEGACY', 'Legacy workspace', 't0'],
+      ['TEAM-LEGACY', 'Legacy workspace', '2026-01-01T00:00:00.000Z'],
     );
     team = { id: BigInt(row.id), code: row.code };
   }
@@ -154,7 +154,7 @@ async function seedIdentityBase(db) {
   if (!user) {
     const { rows: [row] } = await db.$client.query(
       'INSERT INTO users (legacy_code, account, display_name, created_at) VALUES ($1, $2, $3, $4) RETURNING id, code',
-      ['user-chen', 'chen', 'chen', 't0'],
+      ['user-chen', 'chen', 'chen', '2026-01-01T00:00:00.000Z'],
     );
     user = { id: BigInt(row.id), code: row.code };
   }
@@ -166,7 +166,7 @@ async function seedIdentityBase(db) {
     const { rows } = await db.$client.query(
       `INSERT INTO projects (legacy_code, team_id, name, created_at)
        VALUES ($1, $2, $3, $4) RETURNING id, code`,
-      ['PROJECT-A', team.id, 'Team Synergy', 't0'],
+      ['PROJECT-A', team.id, 'Team Synergy', '2026-01-01T00:00:00.000Z'],
     );
     project = { id: BigInt(rows[0].id), code: rows[0].code };
   }
@@ -181,7 +181,7 @@ async function seedIdentityBase(db) {
       principal_id: user.id,
       role: 'owner',
       display_name: 'chen',
-      created_at: 't0',
+      created_at: '2026-01-01T00:00:00.000Z',
     });
   }
 
@@ -192,7 +192,7 @@ async function seedIdentityBase(db) {
       project_id: project.id,
       role: 'owner',
       display_name: 'chen',
-      created_at: 't0',
+      created_at: '2026-01-01T00:00:00.000Z',
     });
   }
 
@@ -202,7 +202,7 @@ async function seedIdentityBase(db) {
 async function seedLegacyProject(db, teamId, name) {
   const { rows: [row] } = await db.$client.query(
     'INSERT INTO projects (team_id, name, created_at) VALUES ($1, $2, $3) RETURNING id, code',
-    [teamId, name, 'p0'],
+    [teamId, name, '2026-01-01T00:00:00.000Z'],
   );
   return { id: BigInt(row.id), code: row.code };
 }
@@ -239,7 +239,7 @@ async function seedTaskBase(db) {
       requirement_id: requirement.id,
       acceptance: JSON.stringify([{ id: 'AC-1', text: 'x' }]),
       base_snapshot: 28,
-      created_at: 't0',
+      created_at: '2026-01-01T00:00:00.000Z',
     })
     .returning({ id: schema.tasks.id, code: schema.tasks.code });
 
@@ -253,7 +253,7 @@ async function seedGraph(db, graphLegacyCode = 'G1', graphSnapshot = 28) {
     .values({
       legacy_code: graphLegacyCode,
       project_id: project.id,
-      created_at: 't',
+      created_at: '2026-01-01T00:00:00.000Z',
     })
     .returning({ id: schema.contextGraphs.id, code: schema.contextGraphs.code });
   const [snapshot] = await db
@@ -261,7 +261,7 @@ async function seedGraph(db, graphLegacyCode = 'G1', graphSnapshot = 28) {
     .values({
       graph_id: graph.id,
       graph_snapshot: graphSnapshot,
-      created_at: 't',
+      created_at: '2026-01-01T00:00:00.000Z',
     })
     .returning({ id: schema.contextGraphSnapshots.id, code: schema.contextGraphSnapshots.code });
 
@@ -383,7 +383,7 @@ test('0026 升级到 0027：保留既有需求任务，基线绑定默认空且�
     const [requirement] = await previous.insert(schema.requirements).values({ feature_id: feature.id, title: '邮箱登录', state: 'confirmed', owner_principal_id: user.id }).returning();
     // The current Drizzle task schema includes the new column, so seed the deployed schema via SQL.
     const inserted = await previous.$client.query(`INSERT INTO tasks (feature_id, title, profile, status, requirement_id, acceptance, base_snapshot, created_at)
-      VALUES ($1, $2, 'builder', 'ready', $3, '[]', 28, 't0') RETURNING id, code`, [feature.id, '实现认证失败统一响应与锁定策略', requirement.id]);
+      VALUES ($1, $2, 'builder', 'ready', $3, '[]', 28, '2026-01-01T00:00:00.000Z') RETURNING id, code`, [feature.id, '实现认证失败统一响应与锁定策略', requirement.id]);
     seeded = { requirement, task: { ...inserted.rows[0], id: BigInt(inserted.rows[0].id) } };
     await assert.rejects(previous.$client.query('SELECT requirement_baseline_id FROM tasks'), error => error.code === '42703');
   } finally { await closeDb(previous); }
@@ -414,8 +414,8 @@ test('0026 升级到 0027：保留既有需求任务，基线绑定默认空且�
 test('0031 升级到 0032：独立架构图源与版本表不修改现有项目或文档', async () => {
   const oldDb = await freshDbThrough(31);
   const { project, user } = await seedIdentityBase(oldDb);
-  const [prototype] = await oldDb.insert(schema.designPrototypes).values({ project_id: project.id, title: '原有设计', owner_principal_id: user.id, created_at: 't0', updated_at: 't0' }).returning();
-  const [originalRevision] = await oldDb.insert(schema.designPrototypeRevisions).values({ prototype_id: prototype.id, revision: 1, html_content: '<html>保留</html>', change_summary: 'init', created_by: user.id, created_at: 't0' }).returning();
+  const [prototype] = await oldDb.insert(schema.designPrototypes).values({ project_id: project.id, title: '原有设计', owner_principal_id: user.id, created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z' }).returning();
+  const [originalRevision] = await oldDb.insert(schema.designPrototypeRevisions).values({ prototype_id: prototype.id, revision: 1, html_content: '<html>保留</html>', change_summary: 'init', created_by: user.id, created_at: '2026-01-01T00:00:00.000Z' }).returning();
   const beforeProjects = (await oldDb.$client.query('SELECT * FROM projects ORDER BY id')).rows;
   const beforeFolders = await oldDb.select().from(schema.projectDocumentFolders);
   await closeDb(oldDb);
@@ -440,11 +440,11 @@ test('0031 升级到 0032：独立架构图源与版本表不修改现有项目�
     assert.deepEqual(await db.select().from(schema.designPrototypeRevisions), [originalRevision]);
     assert.deepEqual(await db.select().from(schema.architectureDocuments), []);
     const [document] = await db.insert(schema.architectureDocuments).values({
-      project_id: project.id, title: '总体架构', content_kind: 'mermaid', owner_principal_id: user.id, created_at: 't0', updated_at: 't0',
+      project_id: project.id, title: '总体架构', content_kind: 'mermaid', owner_principal_id: user.id, created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z',
     }).returning();
     assertPublicCode(document.code);
     const revisionInput = { document_id: document.id, revision: 1, title: '总体架构', content_kind: 'mermaid',
-      source_content: 'flowchart LR\n A --> B', preview_svg: '<svg/>', change_summary: '初始版本', created_by: user.id, created_at: 't0' };
+      source_content: 'flowchart LR\n A --> B', preview_svg: '<svg/>', change_summary: '初始版本', created_by: user.id, created_at: '2026-01-01T00:00:00.000Z' };
     const [revision] = await db.insert(schema.architectureDocumentRevisions).values(revisionInput).returning();
     assertPublicCode(revision.code);
     assert.equal(revision.source_content, revisionInput.source_content);
@@ -572,7 +572,7 @@ test('0030 升级到 0031：需求系统目录保留原需求正文、历史、�
     for (const change of [{ name: 'Renamed' }, { status: 'archived' }, { system_role: 'unknown' }, { system_role: 'standards' }]) {
       await assert.rejects(upgraded.update(schema.projectDocumentFolders).set(change).where(eq(schema.projectDocumentFolders.id, root.id)), error => pgCode(error) === '23514');
     }
-    await assert.rejects(upgraded.insert(schema.projectDocumentFolders).values({ project_id: seeded.project.id, parent_id: root.parent_id, name: '需求文档', system_role: 'requirements', created_at: 't0', updated_at: 't0' }), error => pgCode(error) === '23505');
+    await assert.rejects(upgraded.insert(schema.projectDocumentFolders).values({ project_id: seeded.project.id, parent_id: root.parent_id, name: '需求文档', system_role: 'requirements', created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z' }), error => pgCode(error) === '23505');
   } finally { await closeDb(upgraded); }
   const reopened = await freshDb();
   try {
@@ -615,7 +615,7 @@ test('0029 升级到 0030：固定规范目录只迁移明确绑定，保留同�
     await previous.update(schema.projects).set({ standards_document_id: bound.id }).where(eq(schema.projects.id, foreign.id));
     await previous.update(schema.projects).set({ standards_document_id: archived.id }).where(eq(schema.projects.id, archivedProject.id));
     await previous.insert(schema.auditEvents).values({ entity_type: 'project_document', entity_id: bound.id, principal_id: user.id,
-      base_snapshot: 1, action: 'project_document.revised', payload: JSON.stringify({ document_code: bound.code, revision: 2 }), timestamp: 'r2' });
+      base_snapshot: 1, action: 'project_document.revised', payload: JSON.stringify({ document_code: bound.code, revision: 2 }), timestamp: '2026-01-01T00:00:02.000Z' });
     const history = await previous.select().from(schema.projectDocumentRevisions);
     const audits = await previous.select().from(schema.auditEvents);
     seeded = { project, foreign, archivedProject, empty, user, bound, unrelated, descendant, archived, legacyFolder, child, history, audits };
@@ -663,13 +663,13 @@ test('0029 升级到 0030：固定规范目录只迁移明确绑定，保留同�
     assert.equal(projects.find(project => project.id === seeded.project.id).overview_document_id, seeded.bound.id);
     assert.equal(projects.find(project => project.id === seeded.project.id).guide_document_id, seeded.unrelated.id);
     await assert.rejects(upgraded.insert(schema.projectDocumentFolders).values({ project_id: seeded.project.id, parent_id: root.parent_id, name: '项目规范', system_role: 'standards',
-      created_at: 't0', updated_at: 't0' }), error => (error.cause?.code ?? error.code) === '23505');
+      created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z' }), error => (error.cause?.code ?? error.code) === '23505');
     for (const change of [{ name: 'Renamed' }, { status: 'archived' }]) {
       await assert.rejects(upgraded.update(schema.projectDocumentFolders).set(change).where(eq(schema.projectDocumentFolders.id, root.id)),
         error => (error.cause?.code ?? error.code) === '23514');
     }
     await assert.rejects(upgraded.insert(schema.projectDocumentFolders).values({ project_id: seeded.project.id, name: 'Ordinary missing creator',
-      created_at: 't0', updated_at: 't0' }), error => (error.cause?.code ?? error.code) === '23514');
+      created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z' }), error => (error.cause?.code ?? error.code) === '23514');
     const trigger = await upgraded.$client.query(`SELECT t.tgname FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
       WHERE c.relname = 'project_document_folders' AND t.tgname = 'acp_context_material_fence'`);
     assert.equal(trigger.rows.length, 1);
@@ -708,7 +708,7 @@ test('0034 升级到 0035：测试固定目录保留同名普通子树、正文�
         change_summary: `Revision ${revision}`, created_by: user.id, created_at: `r${revision}` })));
     }
     await previous.insert(schema.auditEvents).values({ entity_type: 'project_document', entity_id: documents[0].id,
-      principal_id: user.id, base_snapshot: 1, action: 'project_document.revised', payload: '{"revision":2}', timestamp: 'r2' });
+      principal_id: user.id, base_snapshot: 1, action: 'project_document.revised', payload: '{"revision":2}', timestamp: '2026-01-01T00:00:02.000Z' });
     for (const name of tableNames) assert.equal((await previous.$client.query('SELECT to_regclass($1) AS relation', [`public.${name}`])).rows[0].relation, null);
     seeded = { project, user, emptyProject, ordinary, child, documents,
       revisions: await previous.select().from(schema.projectDocumentRevisions).orderBy(schema.projectDocumentRevisions.id),
@@ -737,16 +737,16 @@ test('0034 升级到 0035：测试固定目录保留同名普通子树、正文�
     const root = roots.find(folder => folder.project_id === seeded.project.id);
     const pgCode = error => error.cause?.code ?? error.code;
     await assert.rejects(upgraded.insert(schema.projectDocumentFolders).values({ project_id: seeded.project.id, parent_id: root.parent_id,
-      name: '测试资料', system_role: 'testing', created_at: 't0', updated_at: 't0' }), error => pgCode(error) === '23505');
+      name: '测试资料', system_role: 'testing', created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z' }), error => pgCode(error) === '23505');
     for (const change of [{ name: 'Renamed' }, { status: 'archived' }]) {
       await assert.rejects(upgraded.update(schema.projectDocumentFolders).set(change).where(eq(schema.projectDocumentFolders.id, root.id)), error => pgCode(error) === '23514');
     }
 
     const documentValues = { project_id: seeded.project.id, title: '登录冒烟', summary: '登录场景', current_revision: 1,
-      owner_principal_id: seeded.user.id, created_at: 't0', updated_at: 't0' };
+      owner_principal_id: seeded.user.id, created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z' };
     const [testCase] = await upgraded.insert(schema.testCases).values(documentValues).returning();
     const caseContent = JSON.stringify({ title: testCase.title, steps: [{ action: '输入错误密码', expected: '显示提示' }] });
-    const caseRevisionValues = { document_id: testCase.id, revision: 1, content_json: caseContent, change_summary: '初始用例', created_by: seeded.user.id, created_at: 't0' };
+    const caseRevisionValues = { document_id: testCase.id, revision: 1, content_json: caseContent, change_summary: '初始用例', created_by: seeded.user.id, created_at: '2026-01-01T00:00:00.000Z' };
     const [caseRevision] = await upgraded.insert(schema.testCaseRevisions).values(caseRevisionValues).returning();
     const [asset] = await upgraded.insert(schema.testAssets).values({ ...documentValues, title: '冒烟说明' }).returning();
     const [assetRevision] = await upgraded.insert(schema.testAssetRevisions).values({ ...caseRevisionValues, document_id: asset.id,
@@ -766,7 +766,7 @@ test('0034 升级到 0035：测试固定目录保留同名普通子树、正文�
     await assert.rejects(upgraded.insert(schema.testExecutionResults).values({ ...resultValues, case_code: 'other-case', result: 'unknown' }), error => pgCode(error) === '23514');
     const [nextCaseRevision] = await upgraded.insert(schema.testCaseRevisions).values({ ...caseRevisionValues, revision: 2,
       content_json: JSON.stringify({ title: '新登录用例', steps: [{ action: '新的操作', expected: '新的预期' }] }), change_summary: '新增步骤' }).returning();
-    await upgraded.update(schema.testCases).set({ current_revision: 2, title: '新登录用例', updated_at: 't1' }).where(eq(schema.testCases.id, testCase.id));
+    await upgraded.update(schema.testCases).set({ current_revision: 2, title: '新登录用例', updated_at: '2026-01-01T00:00:01.000Z' }).where(eq(schema.testCases.id, testCase.id));
     assert.deepEqual(await upgraded.select().from(schema.testExecutionResults), [result], 'New definitions must not rewrite a saved execution snapshot');
     snapshots = { cases: await upgraded.select().from(schema.testCases), caseRevisions: [caseRevision, nextCaseRevision],
       assets: [asset], assetRevisions: [assetRevision], executions: [execution], results: [result] };
@@ -793,11 +793,11 @@ test('0012 升级到 0013：保留原项目并支持 HTML 原型 Revision 与需
   const pool = new Pool({ connectionString: testDatabaseUrl });
   try {
     await pool.query(`
-      INSERT INTO teams (code, name, created_at) VALUES ('11111111111111111111', 'Design Team', 't0');
+      INSERT INTO teams (code, name, created_at) VALUES ('11111111111111111111', 'Design Team', '2026-01-01T00:00:00.000Z');
       INSERT INTO users (code, account, display_name, status, is_system_admin, must_change_password, created_at)
-      VALUES ('22222222222222222222', 'designer', 'Designer', 'active', false, false, 't0');
+      VALUES ('22222222222222222222', 'designer', 'Designer', 'active', false, false, '2026-01-01T00:00:00.000Z');
       INSERT INTO projects (code, team_id, name, current_snapshot, created_at)
-      VALUES ('33333333333333333333', 1, 'Existing Project', 0, 't0');
+      VALUES ('33333333333333333333', 1, 'Existing Project', 0, '2026-01-01T00:00:00.000Z');
       INSERT INTO features (code, project_id, title, status)
       VALUES ('44444444444444444444', 1, 'Design Feature', 'active');
       INSERT INTO requirements (code, feature_id, title, current_revision, state, owner_principal_id)
@@ -807,10 +807,10 @@ test('0012 升级到 0013：保留原项目并支持 HTML 原型 Revision 与需
     await pool.query(`
       INSERT INTO design_prototypes (
         code, project_id, title, summary, status, current_revision, owner_principal_id, created_at, updated_at
-      ) VALUES ('66666666666666666666', 1, 'HTML Prototype', 'Existing requirement', 'ready', 1, 1, 't1', 't1');
+      ) VALUES ('66666666666666666666', 1, 'HTML Prototype', 'Existing requirement', 'ready', 1, 1, '2026-01-01T00:00:01.000Z', '2026-01-01T00:00:01.000Z');
       INSERT INTO design_prototype_revisions (
         code, prototype_id, revision, html_content, change_summary, created_by, created_at
-      ) VALUES ('77777777777777777777', 1, 1, '<html><body>prototype</body></html>', 'initial', 1, 't1');
+      ) VALUES ('77777777777777777777', 1, 1, '<html><body>prototype</body></html>', 'initial', 1, '2026-01-01T00:00:01.000Z');
       INSERT INTO design_prototype_requirements (prototype_id, requirement_id) VALUES (1, 1);
     `);
     const joined = await pool.query(`
@@ -839,10 +839,10 @@ test('0013 升级到 0014：原型 Revision 增加同版本配套设计说明且
     await pool.query(`
       INSERT INTO design_prototypes (
         code, project_id, title, summary, status, current_revision, owner_principal_id, created_at, updated_at
-      ) VALUES ('11111111111111111111', 1, 'Visual Prototype', '', 'draft', 1, 1, 't0', 't0');
+      ) VALUES ('11111111111111111111', 1, 'Visual Prototype', '', 'draft', 1, 1, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
       INSERT INTO design_prototype_revisions (
         code, prototype_id, revision, html_content, change_summary, created_by, created_at
-      ) VALUES ('22222222222222222222', 1, 1, '<html><body>visual</body></html>', 'initial', 1, 't0');
+      ) VALUES ('22222222222222222222', 1, 1, '<html><body>visual</body></html>', 'initial', 1, '2026-01-01T00:00:00.000Z');
     `);
     await executeSqlFile(pool, path.join(migrationsFolder, '0014_design_prototype_notes.sql'));
     const backfilled = await pool.query('SELECT notes_markdown FROM design_prototype_revisions WHERE id = 1');
@@ -860,9 +860,9 @@ test('0014 升级到 0015：旧项目保留名称并获得可空简介字段', a
   const pool = new Pool({ connectionString: testDatabaseUrl });
   try {
     await pool.query(`
-      INSERT INTO teams (code, name, created_at) VALUES ('11111111111111111111', 'Project Team', 't0');
+      INSERT INTO teams (code, name, created_at) VALUES ('11111111111111111111', 'Project Team', '2026-01-01T00:00:00.000Z');
       INSERT INTO projects (code, team_id, name, current_snapshot, created_at)
-      VALUES ('22222222222222222222', 1, 'Existing Project', 0, 't0');
+      VALUES ('22222222222222222222', 1, 'Existing Project', 0, '2026-01-01T00:00:00.000Z');
     `);
     await executeSqlFile(pool, path.join(migrationsFolder, '0015_project_description.sql'));
     const migrated = await pool.query("SELECT name, description FROM projects WHERE code = '22222222222222222222'");
@@ -881,19 +881,19 @@ test('0015 升级到 0016：按用户回填团队和项目的个人排序', asyn
   try {
     await pool.query(`
       INSERT INTO users (code, account, display_name, status, is_system_admin, must_change_password, created_at)
-      VALUES ('11111111111111111111', 'sorter', 'Sorter', 'active', false, false, 't0');
+      VALUES ('11111111111111111111', 'sorter', 'Sorter', 'active', false, false, '2026-01-01T00:00:00.000Z');
       INSERT INTO teams (code, name, created_at) VALUES
-        ('22222222222222222222', 'Later Team', 't2'),
-        ('33333333333333333333', 'Earlier Team', 't1');
+        ('22222222222222222222', 'Later Team', '2026-01-01T00:00:02.000Z'),
+        ('33333333333333333333', 'Earlier Team', '2026-01-01T00:00:01.000Z');
       INSERT INTO projects (code, team_id, name, current_snapshot, created_at) VALUES
-        ('44444444444444444444', 1, 'Later Project', 0, 't2'),
-        ('55555555555555555555', 2, 'Earlier Project', 0, 't1');
+        ('44444444444444444444', 1, 'Later Project', 0, '2026-01-01T00:00:02.000Z'),
+        ('55555555555555555555', 2, 'Earlier Project', 0, '2026-01-01T00:00:01.000Z');
       INSERT INTO team_members (team_id, principal_id, role, display_name, created_at) VALUES
-        (1, 1, 'owner', 'Sorter', 't2'),
-        (2, 1, 'owner', 'Sorter', 't1');
+        (1, 1, 'owner', 'Sorter', '2026-01-01T00:00:02.000Z'),
+        (2, 1, 'owner', 'Sorter', '2026-01-01T00:00:01.000Z');
       INSERT INTO members (principal_id, project_id, role, display_name, created_at) VALUES
-        (1, 1, 'owner', 'Sorter', 't2'),
-        (1, 2, 'owner', 'Sorter', 't1');
+        (1, 1, 'owner', 'Sorter', '2026-01-01T00:00:02.000Z'),
+        (1, 2, 'owner', 'Sorter', '2026-01-01T00:00:01.000Z');
     `);
     await executeSqlFile(pool, path.join(migrationsFolder, '0016_personal_workspace_order.sql'));
     const teamOrder = await pool.query('SELECT team_id, sort_order FROM team_members ORDER BY sort_order');
@@ -911,19 +911,19 @@ test('0016 升级到 0017：新增项目工作空间与多代码仓库且不保�
   try {
     await pool.query(`
       INSERT INTO users (code, account, display_name, status, is_system_admin, must_change_password, created_at)
-      VALUES ('11111111111111111111', 'workspace.owner', 'Workspace Owner', 'active', false, false, 't0');
-      INSERT INTO teams (code, name, created_at) VALUES ('22222222222222222222', 'Workspace Team', 't0');
+      VALUES ('11111111111111111111', 'workspace.owner', 'Workspace Owner', 'active', false, false, '2026-01-01T00:00:00.000Z');
+      INSERT INTO teams (code, name, created_at) VALUES ('22222222222222222222', 'Workspace Team', '2026-01-01T00:00:00.000Z');
       INSERT INTO projects (code, team_id, name, current_snapshot, created_at)
-      VALUES ('33333333333333333333', 1, 'Workspace Project', 0, 't0');
+      VALUES ('33333333333333333333', 1, 'Workspace Project', 0, '2026-01-01T00:00:00.000Z');
     `);
     await executeSqlFile(pool, path.join(migrationsFolder, '0017_project_workspaces_repositories.sql'));
     await pool.query(`
       INSERT INTO project_repositories (code, project_id, name, remote_url, status, created_by, created_at, updated_at)
       VALUES
-        ('44444444444444444444', 1, 'Web', 'git@example.com:team/web.git', 'active', 1, 't1', 't1'),
-        ('55555555555555555555', 1, 'API', 'git@example.com:team/api.git', 'active', 1, 't1', 't1');
+        ('44444444444444444444', 1, 'Web', 'git@example.com:team/web.git', 'active', 1, '2026-01-01T00:00:01.000Z', '2026-01-01T00:00:01.000Z'),
+        ('55555555555555555555', 1, 'API', 'git@example.com:team/api.git', 'active', 1, '2026-01-01T00:00:01.000Z', '2026-01-01T00:00:01.000Z');
       INSERT INTO project_workspaces (code, project_id, principal_id, name, status, last_seen_at, created_at)
-      VALUES ('66666666666666666666', 1, 1, 'Product Workspace', 'active', 't1', 't1');
+      VALUES ('66666666666666666666', 1, 1, 'Product Workspace', 'active', '2026-01-01T00:00:01.000Z', '2026-01-01T00:00:01.000Z');
     `);
     const repositories = await pool.query('SELECT name, remote_url FROM project_repositories ORDER BY name');
     assert.deepEqual(repositories.rows, [
@@ -946,9 +946,9 @@ test('0017 升级到 0018：存量项目保留并默认处于启用状态', asyn
   const pool = new Pool({ connectionString: testDatabaseUrl });
   try {
     await pool.query(`
-      INSERT INTO teams (code, name, created_at) VALUES ('11111111111111111111', 'Archive Team', 't0');
+      INSERT INTO teams (code, name, created_at) VALUES ('11111111111111111111', 'Archive Team', '2026-01-01T00:00:00.000Z');
       INSERT INTO projects (code, team_id, name, current_snapshot, created_at)
-      VALUES ('22222222222222222222', 1, 'Existing Project', 0, 't0');
+      VALUES ('22222222222222222222', 1, 'Existing Project', 0, '2026-01-01T00:00:00.000Z');
     `);
     await executeSqlFile(pool, path.join(migrationsFolder, '0018_project_archive_status.sql'));
     const projects = await pool.query('SELECT name, status FROM projects');
@@ -969,13 +969,13 @@ test('0018 升级到 0019：单份项目文档无损升级为多文件夹交接�
   try {
     await pool.query(`
       INSERT INTO users (code, account, display_name, status, is_system_admin, must_change_password, created_at)
-      VALUES ('11111111111111111111', 'handoff.owner', 'Handoff Owner', 'active', false, false, 't0');
+      VALUES ('11111111111111111111', 'handoff.owner', 'Handoff Owner', 'active', false, false, '2026-01-01T00:00:00.000Z');
       INSERT INTO teams (code, name, created_at)
-      VALUES ('22222222222222222222', 'Handoff Team', 't0');
+      VALUES ('22222222222222222222', 'Handoff Team', '2026-01-01T00:00:00.000Z');
       INSERT INTO projects (code, team_id, name, current_snapshot, created_at)
-      VALUES ('33333333333333333333', 1, 'Handoff Project', 0, 't0');
+      VALUES ('33333333333333333333', 1, 'Handoff Project', 0, '2026-01-01T00:00:00.000Z');
       INSERT INTO project_documents (code, project_id, title, content, revision, updated_by, updated_at)
-      VALUES ('44444444444444444444', 1, '原项目文档', '# 原项目文档', 3, 1, 't3');
+      VALUES ('44444444444444444444', 1, '原项目文档', '# 原项目文档', 3, 1, '2026-01-01T00:00:03.000Z');
     `);
     await executeSqlFile(pool, path.join(migrationsFolder, '0019_handoff_document_library.sql'));
 
@@ -991,7 +991,7 @@ test('0018 升级到 0019：单份项目文档无损升级为多文件夹交接�
       kind: 'general',
       status: 'active',
       created_by: '1',
-      created_at: 't3',
+      created_at: '2026-01-01T00:00:03.000Z',
       revision: 3,
       content: '# 原项目文档',
       change_summary: '迁移现有项目交接文档',
@@ -999,13 +999,13 @@ test('0018 升级到 0019：单份项目文档无损升级为多文件夹交接�
 
     await pool.query(`
       INSERT INTO project_document_folders (project_id, name, created_by, created_at, updated_at)
-      VALUES (1, '前后端对接', 1, 't4', 't4');
+      VALUES (1, '前后端对接', 1, '2026-01-01T00:00:04.000Z', '2026-01-01T00:00:04.000Z');
       INSERT INTO project_documents (
         project_id, folder_id, kind, title, summary, content, revision, status,
         created_by, created_at, updated_by, updated_at
       ) VALUES (
         1, 1, 'api', 'Core API 接口约定', '前后端接口', '# API', 1, 'active',
-        1, 't4', 1, 't4'
+        1, '2026-01-01T00:00:04.000Z', 1, '2026-01-01T00:00:04.000Z'
       );
     `);
     const documents = await pool.query('SELECT kind, title FROM project_documents ORDER BY id');
@@ -1024,13 +1024,13 @@ test('0019 升级到 0020：新增需求发现、议题决策和文档版本评�
   try {
     await pool.query(`
       INSERT INTO users (code, account, display_name, status, is_system_admin, must_change_password, created_at)
-      VALUES ('11111111111111111111', 'discovery.owner', 'Discovery Owner', 'active', false, false, 't0');
-      INSERT INTO teams (code, name, created_at) VALUES ('22222222222222222222', 'Discovery Team', 't0');
+      VALUES ('11111111111111111111', 'discovery.owner', 'Discovery Owner', 'active', false, false, '2026-01-01T00:00:00.000Z');
+      INSERT INTO teams (code, name, created_at) VALUES ('22222222222222222222', 'Discovery Team', '2026-01-01T00:00:00.000Z');
       INSERT INTO projects (code, team_id, name, current_snapshot, created_at)
-      VALUES ('33333333333333333333', 1, 'Discovery Project', 0, 't0');
+      VALUES ('33333333333333333333', 1, 'Discovery Project', 0, '2026-01-01T00:00:00.000Z');
       INSERT INTO features (code, project_id, title, status) VALUES ('44444444444444444444', 1, 'Discovery', 'active');
       INSERT INTO tasks (code, feature_id, title, profile, source, status, acceptance, base_snapshot, created_at)
-      VALUES ('55555555555555555555', 1, 'Existing task', 'builder', 'requirement', 'draft', '[{"id":"AC-1","text":"ok"}]', 0, 't0');
+      VALUES ('55555555555555555555', 1, 'Existing task', 'builder', 'requirement', 'draft', '[{"id":"AC-1","text":"ok"}]', 0, '2026-01-01T00:00:00.000Z');
     `);
     await executeSqlFile(pool, path.join(migrationsFolder, '0020_requirement_discovery_and_reviews.sql'));
     const task = (await pool.query(`SELECT source_requirement_revision_id, source_document_revision_id FROM tasks`)).rows[0];
@@ -1087,9 +1087,9 @@ test('0022 升级到 0023：存量 Feature 获得稳定排序并建立项目排�
   const pool = new Pool({ connectionString: testDatabaseUrl });
   try {
     await pool.query(`
-      INSERT INTO teams (code, name, created_at) VALUES ('11111111111111111111', 'Sort Team', 't0');
+      INSERT INTO teams (code, name, created_at) VALUES ('11111111111111111111', 'Sort Team', '2026-01-01T00:00:00.000Z');
       INSERT INTO projects (code, team_id, name, current_snapshot, created_at)
-      VALUES ('22222222222222222222', 1, 'Sort Project', 0, 't0');
+      VALUES ('22222222222222222222', 1, 'Sort Project', 0, '2026-01-01T00:00:00.000Z');
       INSERT INTO features (code, project_id, title, status) VALUES
         ('33333333333333333333', 1, 'B Feature', 'active'),
         ('44444444444444444444', 1, 'A Feature', 'active');
@@ -1113,25 +1113,25 @@ test('0009 升级到 0010：从文档 module_key 回填 project_modules、requir
   const pool = new Pool({ connectionString: testDatabaseUrl });
   try {
     await pool.query(`
-      INSERT INTO teams (code, legacy_code, name, created_at) VALUES ('11111111111111111111', 'TEAM-STRUCT', 'Struct Team', 't0');
+      INSERT INTO teams (code, legacy_code, name, created_at) VALUES ('11111111111111111111', 'TEAM-STRUCT', 'Struct Team', '2026-01-01T00:00:00.000Z');
       INSERT INTO users (code, legacy_code, account, display_name, status, is_system_admin, must_change_password, created_at)
-      VALUES ('22222222222222222222', 'USER-OWNER', 'owner', 'owner', 'active', false, false, 't0');
+      VALUES ('22222222222222222222', 'USER-OWNER', 'owner', 'owner', 'active', false, false, '2026-01-01T00:00:00.000Z');
       INSERT INTO projects (code, legacy_code, team_id, name, current_snapshot, created_at)
-      VALUES ('33333333333333333333', 'PROJECT-STRUCT', 1, 'Struct Project', 0, 't0');
+      VALUES ('33333333333333333333', 'PROJECT-STRUCT', 1, 'Struct Project', 0, '2026-01-01T00:00:00.000Z');
       INSERT INTO members (principal_id, project_id, role, display_name, created_at)
-      VALUES (1, 1, 'owner', 'owner', 't0');
+      VALUES (1, 1, 'owner', 'owner', '2026-01-01T00:00:00.000Z');
       INSERT INTO features (code, legacy_code, project_id, title, goal, status)
       VALUES ('44444444444444444444', 'FEATURE-STRUCT', 1, 'Structured Feature', NULL, 'active');
       INSERT INTO requirement_documents (
         code, legacy_code, project_id, module_key, title, current_revision, state, owner_principal_id, created_at, updated_at
       ) VALUES
-        ('55555555555555555555', 'DOC-AUTH', 1, 'auth', 'Auth Doc', 1, 'active', 1, 't0', 't1'),
-        ('66666666666666666666', 'DOC-BILLING', 1, 'billing', 'Billing Doc', 1, 'archived', 1, 't0', 't2');
+        ('55555555555555555555', 'DOC-AUTH', 1, 'auth', 'Auth Doc', 1, 'active', 1, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:01.000Z'),
+        ('66666666666666666666', 'DOC-BILLING', 1, 'billing', 'Billing Doc', 1, 'archived', 1, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:02.000Z');
       INSERT INTO requirement_document_revisions (
         code, document_id, revision, summary, content, keywords, change_summary, created_by, created_at
       ) VALUES
-        ('77777777777777777777', 1, 1, 'auth summary', 'auth content', '[]', 'init', 1, 't0'),
-        ('88888888888888888888', 2, 1, 'billing summary', 'billing content', '[]', 'init', 1, 't0');
+        ('77777777777777777777', 1, 1, 'auth summary', 'auth content', '[]', 'init', 1, '2026-01-01T00:00:00.000Z'),
+        ('88888888888888888888', 2, 1, 'billing summary', 'billing content', '[]', 'init', 1, '2026-01-01T00:00:00.000Z');
       INSERT INTO requirements (
         code, legacy_code, feature_id, document_id, title, current_revision, state, owner_principal_id
       ) VALUES (
@@ -1140,7 +1140,7 @@ test('0009 升级到 0010：从文档 module_key 回填 project_modules、requir
       INSERT INTO requirement_revisions (
         code, requirement_id, revision, summary, acceptance_criteria, open_questions, created_at
       ) VALUES (
-        'AAAAAAAAAAAAAAAAAAAA', 1, 1, 'Need auth', '[{\"id\":\"AC-1\",\"text\":\"auth\"}]', '[]', 't0'
+        'AAAAAAAAAAAAAAAAAAAA', 1, 1, 'Need auth', '[{\"id\":\"AC-1\",\"text\":\"auth\"}]', '[]', '2026-01-01T00:00:00.000Z'
       );
     `);
 
@@ -1179,13 +1179,13 @@ test('0010 升级到 0011：里程碑开始日期为空且原记录保留', asyn
   try {
     await pool.query(`
       INSERT INTO teams (code, legacy_code, name, created_at)
-      VALUES ('11111111111111111111', 'TEAM-SCHEDULE', 'Schedule Team', 't0');
+      VALUES ('11111111111111111111', 'TEAM-SCHEDULE', 'Schedule Team', '2026-01-01T00:00:00.000Z');
       INSERT INTO projects (code, legacy_code, team_id, name, current_snapshot, created_at)
-      VALUES ('22222222222222222222', 'PROJECT-SCHEDULE', 1, 'Schedule Project', 0, 't0');
+      VALUES ('22222222222222222222', 'PROJECT-SCHEDULE', 1, 'Schedule Project', 0, '2026-01-01T00:00:00.000Z');
       INSERT INTO project_phases (code, project_id, name, sort_order, status, created_at, updated_at)
-      VALUES ('33333333333333333333', 1, 'MVP', 0, 'planned', 't0', 't0');
+      VALUES ('33333333333333333333', 1, 'MVP', 0, 'planned', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
       INSERT INTO project_milestones (code, project_id, phase_id, name, target_date, sort_order, status, created_at, updated_at)
-      VALUES ('44444444444444444444', 1, 1, 'First delivery', '2026-08-31', 0, 'planned', 't0', 't0');
+      VALUES ('44444444444444444444', 1, 1, 'First delivery', '2026-08-31', 0, 'planned', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
     `);
 
     await executeSqlFile(pool, path.join(migrationsFolder, '0011_milestone_schedule_start.sql'));
@@ -1203,9 +1203,9 @@ test('0011 升级到 0012：Feature 排期字段为空且原记录保留', async
   try {
     await pool.query(`
       INSERT INTO teams (code, legacy_code, name, created_at)
-      VALUES ('11111111111111111111', 'TEAM-FEATURE-DATE', 'Feature Date Team', 't0');
+      VALUES ('11111111111111111111', 'TEAM-FEATURE-DATE', 'Feature Date Team', '2026-01-01T00:00:00.000Z');
       INSERT INTO projects (code, legacy_code, team_id, name, current_snapshot, created_at)
-      VALUES ('22222222222222222222', 'PROJECT-FEATURE-DATE', 1, 'Feature Date Project', 0, 't0');
+      VALUES ('22222222222222222222', 'PROJECT-FEATURE-DATE', 1, 'Feature Date Project', 0, '2026-01-01T00:00:00.000Z');
       INSERT INTO features (code, legacy_code, project_id, title, status)
       VALUES ('33333333333333333333', 'FEATURE-DATE', 1, 'Scheduled later', 'active');
     `);
@@ -1228,26 +1228,26 @@ test('0008 存量升级到 0009：保留 legacy 映射、生成公开 code，并
         user_id, display_name, status, bind_token_hash, bind_token_expires_at, created_at,
         password_hash, account, is_system_admin, must_change_password, password_expires_at
       ) VALUES (
-        'user-chen', 'chen', 'active', NULL, NULL, 't0',
+        'user-chen', 'chen', 'active', NULL, NULL, '2026-01-01T00:00:00.000Z',
         'hash', 'chen', true, false, NULL
       );
       INSERT INTO team_members (team_id, principal_id, role, display_name, created_at)
-      VALUES ('TEAM-LEGACY', 'user-chen', 'owner', 'chen', 't0');
+      VALUES ('TEAM-LEGACY', 'user-chen', 'owner', 'chen', '2026-01-01T00:00:00.000Z');
       INSERT INTO projects (id, team_id, name, current_snapshot, created_at)
-      VALUES ('PROJECT-A', 'TEAM-LEGACY', 'Team Synergy', 28, 't0');
+      VALUES ('PROJECT-A', 'TEAM-LEGACY', 'Team Synergy', 28, '2026-01-01T00:00:00.000Z');
       INSERT INTO members (principal_id, project_id, role, display_name, created_at)
-      VALUES ('user-chen', 'PROJECT-A', 'owner', 'chen', 't0');
+      VALUES ('user-chen', 'PROJECT-A', 'owner', 'chen', '2026-01-01T00:00:00.000Z');
       INSERT INTO project_documents (project_id, title, content, revision, updated_by, updated_at)
-      VALUES ('PROJECT-A', 'Overview', '# Overview', 2, 'user-chen', 't1');
+      VALUES ('PROJECT-A', 'Overview', '# Overview', 2, 'user-chen', '2026-01-01T00:00:01.000Z');
       INSERT INTO requirement_documents (
         document_id, project_id, module_key, title, current_revision, state, owner_principal_id, created_at, updated_at
       ) VALUES (
-        'DOC-1', 'PROJECT-A', 'auth', '认证需求', 1, 'active', 'user-chen', 't0', 't1'
+        'DOC-1', 'PROJECT-A', 'auth', '认证需求', 1, 'active', 'user-chen', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:01.000Z'
       );
       INSERT INTO requirement_document_revisions (
         document_id, revision, summary, content, keywords, change_summary, created_by, created_at
       ) VALUES (
-        'DOC-1', 1, 'summary', 'content', '[]', 'init', 'user-chen', 't0'
+        'DOC-1', 1, 'summary', 'content', '[]', 'init', 'user-chen', '2026-01-01T00:00:00.000Z'
       );
       INSERT INTO features (feature_id, project_id, title, goal, status)
       VALUES ('FEATURE-1', 'PROJECT-A', '登录', '邮箱密码登录', 'active');
@@ -1259,7 +1259,7 @@ test('0008 存量升级到 0009：保留 legacy 映射、生成公开 code，并
       INSERT INTO requirement_revisions (
         requirement_id, revision, summary, acceptance_criteria, open_questions, created_at
       ) VALUES (
-        'REQ-1', 1, 'summary', '["AC-1"]', '[]', 't0'
+        'REQ-1', 1, 'summary', '["AC-1"]', '[]', '2026-01-01T00:00:00.000Z'
       );
       INSERT INTO defects (
         defect_id, feature_id, title, severity, reported_by, found_in, description, status, related_requirement
@@ -1271,43 +1271,43 @@ test('0008 存量升级到 0009：保留 legacy 映射、生成公开 code，并
         assignee_principal_id, acceptance, validation_seams, scope, base_snapshot, created_at
       ) VALUES (
         'TASK-411', 'FEATURE-1', '收敛认证失败响应', 'builder', 'requirement', 'submitted', 'REQ-1', NULL,
-        'user-chen', '[{"id":"AC-1"}]', '["api"]', 'auth', 28, 't0'
+        'user-chen', '[{"id":"AC-1"}]', '["api"]', 'auth', 28, '2026-01-01T00:00:00.000Z'
       );
       INSERT INTO task_dependencies (task_id, depends_on_task_id) VALUES ('TASK-411', 'TASK-411');
       INSERT INTO workspaces (workspace_id, run_id, path, git_base, created_at)
-      VALUES ('WS-1', 'RUN-1', '/ws1', 'main', 't0');
+      VALUES ('WS-1', 'RUN-1', '/ws1', 'main', '2026-01-01T00:00:00.000Z');
       INSERT INTO runs (
         run_id, task_id, principal_id, profile, workspace_id, status, base_snapshot, started_at, finished_at
       ) VALUES (
-        'RUN-1', 'TASK-411', 'user-chen', 'builder', 'WS-1', 'completed', 28, 't0', 't1'
+        'RUN-1', 'TASK-411', 'user-chen', 'builder', 'WS-1', 'completed', 28, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:01.000Z'
       );
       INSERT INTO agent_sessions (
         session_id, run_id, agent_command, launch_kind, prompt_path, resumed_from_session_id,
         process_id, status, started_at, finished_at, exit_code, last_error, last_output
       ) VALUES (
-        'SESSION-1', 'RUN-1', 'codex', 'default', NULL, NULL, 100, 'completed', 't0', 't1', 0, NULL, 'ok'
+        'SESSION-1', 'RUN-1', 'codex', 'default', NULL, NULL, 100, 'completed', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:01.000Z', 0, NULL, 'ok'
       );
       INSERT INTO artifacts (
         artifact_id, task_id, run_id, kind, uri, content_hash, published, published_at,
         project_id, title, summary
       ) VALUES (
-        'ART-1', 'TASK-411', 'RUN-1', 'report', 'file:///report', 'hash', true, 't1',
+        'ART-1', 'TASK-411', 'RUN-1', 'report', 'file:///report', 'hash', true, '2026-01-01T00:00:01.000Z',
         'PROJECT-A', 'report', 'summary'
       );
       INSERT INTO evidences (
         evidence_id, task_id, run_id, type, acceptance_refs, result, command, summary, report_uri, recorded_at
       ) VALUES (
-        'EVD-1', 'TASK-411', 'RUN-1', 'self_test', '["AC-1"]', 'pass', 'npm test', 'ok', 'file:///evidence', 't1'
+        'EVD-1', 'TASK-411', 'RUN-1', 'self_test', '["AC-1"]', 'pass', 'npm test', 'ok', 'file:///evidence', '2026-01-01T00:00:01.000Z'
       );
       INSERT INTO audit_events (
         event_id, timestamp, principal_id, run_id, action, entity_id, base_snapshot, from_state, to_state, payload
       ) VALUES (
-        'AUDIT-1', 't1', 'user-chen', 'RUN-1', 'task.submitted', 'TASK-411', 28, 'ready', 'submitted', '{"ok":true}'
+        'AUDIT-1', '2026-01-01T00:00:01.000Z', 'user-chen', 'RUN-1', 'task.submitted', 'TASK-411', 28, 'ready', 'submitted', '{"ok":true}'
       ), (
-        'AUDIT-2', 't2', 'user-chen', NULL, 'legacy.external', 'EXT-404', 28, NULL, NULL, '{"legacy":true}'
+        'AUDIT-2', '2026-01-01T00:00:02.000Z', 'user-chen', NULL, 'legacy.external', 'EXT-404', 28, NULL, NULL, '{"legacy":true}'
       );
       INSERT INTO context_graph_snapshots (graph_id, graph_snapshot, project_id, created_at)
-      VALUES ('G1', 28, 'PROJECT-A', 't0');
+      VALUES ('G1', 28, 'PROJECT-A', '2026-01-01T00:00:00.000Z');
       INSERT INTO context_nodes (
         node_id, graph_id, graph_snapshot, kind, verification, freshness, payload
       ) VALUES
@@ -1389,9 +1389,9 @@ test('0008 存量升级到 0009：保留 legacy 映射、生成公开 code，并
   }
 });
 
-test('孤儿 task 由用例层校验拒绝（库层软引用允许插入）', async () => {
+test('核心 task 引用由数据库拒绝孤儿，并保留合法父实体下的插入', async () => {
   await withDb(async (db) => {
-    const [task] = await db
+    await assert.rejects(db
       .insert(schema.tasks)
       .values({
         feature_id: 999n,
@@ -1399,12 +1399,13 @@ test('孤儿 task 由用例层校验拒绝（库层软引用允许插入）', as
         profile: 'builder',
         acceptance: '[]',
         base_snapshot: 0,
-        created_at: 't',
+        created_at: '2026-01-01T00:00:00.000Z',
       })
-      .returning({ id: schema.tasks.id });
-
+      .returning({ id: schema.tasks.id }), error => (error.cause?.code ?? error.code) === '23503'
+        && (error.cause?.constraint ?? error.constraint) === 'fk_tasks_feature');
+    const { task } = await seedTaskBase(db);
     const rows = await db.select().from(schema.tasks).where(eq(schema.tasks.id, task.id));
-    assert.equal(rows[0]?.title, 'x');
+    assert.equal(rows[0]?.title, '实现认证失败统一响应与锁定策略');
   });
 });
 
@@ -1413,11 +1414,11 @@ test('members 复合主键：同用户可加入多个项目，但同项目不得
     const { team, user } = await seedIdentityBase(db);
     const [project1] = await db
       .insert(schema.projects)
-      .values({ team_id: team.id, name: 'P1', created_at: 't' })
+      .values({ team_id: team.id, name: 'P1', created_at: '2026-01-01T00:00:00.000Z' })
       .returning({ id: schema.projects.id });
     const [project2] = await db
       .insert(schema.projects)
-      .values({ team_id: team.id, name: 'P2', created_at: 't' })
+      .values({ team_id: team.id, name: 'P2', created_at: '2026-01-01T00:00:00.000Z' })
       .returning({ id: schema.projects.id });
 
     await db.insert(schema.members).values({
@@ -1425,14 +1426,14 @@ test('members 复合主键：同用户可加入多个项目，但同项目不得
       project_id: project1.id,
       role: 'owner',
       display_name: 'chen',
-      created_at: 't',
+      created_at: '2026-01-01T00:00:00.000Z',
     });
     await db.insert(schema.members).values({
       principal_id: user.id,
       project_id: project2.id,
       role: 'member',
       display_name: 'chen',
-      created_at: 't',
+      created_at: '2026-01-01T00:00:00.000Z',
     });
 
     await assert.rejects(
@@ -1441,7 +1442,7 @@ test('members 复合主键：同用户可加入多个项目，但同项目不得
         project_id: project1.id,
         role: 'owner',
         display_name: 'chen',
-        created_at: 't',
+        created_at: '2026-01-01T00:00:00.000Z',
       }),
     );
 
@@ -1556,7 +1557,7 @@ test('快照隔离：同图不同 snapshot 不串数据', async () => {
     const { graph } = await seedGraph(db, 'G1', 28);
     const [snapshot29] = await db
       .insert(schema.contextGraphSnapshots)
-      .values({ graph_id: graph.id, graph_snapshot: 29, created_at: 't' })
+      .values({ graph_id: graph.id, graph_snapshot: 29, created_at: '2026-01-01T00:00:00.000Z' })
       .returning({ id: schema.contextGraphSnapshots.id });
 
     const [snapshot28] = await db
@@ -1691,7 +1692,7 @@ test('部分唯一索引：同一 Task 的第二个 active Run 被数据库拒�
         run_id: 1n,
         path: '/ws1',
         git_base: 'b',
-        created_at: 't',
+        created_at: '2026-01-01T00:00:00.000Z',
       })
       .returning({ id: schema.workspaces.id });
     const [run1] = await db
@@ -1716,7 +1717,7 @@ test('部分唯一索引：同一 Task 的第二个 active Run 被数据库拒�
         run_id: 2n,
         path: '/ws2',
         git_base: 'b',
-        created_at: 't',
+        created_at: '2026-01-01T00:00:00.000Z',
       })
       .returning({ id: schema.workspaces.id });
 
