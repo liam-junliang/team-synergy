@@ -220,6 +220,7 @@ export interface ProjectHome {
   overview: ProjectHomeDocument | null;
   guide: ProjectHomeDocument | null;
   standards: ProjectHomeDocument[];
+  overview_folder_code: string;
   standards_folder_code: string;
 }
 
@@ -642,7 +643,7 @@ export interface HandoffFolder {
   name: string;
   sort_order: number;
   status: HandoffDocumentStatus;
-  system_role: 'standards' | 'requirements' | 'architecture' | 'testing' | null;
+  system_role: 'root' | 'overview' | 'standards' | 'requirements' | 'architecture' | 'testing' | null;
   can_create_folder?: boolean;
   can_edit: boolean;
   created_at: string;
@@ -694,6 +695,7 @@ export interface HandoffLibrary {
 }
 
 export interface HandoffDocumentInput {
+  base_revision?: number;
   folder_code?: string | null;
   kind?: HandoffDocumentKind;
   title: string;

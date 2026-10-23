@@ -65,7 +65,7 @@ test('交接文档库：多级文件夹组织前后端接口文档', async () =>
     query: '错误码',
   });
   assert.equal(library.ok, true, JSON.stringify(library));
-  assert.deepEqual(library.data.folders.map((folder) => folder.name), ['项目规范', '需求文档', '架构设计', '测试资料', '接口与联调', '前后端对接']);
+  assert.deepEqual(library.data.folders.map((folder) => folder.name), ['项目资料', '项目说明', '项目规范', '需求文档', '架构设计', '测试资料', '接口与联调', '前后端对接']);
   assert.deepEqual(library.data.documents.map((document) => document.title), ['登录接口约定']);
   assert.equal(library.data.documents[0].folder_code, frontendBackend.data.folder_code);
   assert.equal(library.data.documents[0].source_kind, 'project');
@@ -178,7 +178,7 @@ test('需求文档在固定目录单源展示，搜索与修订实时同步并�
     moduleKey: 'AUTHMODULE', title: '账号说明', summary: '审批摘要', keywords: ['独有关键词'], content: '# 账号\n\n原始正文标记' });
   assert.equal(created.ok, true, JSON.stringify(created));
   const folders = await ctx.db.select().from(schema.projectDocumentFolders).where(eq(schema.projectDocumentFolders.project_id, ctx.project.id)).orderBy(asc(schema.projectDocumentFolders.id));
-  assert.deepEqual(folders.map(folder => folder.system_role), ['standards', 'requirements', 'architecture', 'testing'], '需求创建自身保证固定目录存在');
+  assert.deepEqual(folders.map(folder => folder.system_role), ['root', 'overview', 'standards', 'requirements', 'architecture', 'testing'], '需求创建自身保证固定目录存在');
   const originalRows = await ctx.db.select().from(schema.requirementDocumentRevisions);
   assert.equal(originalRows.length, 1);
   for (const query of ['账号说明', '审批摘要', '独有关键词', 'AUTHMODULE', '原始正文标记']) {
@@ -188,7 +188,7 @@ test('需求文档在固定目录单源展示，搜索与修订实时同步并�
     const projection = result.data.documents[0];
     assert.equal(projection.source_kind, 'requirement');
     assert.equal(projection.kind, 'doc');
-    assert.equal(projection.folder_code, folders[1].code);
+    assert.equal(projection.folder_code, folders.find(folder => folder.system_role === 'requirements').code);
     assert.equal(projection.status, 'active');
     assert.equal(projection.can_edit, false);
     assert.equal(projection.source_can_edit, false);
@@ -303,7 +303,7 @@ test('历史项目鉴权后幂等补齐需求目录，同名普通目录不被�
   const requirements = results.map(result => result.data.folders.find(folder => folder.system_role === 'requirements'));
   assert.equal(requirements[0].folder_code, requirements[1].folder_code);
   const all = await ctx.db.select().from(schema.projectDocumentFolders).where(eq(schema.projectDocumentFolders.project_id, ctx.project.id));
-  assert.equal(all.length, 5);
+  assert.equal(all.length, 7);
   const retained = all.find(folder => folder.id === ordinary.id);
   assert.equal(retained.system_role, null);
   assert.equal(retained.name, `需求文档（原目录 ${ordinary.code}）`);
@@ -378,7 +378,7 @@ test('三个系统目录统一限制，架构目录不接收普通文档，普�
     assert.equal((await uc.updateFolder({ folderCode: plain.data.folder_code, principalCode: ctx.users.author.code, parentFolderCode: root.folder_code })).error.code, 'project_document_folder_read_only');
     const moved = await uc.reviseDocument({ documentCode: document.data.document_code, principalCode: ctx.users.author.code,
       folderCode: root.folder_code, title: '普通文档', content: '# 保持正文', changeSummary: '移动' });
-    assert.equal(moved.ok, root.system_role === 'standards', JSON.stringify(moved));
+    assert.equal(moved.ok, root.system_role === 'standards' || root.system_role === 'overview', JSON.stringify(moved));
     if (!moved.ok) assert.equal(moved.error.code, 'project_document_folder_read_only');
   }
   const nested = await uc.createFolder({ projectCode: ctx.project.code, principalCode: ctx.users.author.code, name: '普通子目录', parentFolderCode: plain.data.folder_code });
@@ -427,7 +427,7 @@ test('架构系统目录按成员身份幂等补齐，同名普通目录及内�
   const roots = results.map(result => result.data.folders.find(folder => folder.system_role === 'architecture'));
   assert.equal(roots[0].folder_code, roots[1].folder_code);
   const folders = await ctx.db.select().from(schema.projectDocumentFolders);
-  assert.equal(folders.length, 5);
+  assert.equal(folders.length, 7);
   assert.deepEqual(folders.find(folder => folder.id === ordinary.id), { ...ordinary, name: `架构设计（原目录 ${ordinary.code}）` });
   const after = await uc.getDocument(created.data.document_code, ctx.users.owner.code);
   assert.equal(after.data.folder_code, ordinary.code);

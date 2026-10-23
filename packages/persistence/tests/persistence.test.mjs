@@ -11,7 +11,7 @@ import { openDb, closeDb, traverseSubgraph, schema } from '../dist/index.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = path.resolve(__dirname, '../drizzle');
 const testDatabaseUrl =
-  process.env.ACP_TEST_DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/acp_test';
+  process.env.TSP_TEST_DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/team_synergy_test';
 const PUBLIC_CODE_PATTERN = /^[0-9A-HJKMNP-TV-Z]{20}$/;
 const migrationJournal = JSON.parse(await readFile(path.join(migrationsFolder, 'meta/_journal.json'), 'utf8'));
 
@@ -427,7 +427,14 @@ test('0031 升级到 0032：独立架构图源与版本表不修改现有项目�
     assert.equal(afterProjects[0].created_by, null, 'Historic creator is not inferred without creation evidence');
     assert.equal(afterProjects[0].member_policy, 'private');
     const upgradedFolders = await db.select().from(schema.projectDocumentFolders);
-    assert.deepEqual(upgradedFolders.filter(folder => !['architecture', 'testing'].includes(folder.system_role)), beforeFolders);
+    assert.deepEqual(upgradedFolders.filter(folder => !folder.system_role), beforeFolders.filter(folder => !folder.system_role));
+    for (const folder of beforeFolders.filter(folder => folder.system_role)) {
+      const after = upgradedFolders.find(candidate => candidate.id === folder.id);
+      assert.equal(after.code, folder.code);
+      assert.equal(after.name, folder.name);
+    }
+    assert.equal(upgradedFolders.filter(folder => folder.system_role === 'root').length, 1);
+    assert.equal(upgradedFolders.filter(folder => folder.system_role === 'overview').length, 1);
     assert.equal(upgradedFolders.filter(folder => folder.system_role === 'architecture').length, 1);
     assert.equal(upgradedFolders.filter(folder => folder.system_role === 'testing').length, 1);
     assert.deepEqual(await db.select().from(schema.designPrototypeRevisions), [originalRevision]);
@@ -488,12 +495,13 @@ test('0032 升级到 0033：架构关联目录与类型升级保留所有正文�
     for (const root of roots) {
       assertPublicCode(root.code);
       assert.equal(root.name, '架构设计');
-      assert.equal(root.parent_id, null);
+      assert.equal(root.parent_id, folders.find(folder => folder.project_id === root.project_id && folder.system_role === 'root').id);
       assert.equal(root.status, 'active');
       assert.equal(root.created_by, null);
     }
     assert.deepEqual(folders.find(folder => folder.id === seeded.child.id), seeded.child);
-    assert.deepEqual(folders.find(folder => folder.id === seeded.standards.id), seeded.standards);
+    assert.equal(folders.find(folder => folder.id === seeded.standards.id).code, seeded.standards.code);
+    assert.equal(folders.find(folder => folder.id === seeded.standards.id).parent_id, folders.find(folder => folder.project_id === seeded.project.id && folder.system_role === 'root').id);
     assert.deepEqual(folders.find(folder => folder.id === seeded.ordinary.id), { ...seeded.ordinary, name: `架构设计（原目录 ${seeded.ordinary.code}）` });
     assert.deepEqual(await upgraded.select().from(schema.projectDocuments), [seeded.document]);
     assert.deepEqual(await upgraded.select().from(schema.projectDocumentRevisions), seeded.docRevisions);
@@ -507,7 +515,7 @@ test('0032 升级到 0033：架构关联目录与类型升级保留所有正文�
     }
     const root = roots.find(folder => folder.project_id === seeded.project.id);
     const constraint = error => error.cause?.constraint ?? error.constraint;
-    for (const change of [{ name: 'Renamed' }, { parent_id: seeded.child.id }, { status: 'archived' }]) {
+    for (const change of [{ name: 'Renamed' }, { status: 'archived' }]) {
       await assert.rejects(upgraded.update(schema.projectDocumentFolders).set(change).where(eq(schema.projectDocumentFolders.id, root.id)), error => constraint(error) === 'ck_project_document_folders_system_shape');
     }
   } finally { await closeDb(upgraded); }
@@ -548,7 +556,7 @@ test('0030 升级到 0031：需求系统目录保留原需求正文、历史、�
     for (const root of roots) {
       assertPublicCode(root.code);
       assert.equal(root.name, '需求文档');
-      assert.equal(root.parent_id, null);
+      assert.equal(root.parent_id, folders.find(folder => folder.project_id === root.project_id && folder.system_role === 'root').id);
       assert.equal(root.status, 'active');
       assert.equal(root.created_by, null);
     }
@@ -561,10 +569,10 @@ test('0030 升级到 0031：需求系统目录保留原需求正文、历史、�
     assert.deepEqual(await upgraded.select().from(schema.requirementDocumentRevisions).orderBy(schema.requirementDocumentRevisions.id), seeded.revisions);
     assert.deepEqual(await upgraded.select().from(schema.requirementDocumentReviews), [seeded.review]);
     const pgCode = error => error.cause?.code ?? error.code;
-    for (const change of [{ name: 'Renamed' }, { parent_id: seeded.child.id }, { status: 'archived' }, { system_role: 'unknown' }, { system_role: 'standards' }]) {
+    for (const change of [{ name: 'Renamed' }, { status: 'archived' }, { system_role: 'unknown' }, { system_role: 'standards' }]) {
       await assert.rejects(upgraded.update(schema.projectDocumentFolders).set(change).where(eq(schema.projectDocumentFolders.id, root.id)), error => pgCode(error) === '23514');
     }
-    await assert.rejects(upgraded.insert(schema.projectDocumentFolders).values({ project_id: seeded.project.id, name: '需求文档', system_role: 'requirements', created_at: 't0', updated_at: 't0' }), error => pgCode(error) === '23505');
+    await assert.rejects(upgraded.insert(schema.projectDocumentFolders).values({ project_id: seeded.project.id, parent_id: root.parent_id, name: '需求文档', system_role: 'requirements', created_at: 't0', updated_at: 't0' }), error => pgCode(error) === '23505');
   } finally { await closeDb(upgraded); }
   const reopened = await freshDb();
   try {
@@ -623,7 +631,7 @@ test('0029 升级到 0030：固定规范目录只迁移明确绑定，保留同�
       const root = roots.find(folder => folder.project_id === project.id);
       assertPublicCode(root.code);
       assert.equal(root.name, '项目规范');
-      assert.equal(root.parent_id, null);
+      assert.equal(root.parent_id, folders.find(folder => folder.project_id === project.id && folder.system_role === 'root').id);
       assert.equal(root.status, 'active');
       assert.equal(root.created_by, null);
     }
@@ -643,8 +651,9 @@ test('0029 升级到 0030：固定规范目录只迁移明确绑定，保留同�
       const { folder_id: ignoredOldFolder, ...oldBody } = old;
       assert.deepEqual(currentBody, oldBody);
     }
-    assert.equal(documents.find(document => document.id === seeded.bound.id).folder_id, root.id);
-    assert.equal(documents.find(document => document.id === seeded.unrelated.id).folder_id, original.id);
+    const overview = folders.find(folder => folder.project_id === seeded.project.id && folder.system_role === 'overview');
+    assert.equal(documents.find(document => document.id === seeded.bound.id).folder_id, overview.id);
+    assert.equal(documents.find(document => document.id === seeded.unrelated.id).folder_id, overview.id);
     assert.equal(documents.find(document => document.id === seeded.descendant.id).folder_id, child.id);
     assert.equal(documents.find(document => document.id === seeded.archived.id).folder_id, roots.find(folder => folder.project_id === seeded.archivedProject.id).id);
     assert.deepEqual(await upgraded.select().from(schema.projectDocumentRevisions), seeded.history);
@@ -653,9 +662,9 @@ test('0029 升级到 0030：固定规范目录只迁移明确绑定，保留同�
     assert.ok(projects.every(project => project.standards_document_id === null));
     assert.equal(projects.find(project => project.id === seeded.project.id).overview_document_id, seeded.bound.id);
     assert.equal(projects.find(project => project.id === seeded.project.id).guide_document_id, seeded.unrelated.id);
-    await assert.rejects(upgraded.insert(schema.projectDocumentFolders).values({ project_id: seeded.project.id, name: '项目规范', system_role: 'standards',
+    await assert.rejects(upgraded.insert(schema.projectDocumentFolders).values({ project_id: seeded.project.id, parent_id: root.parent_id, name: '项目规范', system_role: 'standards',
       created_at: 't0', updated_at: 't0' }), error => (error.cause?.code ?? error.code) === '23505');
-    for (const change of [{ name: 'Renamed' }, { parent_id: original.id }, { status: 'archived' }]) {
+    for (const change of [{ name: 'Renamed' }, { status: 'archived' }]) {
       await assert.rejects(upgraded.update(schema.projectDocumentFolders).set(change).where(eq(schema.projectDocumentFolders.id, root.id)),
         error => (error.cause?.code ?? error.code) === '23514');
     }
@@ -718,7 +727,7 @@ test('0034 升级到 0035：测试固定目录保留同名普通子树、正文�
     assert.equal(roots.length, 2, 'Every existing project receives a fixed testing root, including empty archived projects');
     for (const root of roots) {
       assertPublicCode(root.code);
-      assert.equal(root.name, '测试资料'); assert.equal(root.status, 'active'); assert.equal(root.parent_id, null); assert.equal(root.created_by, null);
+      assert.equal(root.name, '测试资料'); assert.equal(root.status, 'active'); assert.equal(root.parent_id, folders.find(folder => folder.project_id === root.project_id && folder.system_role === 'root').id); assert.equal(root.created_by, null);
     }
     assert.deepEqual(folders.find(folder => folder.id === seeded.ordinary.id), { ...seeded.ordinary, name: `测试资料（原目录 ${seeded.ordinary.code}）` });
     assert.deepEqual(folders.find(folder => folder.id === seeded.child.id), seeded.child, 'Nested same-name folders retain their own names and ancestry');
@@ -727,9 +736,9 @@ test('0034 升级到 0035：测试固定目录保留同名普通子树、正文�
     assert.deepEqual(await upgraded.select().from(schema.auditEvents).orderBy(schema.auditEvents.id), seeded.audits);
     const root = roots.find(folder => folder.project_id === seeded.project.id);
     const pgCode = error => error.cause?.code ?? error.code;
-    await assert.rejects(upgraded.insert(schema.projectDocumentFolders).values({ project_id: seeded.project.id,
+    await assert.rejects(upgraded.insert(schema.projectDocumentFolders).values({ project_id: seeded.project.id, parent_id: root.parent_id,
       name: '测试资料', system_role: 'testing', created_at: 't0', updated_at: 't0' }), error => pgCode(error) === '23505');
-    for (const change of [{ name: 'Renamed' }, { parent_id: seeded.child.id }, { status: 'archived' }]) {
+    for (const change of [{ name: 'Renamed' }, { status: 'archived' }]) {
       await assert.rejects(upgraded.update(schema.projectDocumentFolders).set(change).where(eq(schema.projectDocumentFolders.id, root.id)), error => pgCode(error) === '23514');
     }
 

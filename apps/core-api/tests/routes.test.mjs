@@ -503,7 +503,7 @@ test('handoff routes expose nested folders, API documents, search and immutable 
     headers: { 'x-principal-code': owner.code },
   });
   assert.equal(library.json().ok, true, library.body);
-  assert.deepEqual(library.json().data.folders.map((folder) => folder.name), ['项目规范', '需求文档', '架构设计', '测试资料', '接口与联调', '前后端对接']);
+  assert.deepEqual(library.json().data.folders.map((folder) => folder.name), ['项目资料', '项目说明', '项目规范', '需求文档', '架构设计', '测试资料', '接口与联调', '前后端对接']);
   assert.deepEqual(library.json().data.documents.map((document) => document.document_code), [documentCode]);
 
   const revised = await app.inject({

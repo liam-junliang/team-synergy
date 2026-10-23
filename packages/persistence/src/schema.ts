@@ -143,7 +143,7 @@ export const projectDocumentFolders = pgTable(
     project_id: bigint('project_id', { mode: 'bigint' }).notNull(),
     parent_id: bigint('parent_id', { mode: 'bigint' }),
     name: text('name').notNull(),
-    system_role: text('system_role', { enum: ['standards', 'requirements', 'architecture', 'testing'] }),
+    system_role: text('system_role', { enum: ['root', 'overview', 'standards', 'requirements', 'architecture', 'testing'] }),
     sort_order: integer('sort_order').notNull().default(0),
     status: text('status', { enum: ['active', 'archived'] }).notNull().default('active'),
     created_by: bigint('created_by', { mode: 'bigint' }),
@@ -153,8 +153,8 @@ export const projectDocumentFolders = pgTable(
   (t) => [
     ...codeConstraints('project_document_folders', t),
     uniqueIndex('uq_project_document_folders_system_role').on(t.project_id, t.system_role),
-    check('ck_project_document_folders_system_role', sql`${t.system_role} is null or ${t.system_role} in ('standards', 'requirements', 'architecture', 'testing')`),
-    check('ck_project_document_folders_system_shape', sql`${t.system_role} is null or (${t.parent_id} is null and ${t.status} = 'active' and ((${t.system_role} = 'standards' and ${t.name} = '项目规范') or (${t.system_role} = 'requirements' and ${t.name} = '需求文档') or (${t.system_role} = 'architecture' and ${t.name} = '架构设计') or (${t.system_role} = 'testing' and ${t.name} = '测试资料')))`),
+    check('ck_project_document_folders_system_role', sql`${t.system_role} is null or ${t.system_role} in ('root', 'overview', 'standards', 'requirements', 'architecture', 'testing')`),
+    check('ck_project_document_folders_system_shape', sql`${t.system_role} is null or (${t.status} = 'active' and ((${t.system_role} = 'root' and ${t.parent_id} is null and ${t.name} = '项目资料') or (${t.system_role} in ('overview', 'standards', 'requirements', 'architecture', 'testing') and ${t.parent_id} is not null and ((${t.system_role} = 'overview' and ${t.name} = '项目说明') or (${t.system_role} = 'standards' and ${t.name} = '项目规范') or (${t.system_role} = 'requirements' and ${t.name} = '需求文档') or (${t.system_role} = 'architecture' and ${t.name} = '架构设计') or (${t.system_role} = 'testing' and ${t.name} = '测试资料')))))`),
     check('ck_project_document_folders_creator', sql`${t.created_by} is not null or ${t.system_role} is not null`),
     index('idx_project_document_folders_project').on(t.project_id, t.status, t.sort_order),
     index('idx_project_document_folders_parent').on(t.parent_id, t.sort_order),
@@ -210,6 +210,43 @@ export const projectDocumentRevisions = pgTable(
     index('idx_project_document_revisions_document').on(t.document_id, t.revision),
   ],
 );
+
+/** Platform-owned draft work, separate from development Runs and user workspaces. */
+export const systemAgentJobs = pgTable('system_agent_jobs', {
+  id: identityId(),
+  code: publicCode(),
+  project_id: bigint('project_id', { mode: 'bigint' }).notNull(),
+  document_id: bigint('document_id', { mode: 'bigint' }).notNull(),
+  requester_id: bigint('requester_id', { mode: 'bigint' }).notNull(),
+  request_key: text('request_key').notNull(),
+  request_hash: text('request_hash').notNull(),
+  base_revision: integer('base_revision').notNull(),
+  base_title: text('base_title').notNull(),
+  base_summary: text('base_summary').notNull(),
+  base_content: text('base_content').notNull(),
+  instruction: text('instruction').notNull(),
+  quote: text('quote'),
+  status: text('status', { enum: ['queued', 'running', 'awaiting_review', 'applied', 'rejected', 'failed', 'cancelled'] }).notNull().default('queued'),
+  proposal_json: text('proposal_json'),
+  proposal_hash: text('proposal_hash'),
+  quality_json: text('quality_json'),
+  executor_id: text('executor_id'),
+  execution_metadata_json: text('execution_metadata_json'),
+  execution_token: text('execution_token'),
+  lease_expires_at: text('lease_expires_at'),
+  error: text('error'),
+  applied_revision: integer('applied_revision'),
+  applied_by: bigint('applied_by', { mode: 'bigint' }),
+  created_at: text('created_at').notNull(),
+  updated_at: text('updated_at').notNull(),
+}, (t) => [
+  ...codeConstraints('system_agent_jobs', t),
+  uniqueIndex('uq_system_agent_jobs_request').on(t.project_id, t.requester_id, t.request_key),
+  index('idx_system_agent_jobs_queue').on(t.status, t.created_at),
+  index('idx_system_agent_jobs_requester').on(t.project_id, t.requester_id, t.created_at),
+  check('ck_system_agent_jobs_status', sql`${t.status} in ('queued', 'running', 'awaiting_review', 'applied', 'rejected', 'failed', 'cancelled')`),
+  check('ck_system_agent_jobs_base_revision', sql`${t.base_revision} > 0`),
+]);
 
 export const projectModules = pgTable(
   'project_modules',
@@ -1334,16 +1371,19 @@ export const runSkillManifests = pgTable('run_skill_manifests', {
 /** Candidate packages are isolated from business entities until an explicit reviewed plan is applied. */
 export const intakeBatches = pgTable('intake_batches', {
   id: identityId(), code: publicCode(), project_id: bigint('project_id', { mode: 'bigint' }).notNull(),
-  repository_id: bigint('repository_id', { mode: 'bigint' }).notNull(), namespace: text('namespace').notNull(),
+  repository_id: bigint('repository_id', { mode: 'bigint' }), namespace: text('namespace').notNull(),
   created_by: bigint('created_by', { mode: 'bigint' }).notNull(), source_json: text('source_json').notNull(),
   payload_hash: text('payload_hash').notNull(), submit_key: text('submit_key').notNull(), submit_hash: text('submit_hash').notNull(),
   status: text('status', { enum: ['draft', 'ready', 'applying', 'applied', 'partial', 'cancelled', 'stopped'] }).notNull(),
   revision: integer('revision').notNull().default(1), plan_hash: text('plan_hash'),
+  profile: text('profile', { enum: ['pilot', 'enterprise'] }),
+  quality_rule_version: text('quality_rule_version'), quality_report_json: text('quality_report_json'), frozen_quality_json: text('frozen_quality_json'),
   stop_requested: boolean('stop_requested').notNull().default(false),
   created_at: text('created_at').notNull(), updated_at: text('updated_at').notNull(),
 }, t => [...codeConstraints('intake_batches', t), index('idx_intake_batches_project').on(t.project_id),
   uniqueIndex('uq_intake_batches_submit').on(t.project_id, t.created_by, t.submit_key),
   check('ck_intake_batches_status', sql`${t.status} in ('draft','ready','applying','applied','partial','cancelled','stopped')`),
+  check('ck_intake_batches_profile', sql`${t.profile} is null or ${t.profile} in ('pilot','enterprise')`),
   check('ck_intake_batches_revision', sql`${t.revision} > 0`)]);
 export const intakeItems = pgTable('intake_items', {
   id: identityId(), batch_id: bigint('batch_id', { mode: 'bigint' }).notNull(), item_key: text('item_key').notNull(),
@@ -1354,11 +1394,12 @@ export const intakeItems = pgTable('intake_items', {
   check('ck_intake_items_kind', sql`${t.kind} in ('module','feature','requirement_document','requirement','architecture')`),
   check('ck_intake_items_status', sql`${t.status} in ('pending','applied','bound','skipped','failed','blocked')`)]);
 export const intakeBindings = pgTable('intake_bindings', {
-  id: identityId(), project_id: bigint('project_id', { mode: 'bigint' }).notNull(), repository_id: bigint('repository_id', { mode: 'bigint' }).notNull(),
+  id: identityId(), project_id: bigint('project_id', { mode: 'bigint' }).notNull(), repository_id: bigint('repository_id', { mode: 'bigint' }),
   namespace: text('namespace').notNull(), kind: text('kind').notNull(), source_key: text('source_key').notNull(),
   target_code: text('target_code').notNull(), target_fingerprint: text('target_fingerprint').notNull(),
   batch_id: bigint('batch_id', { mode: 'bigint' }).notNull(), created_at: text('created_at').notNull(),
-}, t => [uniqueIndex('uq_intake_bindings_source').on(t.project_id, t.repository_id, t.namespace, t.kind, t.source_key)]);
+}, t => [uniqueIndex('uq_intake_bindings_source').on(t.project_id, t.repository_id, t.namespace, t.kind, t.source_key),
+  uniqueIndex('uq_intake_bindings_material_source').on(t.project_id, t.namespace, t.kind, t.source_key).where(sql`${t.repository_id} is null`)]);
 export const intakeAttempts = pgTable('intake_attempts', {
   id: identityId(), batch_id: bigint('batch_id', { mode: 'bigint' }).notNull(), idempotency_key: text('idempotency_key').notNull(),
   plan_hash: text('plan_hash').notNull(), principal_id: bigint('principal_id', { mode: 'bigint' }).notNull(),

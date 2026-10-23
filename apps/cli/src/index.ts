@@ -25,6 +25,7 @@ import { registerTestingCommands } from './testing.js';
 import { registerSkillCommands } from './skills.js';
 import { registerIntakeCommands } from './intake.js';
 import { prepareRunSkillContext } from './skill-context.js';
+import { generateWorkspaceGuidance, checkWorkspaceGuidance } from './guidance.js';
 import { DomainError } from '@team-synergy/domain';
 import {
   ArtifactKindSchema,
@@ -346,7 +347,7 @@ auth
   });
 
 // ---- project 命令族（bootstrap：初始化项目容器） ----
-const project = program.command('project').description('项目操作：create / list / members / bind / current');
+const project = program.command('project').description('项目操作：create / list / home / members / bind / current');
 const repository = program.command('repository').alias('repo').description('项目代码仓库：list / clone / attach / status');
 
 project
@@ -555,6 +556,11 @@ async function runClaim(taskCode: string, profileRaw: string, repo: string): Pro
       { documents: requirementDocuments, related: relatedRequirementDocument },
       handoffContext,
     );
+    try {
+      await generateWorkspaceGuidance({ dir: process.cwd() });
+    } catch {
+      // The task context pack already includes project documents; guidance refresh is best effort.
+    }
     return {
       runCode,
       workspaceCode,
@@ -1581,7 +1587,7 @@ program
       ok: true,
       data: {
         principal_code: principalCode(),
-        database_configured: Boolean(process.env.ACP_DATABASE_URL?.trim()),
+        database_configured: Boolean(process.env.TSP_DATABASE_URL?.trim()),
         api_url: process.env.ACP_API_URL ?? null,
         sync_mode: apiUrlConfigured() ? 'http' : 'api_required',
       },
@@ -1589,7 +1595,7 @@ program
   });
 
 // ---- workspace 命令族（docs/04/07：Worktree 生命周期） ----
-const workspace = program.command('workspace').description('项目工作空间与 Run 工作区操作：init / create / identify / cleanup');
+const workspace = program.command('workspace').description('项目工作空间与 Run 工作区操作：init / guidance / create / identify / cleanup');
 
 workspace
   .command('init')
@@ -1619,7 +1625,33 @@ workspace
       const workspaceCode = String(registered.project_workspace_code ?? '');
       if (!workspaceCode) throw new DomainError('project_workspace_registration_invalid', '云端未返回项目工作空间编码');
       const bound = finalizeProjectWorkspaceBinding(prepared.root, projectCode, workspaceCode, apiUrl);
-      printResult({ ok: true, data: { ...prepared, binding: bound.binding, binding_path: bound.path, reused: false } });
+      let guidance: unknown = null;
+      try {
+        guidance = await generateWorkspaceGuidance({ dir: prepared.root });
+      } catch (error) {
+        guidance = { error: error instanceof Error ? error.message : String(error) };
+      }
+      printResult({ ok: true, data: { ...prepared, binding: bound.binding, binding_path: bound.path, reused: false, guidance } });
+    } catch (error) {
+      printResult(failResult(error));
+      process.exitCode = 1;
+    }
+  });
+
+workspace
+  .command('guidance')
+  .description('从平台项目规范生成 AGENTS.md、CLAUDE.md 和规范快照')
+  .option('--dir <path>', '工作空间目录', '.')
+  .option('--check', '只检查本地快照是否与平台 revision 一致')
+  .action(async (opts: { dir: string; check?: boolean }) => {
+    try {
+      if (opts.check) {
+        const data = await checkWorkspaceGuidance({ dir: opts.dir });
+        printResult({ ok: true, data });
+        if (!data.up_to_date) process.exitCode = 1;
+        return;
+      }
+      printResult({ ok: true, data: await generateWorkspaceGuidance({ dir: opts.dir }) });
     } catch (error) {
       printResult(failResult(error));
       process.exitCode = 1;
@@ -2494,6 +2526,36 @@ requirement
       if (!result.ok) process.exitCode = 1;
     } catch (e) {
       printResult(failResult(e));
+      process.exitCode = 1;
+    }
+  });
+
+project
+  .command('home')
+  .description('查看或设置项目首页的项目说明与参与指引')
+  .argument('[project_code]')
+  .option('--overview <document_code>', '项目说明文档编码')
+  .option('--guide <document_code>', '参与指引文档编码')
+  .option('--clear-overview', '解除项目说明绑定')
+  .option('--clear-guide', '解除参与指引绑定')
+  .action(async (projectCodeArg: string | undefined, opts: {
+    overview?: string; guide?: string; clearOverview?: boolean; clearGuide?: boolean;
+  }) => {
+    try {
+      const projectCode = projectCodeArg ?? await resolveProjectCode();
+      const body: Record<string, unknown> = {};
+      if (opts.overview) body.overview_document_code = opts.overview;
+      if (opts.guide) body.guide_document_code = opts.guide;
+      if (opts.clearOverview) body.overview_document_code = null;
+      if (opts.clearGuide) body.guide_document_code = null;
+      const api = requireApiClient();
+      const result = Object.keys(body).length > 0
+        ? await api.updateProjectHome(projectCode, body)
+        : await api.getProjectHome(projectCode);
+      printResult(result);
+      if (!result.ok) process.exitCode = 1;
+    } catch (error) {
+      printResult(failResult(error));
       process.exitCode = 1;
     }
   });

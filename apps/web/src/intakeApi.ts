@@ -1,8 +1,8 @@
 import { fetchEnvelope } from './api';
 import { t } from './i18n.ts';
-import type { IntakeBatchDetail, IntakeBundle, IntakeContext, IntakeDecision, IntakeItemView, IntakeKind, IntakeList, IntakeReviewInput } from '../../../packages/contracts/src/intake';
+import type { IntakeBatchDetail, IntakeBundle, IntakeContext, IntakeDecision, IntakeItemView, IntakeKind, IntakeList, IntakeProfile, IntakeReviewInput } from '../../../packages/contracts/src/intake';
 
-export type { IntakeBatchDetail, IntakeBundle, IntakeContext, IntakeDecision, IntakeItemView, IntakeKind, IntakeList, IntakeTarget } from '../../../packages/contracts/src/intake';
+export type { IntakeBatchDetail, IntakeBundle, IntakeContext, IntakeDecision, IntakeItemView, IntakeKind, IntakeList, IntakeProfile, IntakeTarget } from '../../../packages/contracts/src/intake';
 const path = (project: string, batch?: string) => `/projects/${encodeURIComponent(project)}/intake${batch ? `/${encodeURIComponent(batch)}` : ''}`;
 export const getIntakeContext = (project: string): Promise<IntakeContext> => fetchEnvelope(`${path(project)}/context`);
 export const listIntakes = (project: string): Promise<IntakeList> => fetchEnvelope(path(project));
@@ -48,7 +48,15 @@ export function intakeReviewProblem(batch: IntakeBatchDetail, decisions: Record<
 }
 
 export function intakeCanPublish(batch: IntakeBatchDetail, editing: boolean): boolean {
-  return batch.can_review && !editing && Boolean(batch.plan_hash) && ['ready', 'partial', 'stopped'].includes(batch.status);
+  return batch.can_review && !editing && Boolean(batch.profile) && batch.quality_gate?.status === 'eligible' && Boolean(batch.plan_hash) && ['ready', 'partial', 'stopped'].includes(batch.status);
+}
+
+/** The server recalculates the selected profile when freezing; this only explains known blockers. */
+export function intakeFreezeProblem(batch: IntakeBatchDetail, profile?: IntakeProfile): string | null {
+  if (!profile) return t('请明确本批次的交付档位，再冻结发布计划。');
+  if (batch.profile === 'enterprise' && profile !== 'enterprise') return t('企业档位不能降为试点档位。');
+  if (batch.profile === 'enterprise' && batch.quality_gate?.status === 'blocked') return t('企业候选仍有阻断项，请修正候选后重新上传。');
+  return null;
 }
 
 export function filterIntakeItems(items: IntakeItemView[], kind: string, status: string, search: string): IntakeItemView[] {

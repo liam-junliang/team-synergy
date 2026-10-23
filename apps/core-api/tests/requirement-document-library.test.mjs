@@ -47,7 +47,7 @@ test('requirement library projections share source identity, current content and
   const library = await request('GET', `${root}/handoff`, member);
   const folder = library.folders.find(item => item.system_role === 'requirements');
   assert.equal(folder.name, '需求文档');
-  assert.equal(folder.parent_folder_code, null);
+  assert.equal(folder.parent_folder_code, library.folders.find(item => item.system_role === 'root').folder_code);
   assert.equal(folder.can_edit, false);
   assert.equal(folder.status, 'active');
   assert.equal(library.folders.filter(item => item.system_role === 'requirements').length, 1);
@@ -152,7 +152,9 @@ test('fixed requirement directory and projected sources reject generic writes wi
   const folder = library.folders.find(item => item.system_role === 'requirements');
   const ordinaryFolder = await request('POST', `${root}/handoff/folders`, owner, { name: 'Ordinary folder' });
   const ordinary = await request('POST', `${root}/handoff/documents`, owner, { title: 'Ordinary document', content: 'Ordinary body', kind: 'general' });
-  await request('PUT', `${root}/home`, owner, { overview_document_code: ordinary.document_code });
+  const homeView = await request('GET', `${root}/home`);
+  const homeDocument = await request('POST', `${root}/handoff/documents`, owner, { folder_code: homeView.overview_folder_code, title: 'Home overview', content: 'Home body', kind: 'general' });
+  await request('PUT', `${root}/home`, owner, { overview_document_code: homeDocument.document_code });
   for (const payload of [{ name: 'Renamed' }, { parent_folder_code: ordinaryFolder.folder_code }, { status: 'archived' }]) {
     const rejected = await app.inject({ method: 'PATCH', url: `/handoff-folders/${folder.folder_code}`, headers: owner.headers, payload });
     assert.equal(rejected.statusCode, 422, rejected.body);
@@ -177,15 +179,15 @@ test('fixed requirement directory and projected sources reject generic writes wi
   const invalidHome = await app.inject({ method: 'PUT', url: `${root}/home`, headers: owner.headers,
     payload: { overview_document_code: requirement.document_code } });
   assert.equal(invalidHome.statusCode, 422, invalidHome.body);
-  assert.equal((await request('GET', `${root}/home`)).overview.document_code, ordinary.document_code);
+  assert.equal((await request('GET', `${root}/home`)).overview.document_code, homeDocument.document_code);
   assert.deepEqual(await request('GET', sourceUrl), original);
   const preservedOrdinary = await request('GET', `/handoff-documents/${ordinary.document_code}`);
   assert.equal(preservedOrdinary.content, 'Ordinary body');
   assert.equal(preservedOrdinary.current_revision, 1);
   assert.equal(preservedOrdinary.folder_code, null);
   const finalLibrary = await request('GET', `${root}/handoff`);
-  assert.equal(finalLibrary.folders.length, 5);
-  assert.equal(finalLibrary.documents.length, 2);
+  assert.equal(finalLibrary.folders.length, 7);
+  assert.equal(finalLibrary.documents.length, 3);
   assert.equal(finalLibrary.folders.find(item => item.folder_code === folder.folder_code).name, '需求文档');
   assert.equal(finalLibrary.folders.find(item => item.folder_code === ordinaryFolder.folder_code).parent_folder_code, null);
 });

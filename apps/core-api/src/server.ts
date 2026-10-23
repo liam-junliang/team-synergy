@@ -5,7 +5,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import swagger from '@fastify/swagger';
 import { ProfileSchema, TaskStatusSchema } from '@team-synergy/contracts';
 import { canTransition } from '@team-synergy/domain';
-import { ensureSystemAdmin } from '@team-synergy/application';
+import { createSystemAgentUseCases, ensureSystemAdmin } from '@team-synergy/application';
 import { closeDb, openDb, type Db } from '@team-synergy/persistence';
 import { registerTaskRoutes } from './routes/tasks.js';
 import { registerDefectRoutes } from './routes/defects.js';
@@ -16,6 +16,7 @@ import { registerRequirementCollaborationRoutes } from './routes/requirement-col
 import { registerDesignPrototypeRoutes } from './routes/design-prototypes.js';
 import { registerArchitectureDocumentRoutes } from './routes/architecture-documents.js';
 import { registerProjectDocumentRoutes } from './routes/project-documents.js';
+import { registerDocumentQualityRoutes } from './routes/document-quality.js';
 import { registerAuthMiddleware } from './auth.js';
 import { httpStatusForError } from './error-status.js';
 import { registerAuthRoutes } from './routes/auth.js';
@@ -31,11 +32,15 @@ import { registerCliDistributionRoutes } from './routes/cli-distribution.js';
 import { registerSystemSettingsRoutes } from './routes/system-settings.js';
 import { registerAdminGovernanceRoutes } from './routes/admin-governance.js';
 import { registerIntakeRoutes } from './routes/intake.js';
+import { registerSystemAgentRoutes } from './routes/system-agent.js';
+import { createSystemAgentRuntime } from './system-agent-runtime.js';
+import { loadSystemAgentGuidance } from './system-agent-guidance.js';
+import { createSystemAgentWorker } from './system-agent-worker.js';
 
 export interface BuildServerOptions {
   /** Borrow an existing handle. The caller remains responsible for closing it. */
   db?: Db;
-  /** Override the default ACP_DATABASE_URL value when the server owns the database. */
+  /** Override the default TSP_DATABASE_URL value when the server owns the database. */
   databaseUrl?: string;
   logger?: boolean;
 }
@@ -114,6 +119,28 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   registerAdminGovernanceRoutes(app, db);
   registerIntakeRoutes(app, db);
 
+  const systemAgentRuntime = createSystemAgentRuntime();
+  let systemAgentGuidance: ReturnType<typeof loadSystemAgentGuidance> | null = null;
+  try { systemAgentGuidance = loadSystemAgentGuidance(); } catch { /* Explicitly unavailable until the packaged Skill is restored. */ }
+  const systemAgentStatus = () => {
+    const status = systemAgentRuntime.status();
+    return systemAgentGuidance ? status : { ...status, configured: false, message: '系统 Agent 的 Skill 包缺失或校验失败，请重新构建服务' };
+  };
+  app.get('/system-agent/status', async () => ({ ok: true, data: systemAgentStatus() }));
+  registerSystemAgentRoutes(app, db, { isConfigured: () => systemAgentStatus().configured });
+  // Inject-based tests borrow a DB and never start a paid inference/background worker.
+  if (ownsDb && systemAgentStatus().configured && systemAgentGuidance) {
+    const status = systemAgentRuntime.status();
+    const worker = createSystemAgentWorker({
+      store: createSystemAgentUseCases(db), runtime: systemAgentRuntime, guidance: systemAgentGuidance.guidance,
+      executionMetadata: { engine: status.engine, engine_version: status.version, model: status.model,
+        skill_version: systemAgentGuidance.version, skill_sha256: systemAgentGuidance.sha256 },
+      onError: code => app.log.warn({ code }, 'System Agent worker event'),
+    });
+    app.addHook('onReady', async () => { worker.start(); });
+    app.addHook('onClose', async () => { await worker.stop(); });
+  }
+
   // 统一错误状态码映射：业务拒绝（ok:false）不再一律 HTTP 200。
   // envelope 结构不变，仅按 error.code 提升状态码（docs/30 工程化缺漏 #2）。
   app.addHook('preSerialization', async (request, reply, payload) => {
@@ -156,6 +183,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   registerArchitectureDocumentRoutes(app, db);
   // 项目交接文档库：多级文件夹、多份文档及不可变 Revision
   registerProjectDocumentRoutes(app, db);
+  registerDocumentQualityRoutes(app, db);
   // Defect 闭环（docs/19）
   registerDefectRoutes(app, db);
   // 用户账号（docs/23）

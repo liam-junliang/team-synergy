@@ -33,12 +33,26 @@ const components: Components = {
   img({ node: _node, src, ...props }) {
     return <img {...props} src={src || undefined} />;
   },
-  table({ children, node: _node, ...props }) {
-    return <div className="markdown-table-scroll" tabIndex={0} role="region" aria-label={t("表格")}><table {...props}>{children}</table></div>;
+  table({ children, node, ...props }) {
+    return <div className="markdown-table-scroll" data-source-line={node?.position?.start.line} tabIndex={0} role="region" aria-label={t("表格")}><table {...props}>{children}</table></div>;
   },
 };
 
-export function MarkdownDocument({ content, outline = [] }: { content: string; outline?: OutlineItem[] }) {
+/** Candidate content must never fetch model-supplied image URLs, including relative/data URLs. */
+const componentsWithoutImages: Components = {
+  ...components,
+  pre({ children, node: _node, ...props }) {
+    return <pre {...props}>{children}</pre>;
+  },
+  img({ alt }) {
+    return <span className="text-xs text-slate-500" role="img" aria-label={alt || t('图片预览已禁用')}>{t('图片预览已禁用')}{alt ? ` · ${alt}` : ''}</span>;
+  },
+  a({ node: _node, ...props }) {
+    return <a {...props} rel="noopener noreferrer" />;
+  },
+};
+
+export function MarkdownDocument({ content, outline = [], allowImages = true }: { content: string; outline?: OutlineItem[]; allowImages?: boolean }) {
   useLocale();
   const containerRef = useRef<HTMLDivElement>(null);
   const restoredLocation = useRef<string | null>(null);
@@ -54,7 +68,7 @@ export function MarkdownDocument({ content, outline = [] }: { content: string; o
   }, [content]);
 
   return <div ref={containerRef} className="markdown-document" onClick={handleMarkdownAnchorClick}>
-    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[headingAnchors(content, outline)]} remarkRehypeOptions={{ footnoteLabel: t('脚注'), footnoteBackLabel: t('返回正文') }} components={components}>{content}</ReactMarkdown>
+    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[headingAnchors(content, outline)]} remarkRehypeOptions={{ footnoteLabel: t('脚注'), footnoteBackLabel: t('返回正文') }} components={allowImages ? components : componentsWithoutImages}>{content}</ReactMarkdown>
   </div>;
 }
 
@@ -63,6 +77,9 @@ function headingAnchors(content: string, outline: OutlineItem[]) {
     const headings: MarkdownNode[] = [];
     const usedIds = new Set<string>();
     function visit(node: MarkdownNode) {
+      if (node.tagName && /^(h[1-6]|p|li|pre|blockquote)$/.test(node.tagName) && node.position?.start.line) {
+        node.properties = { ...node.properties, 'data-source-line': node.position.start.line };
+      }
       const id = node.properties?.id;
       if (typeof id === 'string') usedIds.add(id);
       // Generated footnote headings already have an id and must keep it.
@@ -100,7 +117,7 @@ function headingAnchors(content: string, outline: OutlineItem[]) {
       let suffix = 2;
       while (usedIds.has(id) || (id !== explicit && reservedIds.has(id))) id = `${base}-${suffix++}`;
       usedIds.add(id);
-      heading.properties = { ...heading.properties, id, tabIndex: -1 };
+      heading.properties = { id, tabIndex: -1, ...heading.properties };
     });
   };
 }

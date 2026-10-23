@@ -34,10 +34,10 @@ jobs:
           --health-retries 10
 
     env:
-      # 测试库连接串。库名必须是 acp_test：ensureTestDatabase() 以该 URL 的库名
+      # 测试库连接串。库名必须是 team_synergy_test：ensureTestDatabase() 以该 URL 的库名
       # 判断是否 CREATE DATABASE（不存在才建），绝不能指向 service 的管理库
       # postgres，否则测试迁移+TRUNCATE 会清空管理库。
-      ACP_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/acp_test
+      TSP_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/team_synergy_test
 
     steps:
       - uses: actions/checkout@v4

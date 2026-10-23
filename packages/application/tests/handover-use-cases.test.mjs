@@ -340,7 +340,7 @@ test('handover: home document roles freeze in context and reassignment produces 
   const home = createProjectHomeUseCases(ctx.db);
   const homeView = success(await home.getHome(ctx.project.code, ctx.users.owner.code), 'standards folder');
   const overview = success(await documents.createDocument({ projectCode: ctx.project.code, principalCode: ctx.users.owner.code,
-    title: 'Overview and onboarding', content: 'Approved project introduction', kind: 'general' }), 'overview document');
+    folderCode: homeView.overview_folder_code, title: 'Overview and onboarding', content: 'Approved project introduction', kind: 'general' }), 'overview document');
   const standards = success(await documents.createDocument({ projectCode: ctx.project.code, principalCode: ctx.users.owner.code,
     title: 'Standards', content: 'Approved working rules', kind: 'general', folderCode: homeView.standards_folder_code }), 'standards document');
   // Preserve coverage of standards trees created before system folders disallowed children.
@@ -362,8 +362,10 @@ test('handover: home document roles freeze in context and reassignment produces 
   assert.deepEqual(sources.find(source => source.code === standards.document_code).home_roles, ['standards']);
   assert.deepEqual(sources.find(source => source.code === second.document_code).home_roles, ['standards']);
   assert.equal(sources.find(source => source.code === second.document_code).revision, 1);
+  const replacement = success(await documents.createDocument({ projectCode: ctx.project.code, principalCode: ctx.users.owner.code,
+    folderCode: homeView.overview_folder_code, title: 'Replacement guide', content: 'Replacement onboarding', kind: 'general' }), 'replacement overview document');
   success(await home.updateHome({ projectCode: ctx.project.code, principalCode: ctx.users.owner.code, bindings: {
-    guide_document_code: standards.document_code,
+    guide_document_code: replacement.document_code,
   } }), 'reassign home without changing document content');
   assert.deepEqual(success(await ctx.handovers.getContext(request), 'frozen home unchanged'), frozen);
   const drift = success(await ctx.handovers.diffContext({ identity: ctx.identities.target, handover_code: prepared.handover_code }), 'home drift');

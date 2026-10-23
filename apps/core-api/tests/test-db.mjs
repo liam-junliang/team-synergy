@@ -5,7 +5,7 @@ import { closeDb, openDb, schema } from '@team-synergy/persistence';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = path.resolve(here, '../dist/migrations');
-const testDatabaseUrl = process.env.ACP_TEST_DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/acp_test';
+const testDatabaseUrl = process.env.TSP_TEST_DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/team_synergy_test';
 
 let ensured = false;
 

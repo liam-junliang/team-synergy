@@ -16,7 +16,7 @@
     "agentctl": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/bundle-intake-skill.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "node --test --test-concurrency=1 tests/*.test.mjs"
   },

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json && node scripts/copy-migrations.mjs",
+    "build": "tsc -p tsconfig.json && node scripts/copy-migrations.mjs && node scripts/bundle-system-agent-skill.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "node --test --test-concurrency=1 tests/*.test.mjs",
     "start": "node dist/index.js"

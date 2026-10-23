@@ -385,18 +385,21 @@ export function createProjectUseCasesProject(db: Db) {
         )).for('update').limit(1);
         if (currentProject.overview_document_id !== null && !existing) throw new DomainError('project_home_document_invalid', '项目首页说明关联无效，请重新关联文档');
         if (existing?.status === 'archived') throw new DomainError('project_home_document_archived', '项目说明文档已归档，请先解除或重新关联首页文档');
+        const folders = await ensureProjectSystemFolders(tx, project.id);
         const revision = (existing?.revision ?? 0) + 1;
         const [document] = existing
           ? await tx.update(schema.projectDocuments).set({
             title,
             content,
             revision,
+            folder_id: folders.overview.id,
             updated_by: principal.id,
             updated_at: updatedAt,
           }).where(eq(schema.projectDocuments.id, existing.id)).returning()
           : await tx.insert(schema.projectDocuments).values({
             code: createPublicCode(),
             project_id: project.id,
+            folder_id: folders.overview.id,
             title,
             content,
             revision,

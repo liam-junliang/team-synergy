@@ -1,7 +1,7 @@
 import { canProject } from './projectManagement';
 import { useLocale } from './useLocale';
 import { t } from './i18n.ts';
-import { useDeferredValue, useEffect, useRef, useState, type Ref } from 'react';
+import { useDeferredValue, useEffect, useRef, useState, type Ref, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import {
   createArchitectureDocument, getArchitectureDocument, getProject, listArchitectureDocuments, reviseArchitectureDocument,
@@ -41,7 +41,7 @@ export function ArchitecturePreview({ document: view }: { document: Architecture
   return <div className="overflow-auto p-4"><img src={view.source_content} alt={view.title || t('架构图')} className="mx-auto max-h-[680px] max-w-full object-contain" /></div>;
 }
 
-export function ArchitectureDocumentReader({ document, onEdit, embedded = false }: { document: ArchitectureDocumentDetail; onEdit: () => void; embedded?: boolean }) {
+export function ArchitectureDocumentReader({ document, onEdit, embedded = false, renderNotice }: { document: ArchitectureDocumentDetail; onEdit: () => void; embedded?: boolean; renderNotice?: (revision: number) => ReactNode }) {
   useLocale();
   const [revision, setRevision] = useState<number | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -56,7 +56,7 @@ export function ArchitectureDocumentReader({ document, onEdit, embedded = false 
   }
   return <article className={`relative grid min-w-0 grid-cols-[minmax(0,1fr)] overflow-clip bg-white ${embedded ? '' : 'rounded-2xl border border-slate-200 shadow-sm'} ${historyOpen ? 'xl:grid-cols-[minmax(0,1fr)_240px]' : ''}`} onKeyDown={(event) => { if (historyOpen && event.key === 'Escape') { event.stopPropagation(); closeHistory(); } }}>
     <div className="min-w-0">
-      <ArchitectureDocumentHeader document={document} historical={historical} historyOpen={historyOpen} historyToggleRef={historyToggleRef}
+      <ArchitectureDocumentHeader document={document} historical={historical} historyOpen={historyOpen} historyToggleRef={historyToggleRef} notice={renderNotice?.(viewedRevision)}
         onToggleHistory={() => setHistoryOpen(open => !open)} onReturnCurrent={() => setRevision(null)} onEdit={onEdit}
         onDownload={() => { try { downloadFile(architectureSourceFile(viewed.content_kind, viewed.source_content, viewed.title, viewedRevision)); setExportError(''); } catch (error) { setExportError(error instanceof Error ? error.message : String(error)); } }} />
       {exportError && <div className="px-5 pt-4 sm:px-6"><ArchitectureError error={exportError} /></div>}
@@ -68,7 +68,7 @@ export function ArchitectureDocumentReader({ document, onEdit, embedded = false 
   </article>;
 }
 
-export function ArchitectureDocumentHeader({ document, historical, historyOpen, historyToggleRef, onToggleHistory, onReturnCurrent, onEdit, onDownload }: {
+export function ArchitectureDocumentHeader({ document, historical, historyOpen, historyToggleRef, onToggleHistory, onReturnCurrent, onEdit, onDownload, notice }: {
   document: ArchitectureDocumentDetail;
   historical?: ArchitectureDocumentRevision;
   historyOpen: boolean;
@@ -77,13 +77,14 @@ export function ArchitectureDocumentHeader({ document, historical, historyOpen, 
   onReturnCurrent: () => void;
   onEdit: () => void;
   onDownload: () => void;
+  notice?: ReactNode;
 }) {
   const viewed = historical ?? document;
   const isHistorical = Boolean(historical && historical.revision !== document.current_revision);
   return <DocumentReaderHeader title={viewed.title} summary={viewed.summary} actionsLabel={t("架构文档操作")}
     breadcrumb={<><span className="truncate">{t("架构设计")}</span><span>/</span><span className="shrink-0 rounded bg-cyan-100 px-1.5 py-0.5 font-semibold text-cyan-700">diagram</span></>}
     metadata={<><span>Revision {historical?.revision ?? document.current_revision} · {formatDocumentDate(historical?.created_at ?? document.updated_at)}</span><span>{t(ARCHITECTURE_KIND_LABEL[viewed.content_kind])}</span><code className="break-all">{document.document_code}</code></>}
-    notice={isHistorical && <p role="status" className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-800">{t("正在查看历史版本 r{revision}，图源、预览与说明均来自该版本。", { revision: historical?.revision ?? 0 })}</p>}>
+    notice={<>{isHistorical && <p role="status" className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-800">{t("正在查看历史版本 r{revision}，图源、预览与说明均来自该版本。", { revision: historical?.revision ?? 0 })}</p>}{notice}</>}>
     <button type="button" className="ui-button ui-button-secondary" onClick={onDownload}>{t("下载图源")}</button>
     {isHistorical ? <button type="button" onClick={onReturnCurrent} className="ui-button ui-button-secondary min-w-28 justify-center">{t("返回当前版本")}</button> : document.can_edit && <button type="button" onClick={onEdit} className="ui-button ui-button-secondary min-w-28 justify-center">{t("编辑当前版本")}</button>}
     <button ref={historyToggleRef} type="button" onClick={onToggleHistory} aria-expanded={historyOpen} aria-controls="architecture-version-history" className="ui-button ui-button-secondary" title={historyOpen ? t('收起版本记录') : t('展开版本记录')}>{t("版本记录")}</button>

@@ -5,7 +5,7 @@ import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { migrate as drizzleMigrate } from 'drizzle-orm/node-postgres/migrator';
 import * as schema from './schema.js';
 
-export const DEFAULT_DATABASE_URL = 'postgres://postgres:postgres@127.0.0.1:5432/acp';
+export const DEFAULT_DATABASE_URL = 'postgres://postgres:postgres@127.0.0.1:5432/team_synergy';
 
 export type Db = NodePgDatabase<typeof schema> & { $client: Pool };
 
@@ -25,12 +25,12 @@ function defaultMigrationsFolder(): string {
 
 /**
  * 打开 PostgreSQL 数据库：
- * - 默认读取 ACP_DATABASE_URL，缺省回退到本地开发库
+ * - 默认读取 TSP_DATABASE_URL，缺省回退到本地开发库
  * - 默认自动执行 drizzle 迁移（幂等，由 __drizzle_migrations 跟踪）
  */
 export async function openDb(options: OpenDbOptions = {}): Promise<Db> {
   const pool = new Pool({
-    connectionString: options.databaseUrl ?? process.env.ACP_DATABASE_URL ?? DEFAULT_DATABASE_URL,
+    connectionString: options.databaseUrl ?? process.env.TSP_DATABASE_URL ?? DEFAULT_DATABASE_URL,
   });
   const db = drizzle(pool, { schema });
 

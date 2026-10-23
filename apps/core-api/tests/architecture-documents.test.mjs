@@ -83,7 +83,7 @@ test('architecture library HTTP shares source versions and rejects generic write
   const list = await app.inject({ method: 'GET', url: `${projectRoot}/handoff`, headers: reader.headers });
   assert.equal(list.statusCode, 200, list.body);
   const library = list.json().data;
-  assert.deepEqual(library.folders.map(folder => folder.system_role).sort(), ['architecture', 'requirements', 'standards', 'testing']);
+  assert.deepEqual(library.folders.map(folder => folder.system_role).sort(), ['architecture', 'overview', 'requirements', 'root', 'standards', 'testing']);
   const folder = library.folders.find(item => item.system_role === 'architecture');
   const item = library.documents[0];
   assert.equal(item.kind, 'diagram');

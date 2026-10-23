@@ -163,6 +163,9 @@ export function createApiClient(opts: ApiClientOptions) {
     async getProjectHome(projectCode: string): Promise<ApiResult<Record<string, unknown>>> {
       return request('GET', `/projects/${encodeURIComponent(projectCode)}/home`);
     },
+    async updateProjectHome(projectCode: string, body: Record<string, unknown>): Promise<ApiResult<Record<string, unknown>>> {
+      return request('PUT', `/projects/${encodeURIComponent(projectCode)}/home`, body);
+    },
     async listHandoffLibrary(projectCode: string, query = ''): Promise<ApiResult<Record<string, unknown>>> {
       const suffix = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : '';
       return request('GET', `/projects/${encodeURIComponent(projectCode)}/handoff${suffix}`);

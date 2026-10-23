@@ -45,7 +45,7 @@ async function start(options: StartOptions, previous?: Session): Promise<Session
   const file = journalPath(session.session_code);
   const journal: Journal = { session, runCode: context.run_code, taskCode: context.task_code, workspace, repoPath, credentialFingerprint: fingerprint, lease, startKey, completed: false, exitCode: null, error: null, output: '', processId: null };
   writeJournal(file, journal);
-  const child = spawn(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), 'supervisor.js'), file], { cwd: repoPath, env: { ...process.env, ACP_API_URL: config.apiUrl, ACP_DEVICE_TOKEN: config.deviceToken, ACP_DATABASE_URL: undefined }, detached: true, windowsHide: true, stdio: 'ignore' });
+  const child = spawn(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), 'supervisor.js'), file], { cwd: repoPath, env: { ...process.env, ACP_API_URL: config.apiUrl, ACP_DEVICE_TOKEN: config.deviceToken, TSP_DATABASE_URL: undefined }, detached: true, windowsHide: true, stdio: 'ignore' });
   journal.processId = child.pid ?? null; journal.session.process_id = child.pid ?? null; writeJournal(file, journal);
   try {
     await new Promise<void>((resolve, reject) => { child.once('error', reject); child.once('spawn', () => { child.unref(); resolve(); }); });

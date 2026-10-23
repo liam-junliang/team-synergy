@@ -131,14 +131,14 @@ test('首页绑定候选仅包含活动项目文档，排除需求和架构来�
   assert.equal(documents.length, 5);
 });
 
-test('从首页编辑正文保留目录与状态，省略类型以保留旧分类', async () => {
+test('从首页编辑正文保留目录、状态与原版本，省略类型以保留旧分类', async () => {
   const { homeDocumentRevision } = await vite.ssrLoadModule('/src/ProjectOverviewWorkbench.tsx');
-  const input = homeDocumentRevision({ kind: 'deployment', folder_code: 'FOLDER-OPS', status: 'active' }, {
+  const input = homeDocumentRevision({ kind: 'deployment', folder_code: 'FOLDER-OPS', status: 'active', current_revision: 3 }, {
     title: '  环境准备  ', summary: '  新环境  ', content: '# 安装\n\n安装依赖。', change_summary: '补充环境说明',
   });
   assert.deepEqual(input, {
     title: '环境准备', summary: '新环境', content: '# 安装\n\n安装依赖。', change_summary: '补充环境说明',
-    folder_code: 'FOLDER-OPS', status: 'active',
+    folder_code: 'FOLDER-OPS', status: 'active', base_revision: 3,
   });
 });
 

@@ -132,18 +132,18 @@ test('handoff upload：通过 HTTP 递归创建云端目录并上传 Markdown �
 
     const folders = await context.db.select().from(schema.projectDocumentFolders);
     const documents = await context.db.select().from(schema.projectDocuments);
-    assert.deepEqual(folders.map((item) => item.name).sort(), ['交接资料', '接口与联调', '架构设计', '测试资料', '需求文档', '项目规范']);
+    assert.deepEqual(folders.map((item) => item.name).sort(), ['交接资料', '接口与联调', '架构设计', '测试资料', '需求文档', '项目规范', '项目说明', '项目资料']);
     const standardsFolder = folders.find(item => item.system_role === 'standards');
     assert.ok(standardsFolder);
-    assert.equal(standardsFolder.parent_id, null);
+    assert.equal(standardsFolder.parent_id, folders.find(item => item.system_role === 'root').id);
     assert.ok(documents.every(item => item.folder_id !== standardsFolder.id), '普通上传不得自动变为项目规范');
     const requirementsFolder = folders.find(item => item.system_role === 'requirements');
     assert.ok(requirementsFolder);
-    assert.equal(requirementsFolder.parent_id, null);
+    assert.equal(requirementsFolder.parent_id, folders.find(item => item.system_role === 'root').id);
     assert.ok(documents.every(item => item.folder_id !== requirementsFolder.id), '普通上传不得进入需求文档关联目录');
     const architectureFolder = folders.find(item => item.system_role === 'architecture');
     assert.ok(architectureFolder);
-    assert.equal(architectureFolder.parent_id, null);
+    assert.equal(architectureFolder.parent_id, folders.find(item => item.system_role === 'root').id);
     assert.ok(documents.every(item => item.folder_id !== architectureFolder.id), '普通上传不得进入架构设计关联目录');
     assert.deepEqual(documents.map((item) => [item.title, item.kind]).sort(), [
       ['交接总览', 'doc'],

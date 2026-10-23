@@ -25,6 +25,9 @@ import { ArchitectureDocumentEditor, ArchitectureDocumentReader } from './Archit
 import { TestAssetEditor, TestAssetReader } from './TestAssets';
 import { DocumentVersionHistory as ProjectDocumentHistory, formatDocumentDate as formatDate } from './DocumentVersionHistory';
 import { DocumentReaderHeader } from './DocumentReaderHeader';
+import { DocumentQualityPanel } from './DocumentQualityPanel';
+import { SystemAgentAnnotation } from './SystemAgentPanel';
+import { systemAgentDocumentEligible } from './systemAgentApi';
 import { projectHomeWorkspacePath, requirementWorkspacePath, testingWorkspacePath } from './workspaceRouting';
 export { MarkdownDocument } from './MarkdownDocument';
 export { DocumentVersionHistory as ProjectDocumentHistory } from './DocumentVersionHistory';
@@ -42,6 +45,7 @@ export function ProjectDocumentsWorkbench({ projectCode, projectId, documentCode
   const [collapsedFolderCodes, setCollapsedFolderCodes] = useState<Set<string>>(() => new Set());
   const [viewRevision, setViewRevision] = useState<number | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [mobileDirectoryOpen, setMobileDirectoryOpen] = useState(false);
   const [dialog, setDialog] = useState<'folder' | 'document' | null>(createDocument ? 'document' : null);
   const [editingFolder, setEditingFolder] = useState<HandoffFolder | null>(null);
   const [editingDocument, setEditingDocument] = useState<HandoffDocumentDetail | null>(null);
@@ -61,7 +65,9 @@ export function ProjectDocumentsWorkbench({ projectCode, projectId, documentCode
   const library = useMemo(() => libraryQuery.data ? { ...libraryQuery.data, can_create: canWrite && libraryQuery.data.can_create, folders: libraryQuery.data.folders.map(folder => ({ ...folder, can_edit: canWrite && folder.can_edit })) } : undefined, [libraryQuery.data, canWrite]);
   const activeFolders = useMemo(() => library?.folders.filter((folder) => folder.status === 'active') ?? [], [library]);
   const folderParents = useMemo(() => handoffFolderParents(activeFolders, editingFolder), [activeFolders, editingFolder]);
-  const documentFolders = useMemo(() => activeFolders.filter((folder) => !isSourceDocumentFolder(activeFolders, folder.folder_code)), [activeFolders]);
+  const documentFolders = useMemo(() => activeFolders.filter((folder) => (
+    folder.system_role !== 'root' && !isSourceDocumentFolder(activeFolders, folder.folder_code)
+  )), [activeFolders]);
   const activeDocuments = useMemo(() => library?.documents.filter((document) => document.status === 'active') ?? [], [library]);
   const folderDocuments = useMemo(() => handoffFolderDocuments(activeDocuments, activeFolders, selectedFolderCode), [activeDocuments, activeFolders, selectedFolderCode]);
   const selectedFolder = activeFolders.find((folder) => folder.folder_code === selectedFolderCode);
@@ -143,6 +149,7 @@ export function ProjectDocumentsWorkbench({ projectCode, projectId, documentCode
   }
 
   function openDocumentDialog(current?: HandoffDocumentDetail) {
+    if (!current && selectedSystemRole === 'root') return;
     if (isSourceDocument(current) || isSourceDocumentFolder(activeFolders, current?.folder_code ?? selectedFolderCode)) return;
     setEditingDocument(current ?? null);
     setDocumentDraft(current ? {
@@ -203,6 +210,7 @@ export function ProjectDocumentsWorkbench({ projectCode, projectId, documentCode
         key={item.document_code}
         type="button"
         onClick={() => {
+          setMobileDirectoryOpen(false);
           setSelectedFolderCode(item.folder_code);
           setSelectedDocumentCode(item.document_code);
         }}
@@ -253,7 +261,7 @@ export function ProjectDocumentsWorkbench({ projectCode, projectId, documentCode
   if (libraryQuery.error) return <div className="m-6 rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">{t("项目文档库加载失败：{0}", { "0": libraryQuery.error.message })}</div>;
 
   return (
-    <main className="min-h-0 flex-1 overflow-hidden bg-slate-50 p-4 lg:p-6">
+    <main className="min-h-0 flex-1 overflow-y-auto bg-slate-50 p-4 lg:overflow-hidden lg:p-6">
       <section className="mx-auto flex h-full min-h-[620px] max-w-[1640px] flex-col">
         <header className="mb-4 flex flex-wrap items-end justify-between gap-4">
           <div>
@@ -264,7 +272,7 @@ export function ProjectDocumentsWorkbench({ projectCode, projectId, documentCode
           <div className="flex items-center gap-2">
             <span className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">{t("{0} 文件夹 · {1} 文档", { "0": activeFolders.length, "1": activeDocuments.length })}</span>
             {library?.can_create && <button type="button" disabled={missingFolder || !canCreateHandoffSubfolder(activeFolders, selectedFolderCode)} onClick={() => openFolderDialog()} className="ui-button ui-button-secondary">{t("新建文件夹")}</button>}
-            {library?.can_create && <button type="button" disabled={missingFolder || sourceFolderSelected} onClick={() => openDocumentDialog()} className="ui-button ui-button-primary">{t("新建文档")}</button>}
+            {library?.can_create && <button type="button" disabled={missingFolder || sourceFolderSelected || selectedSystemRole === 'root'} onClick={() => openDocumentDialog()} className="ui-button ui-button-primary">{t("新建文档")}</button>}
           </div>
         </header>
         {missingFolder && <p role="alert" className="mb-4 rounded-lg bg-rose-50 px-4 py-3 text-sm text-rose-700">{t("该文件夹不存在或已归档，请从文档库重新选择。")}</p>}
@@ -273,8 +281,9 @@ export function ProjectDocumentsWorkbench({ projectCode, projectId, documentCode
         {selectedSystemRole === 'architecture' && <p className="mb-4 text-sm leading-6 text-slate-500">{t("架构设计在此自动归集，图源、说明和历史版本与项目页面同步，可直接阅读和编辑。新增请前往")}<a href={projectHomeWorkspacePath(activeProjectCode, 'architecture')} className="ml-1 font-medium text-cyan-700 hover:text-cyan-900">{t("架构设计页面")}</a>{getLocale() === 'zh-CN' ? '。' : '.'}</p>}
 
         {selectedSystemRole === 'testing' && <p className="mb-4 text-sm leading-6 text-slate-500">{t('测试资料在此自动归集，内容与历史版本保持同步。新增请前往')}<a href={testingWorkspacePath(activeProjectCode, 'assets')} className="ml-1 font-medium text-cyan-700 hover:text-cyan-900">{t('测试页面')}</a></p>}
-        <div className={`relative grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm ${historyOpen && document && !['architecture', 'testing'].includes(document.source_kind ?? '') ? 'xl:grid-cols-[260px_minmax(0,1fr)_240px]' : ''}`}>
-          <aside className="flex min-h-0 flex-col border-r border-slate-200 bg-white">
+        <button type="button" onClick={() => setMobileDirectoryOpen(open => !open)} aria-expanded={mobileDirectoryOpen} aria-controls="project-document-directory" className="ui-button ui-button-secondary mb-3 self-start lg:hidden">{t(mobileDirectoryOpen ? '返回文档正文' : '文档目录')}</button>
+        <div className={`relative grid min-h-[500px] flex-1 grid-cols-[minmax(0,1fr)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:min-h-0 lg:grid-cols-[260px_minmax(0,1fr)] ${historyOpen && document && !['architecture', 'testing'].includes(document.source_kind ?? '') ? 'xl:grid-cols-[260px_minmax(0,1fr)_240px]' : ''}`}>
+          <aside id="project-document-directory" className={`${mobileDirectoryOpen ? 'flex' : 'hidden'} min-h-0 flex-col border-r border-slate-200 bg-white lg:flex`}>
             <div className="border-b border-slate-200 p-3">
               <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-400 focus-within:border-cyan-500 focus-within:bg-white">
                 <span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("搜索项目文档")} className="min-w-0 flex-1 bg-transparent text-sm text-slate-800 outline-none" />
@@ -291,7 +300,7 @@ export function ProjectDocumentsWorkbench({ projectCode, projectId, documentCode
             </div>
           </aside>
 
-          <section ref={documentPaneRef} className="min-h-0 min-w-0 overflow-y-auto bg-white">
+          <section ref={documentPaneRef} className={`${mobileDirectoryOpen ? 'hidden lg:block' : ''} min-h-0 min-w-0 overflow-y-auto bg-white`}>
             {documentQuery.isLoading ? <div className="grid h-full place-items-center text-sm text-slate-400">{t("正在读取文档…")}</div> : documentProjectMismatch || documentQuery.error ? <div role="alert" className="m-5 rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{documentProjectMismatch ? t("该文档不属于当前项目，请从文档库重新选择。") : t("读取文档失败：{0}", { "0": documentQuery.error?.message ?? '' })}</div> : document ? (() => {
               if (document.source_kind === 'architecture') return <ProjectArchitectureDocument key={document.document_code} document={document} />;
               if (document.source_kind === 'testing') return <ProjectTestingDocument key={document.document_code} document={document} />;
@@ -300,8 +309,9 @@ export function ProjectDocumentsWorkbench({ projectCode, projectId, documentCode
               return <article>
                 <ProjectDocumentHeader document={document} historical={historical} folderLabel={documentFolder ? systemFolderName(documentFolder) : undefined} historyOpen={historyOpen} historyToggleRef={historyToggleRef}
                   authorName={memberName(historical?.created_by_user_code ?? document.updated_by_user_code ?? '')}
-                  onToggleHistory={() => setHistoryOpen(open => !open)} onReturnCurrent={() => setViewRevision(null)} onEdit={() => openDocumentDialog(document)} />
-                <div className="mx-auto max-w-[920px] px-4 py-6 sm:px-6 lg:px-8"><MarkdownDocument content={shownContent} outline={historical ? undefined : document.outline} /></div>
+                  onToggleHistory={() => setHistoryOpen(open => !open)} onReturnCurrent={() => setViewRevision(null)} onEdit={() => openDocumentDialog(document)}
+                  notice={<DocumentQualityPanel key={`${document.document_code}:${historical?.revision ?? document.current_revision}`} projectCode={document.project_code} documentCode={document.document_code} revision={historical?.revision ?? document.current_revision} onLocate={line => locateDocumentQualityLine(documentPaneRef.current, line)} />} />
+                <div className="mx-auto max-w-[920px] px-4 py-6 sm:px-6 lg:px-8">{!historical && systemAgentDocumentEligible(document) ? <SystemAgentAnnotation key={`${document.document_code}:${document.current_revision}`} target={{ project_code: document.project_code, document_code: document.document_code, title: document.title, base_revision: document.current_revision }} content={shownContent}><MarkdownDocument content={shownContent} outline={document.outline} /></SystemAgentAnnotation> : <MarkdownDocument content={shownContent} outline={historical ? undefined : document.outline} />}</div>
               </article>;
             })() : <div className="grid h-full place-items-center px-8 text-center"><div><div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-cyan-50 text-2xl text-cyan-700">{t("文")}</div><h2 className="mt-4 text-lg font-bold text-slate-900">{t("选择一份项目文档")}</h2><p className="mt-2 text-sm text-slate-500">{t("从左侧目录查阅，或新建接口、部署、数据等项目资料。")}</p></div></div>}
           </section>
@@ -349,7 +359,7 @@ export function ProjectArchitectureDocument({ document }: { document: HandoffDoc
   }
   const readable = { ...architecture, can_edit: document.source_can_edit === true && architecture.can_edit };
   return <>
-    <ArchitectureDocumentReader document={readable} embedded onEdit={() => { if (readable.can_edit) setEditing(readable); }} />
+    <ArchitectureDocumentReader document={readable} embedded renderNotice={revision => <DocumentQualityPanel key={`${document.document_code}:${revision}`} projectCode={document.project_code} documentCode={document.document_code} revision={revision} />} onEdit={() => { if (readable.can_edit) setEditing(readable); }} />
     {editing && readable.can_edit && <ArchitectureDocumentEditor projectCode={document.project_code} initial={editing} onClose={() => setEditing(null)} onSaved={() => setEditing(null)} />}
   </>;
 }
@@ -359,10 +369,10 @@ export function ProjectTestingDocument({ document }: { document: HandoffDocument
   const asset = document.testing_asset;
   if (!asset || asset.code !== document.document_code || asset.project_code !== document.project_code) return <p role="alert" className="m-5 rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{t('测试资料读取不完整，请刷新后重试。')}</p>;
   const readable = { ...asset, can_edit: document.source_can_edit === true && asset.can_edit };
-  return <><TestAssetReader document={readable} embedded onEdit={() => { if (readable.can_edit) setEditing(readable); }} />{editing && readable.can_edit && <TestAssetEditor projectCode={document.project_code} initial={editing} onClose={() => setEditing(null)} onSaved={() => setEditing(null)} />}</>;
+  return <><TestAssetReader document={readable} embedded renderNotice={revision => <DocumentQualityPanel key={`${document.document_code}:${revision}`} projectCode={document.project_code} documentCode={document.document_code} revision={revision} />} onEdit={() => { if (readable.can_edit) setEditing(readable); }} />{editing && readable.can_edit && <TestAssetEditor projectCode={document.project_code} initial={editing} onClose={() => setEditing(null)} onSaved={() => setEditing(null)} />}</>;
 }
 
-export function ProjectDocumentHeader({ document, historical, folderLabel, authorName, historyOpen, historyToggleRef, onToggleHistory, onReturnCurrent, onEdit }: {
+export function ProjectDocumentHeader({ document, historical, folderLabel, authorName, historyOpen, historyToggleRef, onToggleHistory, onReturnCurrent, onEdit, notice }: {
   document: HandoffDocumentDetail;
   historical: HandoffDocumentRevision | null;
   folderLabel?: string;
@@ -372,15 +382,27 @@ export function ProjectDocumentHeader({ document, historical, folderLabel, autho
   onToggleHistory: () => void;
   onReturnCurrent: () => void;
   onEdit: () => void;
+  notice?: ReactNode;
 }) {
   return <DocumentReaderHeader title={historical?.title ?? document.title} summary={historical?.summary ?? document.summary} actionsLabel={t("文档操作")}
     breadcrumb={<><span className="truncate">{folderLabel ?? document.folder_name ?? t("根目录")}</span><span>/</span><span className={`shrink-0 rounded px-1.5 py-0.5 font-semibold ${kindMeta[canonicalDocumentKind(document.kind)].badge}`}>{kindMeta[canonicalDocumentKind(document.kind)].short}</span></>}
-    metadata={<>Revision {historical?.revision ?? document.current_revision} · {formatDate(historical?.created_at ?? document.updated_at)} · {authorName}</>}>
+    metadata={<>Revision {historical?.revision ?? document.current_revision} · {formatDate(historical?.created_at ?? document.updated_at)} · {authorName}</>} notice={notice}>
     {historical ? <button type="button" onClick={onReturnCurrent} className="ui-button ui-button-secondary min-w-28 justify-center">{t("返回当前版本")}</button> : document.source_kind === 'requirement' ? (
       document.source_can_edit && <a href={requirementWorkspacePath(document.project_code, { documentCode: document.document_code })} className="ui-button ui-button-secondary min-w-28 justify-center">{t("在需求页编辑")}</a>
     ) : document.can_edit && <button type="button" onClick={onEdit} className="ui-button ui-button-secondary min-w-28 justify-center">{t("编辑文档")}</button>}
     <button ref={historyToggleRef} type="button" onClick={onToggleHistory} aria-expanded={historyOpen} aria-controls="document-version-history" className="ui-button ui-button-secondary" title={historyOpen ? t("收起版本记录") : t("展开版本记录")}>{t("版本记录")}</button>
   </DocumentReaderHeader>;
+}
+
+export function locateDocumentQualityLine(container: HTMLElement | null, line: number): boolean {
+  if (!container || line < 1) return false;
+  const candidates = Array.from(container.querySelectorAll<HTMLElement>('.markdown-document [data-source-line]'));
+  const target = candidates.filter(element => Number(element.dataset.sourceLine) <= line).sort((a, b) => Number(b.dataset.sourceLine) - Number(a.dataset.sourceLine))[0];
+  if (!target) return false;
+  target.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  target.setAttribute('tabindex', '-1');
+  target.focus({ preventScroll: true });
+  return true;
 }
 
 function DocumentTreeIcon({ library = false }: { library?: boolean }) {
@@ -430,7 +452,7 @@ export function canonicalDocumentKind(kind: HandoffDocumentSummary['kind']): Han
 }
 
 export function handoffRevisionInput(document: HandoffDocumentDetail, draft: HandoffDocumentInput): HandoffDocumentInput {
-  return { ...draft, kind: draft.kind === canonicalDocumentKind(document.kind) ? undefined : draft.kind };
+  return { ...draft, base_revision: document.current_revision, kind: draft.kind === canonicalDocumentKind(document.kind) ? undefined : draft.kind };
 }
 
 export function handoffFolderDocuments(documents: HandoffDocumentSummary[], folders: HandoffFolder[], folderCode: string | null): HandoffDocumentSummary[] {

@@ -18,9 +18,16 @@ async function seededDb() {
   const home = createProjectHomeUseCases(db);
   const docs = createProjectDocumentUseCases(db);
   const legacy = createProjectUseCasesProject(db);
-  const document = async (title, principalCode = ctx.users.owner.code, folderCode) => success(await docs.createDocument({
-    projectCode: ctx.project.code, principalCode, folderCode, kind: 'general', title, content: `# ${title}\n\n${title} body`,
-  }));
+  let defaultOverviewFolder;
+  const document = async (title, principalCode = ctx.users.owner.code, folderCode) => {
+    if (folderCode === undefined) {
+      defaultOverviewFolder ??= success(await home.getHome(ctx.project.code, ctx.users.owner.code)).overview_folder_code;
+      folderCode = defaultOverviewFolder;
+    }
+    return success(await docs.createDocument({
+      projectCode: ctx.project.code, principalCode, folderCode, kind: 'general', title, content: `# ${title}\n\n${title} body`,
+    }));
+  };
   const bind = (bindings, principalCode = ctx.users.owner.code) => home.updateHome({ projectCode: ctx.project.code, principalCode, bindings });
   const view = (principalCode = ctx.users.owner.code) => home.getHome(ctx.project.code, principalCode);
   return { db, ...ctx, home, docs, legacy, document, bind, view };
@@ -31,7 +38,7 @@ test('project home: explicit roles reuse documents, members read and only Owners
   const general = await ctx.document('Regular handoff');
   const empty = success(await ctx.view(ctx.users.member.code));
   assert.match(empty.standards_folder_code, /^[0-9A-HJKMNP-TV-Z]{20}$/);
-  assert.deepEqual(empty, { project_code: ctx.project.code, can_edit: false, overview: null, guide: null, standards: [], standards_folder_code: empty.standards_folder_code });
+  assert.deepEqual(empty, { project_code: ctx.project.code, can_edit: false, overview: null, guide: null, standards: [], overview_folder_code: empty.overview_folder_code, standards_folder_code: empty.standards_folder_code });
   assert.equal(success(await ctx.legacy.getProjectDocument(ctx.project.code, ctx.users.owner.code)).document_code, null);
   const overview = await ctx.document('Overview');
   const guide = await ctx.document('Start guide', ctx.users.member.code);
@@ -119,7 +126,7 @@ test('project standards: provision is authenticated and concurrent home/library 
   assert.equal(roots.length, 1);
   assert.equal(roots[0].folder_code, first.standards_folder_code);
   assert.equal(roots[0].can_edit, false);
-  assert.equal(roots[0].parent_folder_code, null);
+  assert.equal(roots[0].parent_folder_code, library.folders.find(folder => folder.system_role === 'root').folder_code);
   const original = library.folders.find(folder => folder.folder_code === ordinary.code);
   assert.equal(original.name, `项目规范（原目录 ${ordinary.code}）`);
   assert.equal(original.system_role, null);

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { sql } from 'drizzle-orm';
 import { closeDb, openDb, schema } from '@team-synergy/persistence';
 
-const DEFAULT_TEST_DATABASE_URL = process.env.ACP_TEST_DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/acp_test';
+const DEFAULT_TEST_DATABASE_URL = process.env.TSP_TEST_DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/team_synergy_test';
 
 function quoteIdentifier(value) {
   return `"${value.replaceAll('"', '""')}"`;
@@ -50,7 +50,7 @@ async function truncateAllTables(db) {
 export function useTestDb(metaUrl) {
   const here = path.dirname(fileURLToPath(metaUrl));
   const migrationsFolder = path.resolve(here, '../../persistence/drizzle');
-  const databaseUrl = process.env.ACP_TEST_DATABASE_URL ?? DEFAULT_TEST_DATABASE_URL;
+  const databaseUrl = process.env.TSP_TEST_DATABASE_URL ?? DEFAULT_TEST_DATABASE_URL;
   let db;
 
   before(async () => {

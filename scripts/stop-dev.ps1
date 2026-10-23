@@ -15,6 +15,14 @@ if (-not (Test-Path $stateFile)) {
 
 $state = Get-Content $stateFile -Raw | ConvertFrom-Json
 
+function Get-ProcessTreeIds {
+  param([int]$ProcessId)
+  Write-Output $ProcessId
+  foreach ($child in (Get-CimInstance Win32_Process -Filter "ParentProcessId = $ProcessId" -ErrorAction SilentlyContinue)) {
+    Get-ProcessTreeIds -ProcessId ([int]$child.ProcessId)
+  }
+}
+
 function Stop-ProcessTree {
   param(
     [int]$ProcessId,
@@ -36,12 +44,12 @@ function Stop-ProcessTree {
     return
   }
 
-  $children = Get-CimInstance Win32_Process -Filter "ParentProcessId = $ProcessId" -ErrorAction SilentlyContinue
-  foreach ($child in $children) {
-    Stop-ProcessTree -ProcessId ([int]$child.ProcessId) -Marker '' -Label $Label -ChildProcess
+  # Snapshot the entire tree before stopping supervisors; otherwise a watcher can restart a child
+  # during shutdown, or an exiting intermediate shell can hide its still-running descendants.
+  $processTree = @(Get-ProcessTreeIds -ProcessId $ProcessId)
+  foreach ($treeProcessId in $processTree) {
+    Stop-Process -Id $treeProcessId -Force -ErrorAction SilentlyContinue
   }
-
-  Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
   if (-not $ChildProcess) {
     Write-Host "[ACP] Stopped $Label."
   }

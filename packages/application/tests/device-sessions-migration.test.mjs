@@ -10,7 +10,7 @@ import { openDb, closeDb } from '@team-synergy/persistence';
 import { createAuthUseCases } from '../dist/index.js';
 
 test('0037 preserves old device identity and execution secret while migrating the existing bearer into a session exactly once', async()=>{
- const base=new URL(process.env.ACP_TEST_DATABASE_URL??'postgres://postgres:postgres@127.0.0.1:5432/acp_test');base.pathname='/postgres';
+ const base=new URL(process.env.TSP_TEST_DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/team_synergy_test');base.pathname='/postgres';
  const admin=new pg.Client({connectionString:base.toString()});await admin.connect();
  const databaseName=`acp_device_migration_${randomUUID().replaceAll('-','')}`;
  const migrations=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../persistence/drizzle');

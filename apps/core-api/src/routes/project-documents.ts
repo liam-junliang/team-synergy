@@ -103,6 +103,7 @@ export function registerProjectDocumentRoutes(app: FastifyInstance, db: Db): voi
         content: String(body.content ?? ''),
         changeSummary: String(body.change_summary ?? ''),
         status: statusOf(body.status),
+        baseRevision: body.base_revision === undefined ? undefined : typeof body.base_revision === 'number' ? body.base_revision : NaN,
       });
     },
   );

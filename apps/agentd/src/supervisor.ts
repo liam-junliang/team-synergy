@@ -26,7 +26,7 @@ async function supervise(file: string): Promise<void> {
   journal.processId = process.pid; journal.session.process_id = process.pid; journal.session.status = 'running'; journal.startedAt = new Date().toISOString();
   writeJournal(file, journal);
   await apiRequest(config, 'POST', `/agent-sessions/${journal.session.session_code}/state`, { status: 'running', process_id: process.pid, lease_token: journal.lease.lease_token, execution_epoch: journal.lease.execution_epoch });
-  const env = { ...process.env, ACP_DATABASE_URL: undefined, ACP_RUN_CODE: journal.runCode, ACP_TASK_CODE: journal.taskCode, ACP_WORKSPACE_ROOT: journal.workspace, ACP_BRIEF_PATH: journal.session.prompt_path ?? '', ACP_RUN_LEASE_TOKEN: journal.lease.lease_token, ACP_EXECUTION_EPOCH: String(journal.lease.execution_epoch) };
+  const env = { ...process.env, TSP_DATABASE_URL: undefined, ACP_RUN_CODE: journal.runCode, ACP_TASK_CODE: journal.taskCode, ACP_WORKSPACE_ROOT: journal.workspace, ACP_BRIEF_PATH: journal.session.prompt_path ?? '', ACP_RUN_LEASE_TOKEN: journal.lease.lease_token, ACP_EXECUTION_EPOCH: String(journal.lease.execution_epoch) };
   let child: ChildProcess;
   if (journal.session.launch_kind === 'default') {
     if (!journal.session.prompt_path) throw new Error('默认 Agent 需要 Prompt 文件');

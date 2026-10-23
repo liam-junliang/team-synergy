@@ -24,7 +24,10 @@ async function fixture() {
   }
   const [owner, member, outsider] = users;
   const root = `/projects/${project.code}`;
-  const createDocument = async (title, folder_code) => {
+  const initialHome = await app.inject({ method: 'GET', url: `${root}/home`, headers: owner.headers });
+  assert.equal(initialHome.statusCode, 200, initialHome.body);
+  const overviewFolderCode = initialHome.json().data.overview_folder_code;
+  const createDocument = async (title, folder_code = overviewFolderCode) => {
     const response = await app.inject({ method: 'POST', url: `${root}/handoff/documents`, headers: owner.headers, payload: { title, content: `${title} body`, kind: 'general', folder_code } });
     assert.equal(response.statusCode, 200, response.body);
     return response.json().data;
@@ -53,7 +56,7 @@ test('project home HTTP enforces identity, membership and Owner binding with saf
   assert.equal(empty.statusCode, 200, empty.body);
   const standardsFolderCode = empty.json().data.standards_folder_code;
   assert.match(standardsFolderCode, /^[0-9A-HJKMNP-TV-Z]{20}$/);
-  assert.deepEqual(empty.json().data, { project_code: project.code, can_edit: false, overview: null, guide: null, standards: [], standards_folder_code: standardsFolderCode });
+  assert.deepEqual(empty.json().data, { project_code: project.code, can_edit: false, overview: null, guide: null, standards: [], overview_folder_code: empty.json().data.overview_folder_code, standards_folder_code: standardsFolderCode });
   const unrelated = await createDocument('Regular handoff');
   const overview = await createDocument('Overview');
   const forbidden = await app.inject({ method: 'PUT', url: `${root}/home`, headers: member.headers, payload: { overview_document_code: unrelated.document_code } });
@@ -114,9 +117,10 @@ test('project standards HTTP preserves old nested documents while rejecting new 
   const library = await app.inject({ method: 'GET', url: `${root}/handoff`, headers: member.headers });
   assert.equal(library.statusCode, 200, library.body);
   const standardsFolder = library.json().data.folders.find(folder => folder.system_role === 'standards');
+  const libraryRoot = library.json().data.folders.find(folder => folder.system_role === 'root');
   assert.equal(standardsFolder.name, '项目规范');
   assert.equal(standardsFolder.can_edit, false);
-  assert.equal(standardsFolder.parent_folder_code, null);
+  assert.equal(standardsFolder.parent_folder_code, libraryRoot.folder_code);
   const childResponse = await app.inject({ method: 'POST', url: `${root}/handoff/folders`, headers: member.headers,
     payload: { name: 'Web', parent_folder_code: standardsFolder.folder_code } });
   assert.equal(childResponse.statusCode, 403, childResponse.body);

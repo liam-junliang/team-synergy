@@ -1,8 +1,8 @@
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import { setTimeout as delay } from 'node:timers/promises';
 import { schema, type Db } from '@team-synergy/persistence';
 import { DomainError } from '@team-synergy/domain';
-import { IntakeBundleSchema, IntakeReviewSchema, IntakeApplySchema, INTAKE_MAX_BYTES, INTAKE_SKILL_VERSION, intakeManifestText,
+import { IntakeBundleSchema, IntakeReviewSchema, IntakeApplySchema, INTAKE_MAX_BYTES, INTAKE_SKILL_VERSION, intakeManifestText, ENTERPRISE_ARTIFACTS,
   type IntakeBundle, type IntakeItem, type IntakeKind, type IntakeDecision, type IntakeReviewInput, type IntakeApplyInput,
   type IntakeContext, type IntakeList, type IntakeBatchSummary, type IntakeBatchDetail } from '@team-synergy/contracts';
 import { assertProjectAccess, isProjectManager, type AccessDb } from './project-access.js';
@@ -12,6 +12,7 @@ import { ensureProjectSystemFolders, tryLockProjectSystemFolders } from './proje
 import { intakeHash, intakeTargets, lockIntakeTarget, type TargetRecord } from './intake-targets.js';
 import { intakeAudit, writeProjectModule, writeFeature, writeRequirementDocument, writeRequirement, writeArchitecture } from './intake-entity-writers.js';
 import { architectureText, normalizeArchitectureContent } from './architecture-document-content.js';
+import { evaluateBatchQuality, qualityFields, qualityState, frozenQuality, frozenQualityMatches, intakePlanHash } from './intake-quality-gate.js';
 
 type Command = { principalCode: string; projectCode: string };
 type BatchCommand = Command & { code: string };
@@ -22,6 +23,7 @@ type Transaction = Parameters<Parameters<Db['transaction']>[0]>[0];
 const completed = (row: ItemRow) => row.status === 'applied' || row.status === 'bound';
 const itemOf = (row: ItemRow): IntakeItem => JSON.parse(row.item_json);
 const decisionOf = (row: ItemRow): IntakeDecision | null => row.decision_json ? JSON.parse(row.decision_json) : null;
+const sortedDecisions = (rows: ItemRow[]) => rows.map(row => present(decisionOf(row))).sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
 const dependencies = (item: IntakeItem) => [item.module_key, item.feature_key, item.document_key].filter((key): key is string => Boolean(key));
 const kindOrder: Record<IntakeKind, number> = { module: 0, feature: 1, requirement_document: 2, architecture: 3, requirement: 4 };
 const conflict = (message: string) => new DomainError('intake_conflict', message);
@@ -53,6 +55,19 @@ function parseBundle(raw: unknown): IntakeBundle {
   }
   return result.data;
 }
+function qualityBundle(bundle: IntakeBundle): IntakeBundle {
+  // Candidate ordering is not content identity, and replacements retain completed rows' original IDs.
+  return { ...bundle, items: [...bundle.items].sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0) };
+}
+async function storedBundle(db: AccessDb, batch: Batch, rows: ItemRow[], profile = batch.profile): Promise<IntakeBundle | null> {
+  if (!profile) return null;
+  const [project] = await db.select({ code: schema.projects.code }).from(schema.projects).where(eq(schema.projects.id, batch.project_id)).limit(1);
+  const [repository] = batch.repository_id === null ? [] : await db.select({ code: schema.projectRepositories.code }).from(schema.projectRepositories).where(eq(schema.projectRepositories.id, batch.repository_id)).limit(1);
+  const parsed = IntakeBundleSchema.safeParse({ schema_version: 1, project_code: project?.code, repository_code: batch.repository_id === null ? null : repository?.code,
+    namespace: batch.namespace, profile, source: JSON.parse(batch.source_json), items: rows.map(itemOf) });
+  if (!parsed.success) throw conflict('已保存候选协议或来源已变化，请重新提交候选');
+  return qualityBundle(parsed.data);
+}
 
 async function accessProject(db: AccessDb, cmd: Command, mutation: false | 'write' | 'manage' = false, lock = false) {
   const userQuery = db.select().from(schema.users).where(eq(schema.users.code, cmd.principalCode));
@@ -74,25 +89,40 @@ async function batchOf(db: AccessDb, access: Access, code: string, lock = false)
   return batch;
 }
 async function itemsOf(db: AccessDb, batch: Batch) { return db.select().from(schema.intakeItems).where(eq(schema.intakeItems.batch_id, batch.id)).orderBy(asc(schema.intakeItems.id)); }
-async function repositoryOf(db: AccessDb, access: Access, code: string) {
+async function repositoryOf(db: AccessDb, access: Access, code: string | null) {
+  if (code === null) return null;
   const [repository] = await db.select().from(schema.projectRepositories).where(and(eq(schema.projectRepositories.project_id, access.project.id), eq(schema.projectRepositories.code, code))).limit(1);
   if (!repository || repository.status !== 'active') throw invalid('必须选择当前项目已登记的有效仓库');
   return repository;
 }
-async function bindingRows(db: AccessDb, batch: Batch) { return db.select().from(schema.intakeBindings).where(and(eq(schema.intakeBindings.project_id, batch.project_id), eq(schema.intakeBindings.repository_id, batch.repository_id), eq(schema.intakeBindings.namespace, batch.namespace))); }
+async function bindingRows(db: AccessDb, batch: Batch) { return db.select().from(schema.intakeBindings).where(and(eq(schema.intakeBindings.project_id, batch.project_id), batch.repository_id === null ? isNull(schema.intakeBindings.repository_id) : eq(schema.intakeBindings.repository_id, batch.repository_id), eq(schema.intakeBindings.namespace, batch.namespace))); }
 function checkRevision(batch: Batch, revision: number) { if (!Number.isInteger(revision) || batch.revision !== revision) throw conflict('批次已变化，请重新加载'); }
 function assertNotRunning(batch: Batch) { if (batch.status === 'applying') throw conflict('发布正在执行，请先停止再修改候选'); }
 async function summary(db: AccessDb, access: Access, batch: Batch, items: ItemRow[]): Promise<IntakeBatchSummary> {
   const [author] = await db.select({ code: schema.users.code }).from(schema.users).where(eq(schema.users.id, batch.created_by)).limit(1);
-  const [repo] = await db.select({ code: schema.projectRepositories.code }).from(schema.projectRepositories).where(eq(schema.projectRepositories.id, batch.repository_id)).limit(1);
-  return { code: batch.code, project_code: access.project.code, repository_code: repo?.code ?? '', namespace: batch.namespace,
+  const [repo] = batch.repository_id === null ? [] : await db.select({ code: schema.projectRepositories.code }).from(schema.projectRepositories).where(eq(schema.projectRepositories.id, batch.repository_id)).limit(1);
+  return { code: batch.code, project_code: access.project.code, repository_code: batch.repository_id === null ? null : repo?.code ?? '', namespace: batch.namespace,
     status: batch.status, revision: batch.revision, created_by: author?.code ?? '', created_at: batch.created_at, updated_at: batch.updated_at,
-    item_count: items.length, applied_count: items.filter(completed).length, plan_hash: batch.plan_hash };
+    item_count: items.length, applied_count: items.filter(completed).length, plan_hash: batch.plan_hash, profile: batch.profile };
 }
 async function detailView(db: AccessDb, access: Access, batch: Batch): Promise<IntakeBatchDetail> {
   const items = await itemsOf(db, batch), targets = await intakeTargets(db, batch.project_id), bindings = await bindingRows(db, batch);
   const active = access.project.status === 'active', manager = isProjectManager(access.role.role);
+  const quality = qualityState(batch, await storedBundle(db, batch, items));
+  const required = ENTERPRISE_ARTIFACTS.filter(artifact => artifact.required);
+  const candidates = required.map(artifact => ({ type: artifact.type, rows: items.filter(row => itemOf(row).artifact_type === artifact.type) }));
+  const presentArtifacts = candidates.filter(candidate => candidate.rows.length === 1);
+  const published = presentArtifacts.filter(candidate => candidate.rows[0]?.status === 'applied').length;
+  const bound = presentArtifacts.filter(candidate => candidate.rows[0]?.status === 'bound').length;
+  const skipped = presentArtifacts.filter(candidate => candidate.rows[0]?.status === 'skipped').length;
   return { ...await summary(db, access, batch, items), source: JSON.parse(batch.source_json), stop_requested: batch.stop_requested,
+    quality_report: quality.report, quality_rule_version: batch.quality_rule_version, quality_gate: quality.gate,
+    publication: { status: batch.status === 'applied' ? 'completed' : batch.status === 'applying' ? 'in_progress' : items.some(completed) ? 'partial' : 'not_started',
+      created: items.filter(row => row.status === 'applied').length, bound: items.filter(row => row.status === 'bound').length,
+      skipped: items.filter(row => row.status === 'skipped').length, total: items.length },
+    dossier: { required: required.length, present: presentArtifacts.length, missing: candidates.filter(candidate => candidate.rows.length !== 1).map(candidate => candidate.type),
+      complete: presentArtifacts.length === required.length, published, bound, skipped, all_required_published: published === required.length, content_verified: false },
+    approval: { status: 'not_requested', note: '冻结与执行发布计划不等于负责人批准需求基线或确认文档内容；本流程不代替正式评审。' },
     can_review: active && manager,
     can_edit: active && batch.status !== 'applying' && batch.status !== 'applied' && (manager || (batch.created_by === access.principal.id && !batch.plan_hash)),
     targets: targets.map(row => row.target), items: items.map(row => {
@@ -133,7 +163,7 @@ export function createIntakeUseCases(db: Db) {
       const repoCodes = new Map(repositories.map(row => [row.id, row.code]));
       return { ok: true, data: { project_code: access.project.code, repositories: repositories.map(row => ({ code: row.code, name: row.name })),
         targets: (await intakeTargets(db, access.project.id)).map(row => row.target), skill_version: INTAKE_SKILL_VERSION,
-        bindings: bindings.filter(row => repoCodes.has(row.repository_id)).map(row => ({ repository_code: present(repoCodes.get(row.repository_id)), namespace: row.namespace,
+        bindings: bindings.filter(row => row.repository_id === null || repoCodes.has(row.repository_id)).map(row => ({ repository_code: row.repository_id === null ? null : present(repoCodes.get(row.repository_id)), namespace: row.namespace,
           key: row.source_key, kind: row.kind as IntakeKind, target_code: row.target_code })) } };
     } catch (error) { return fail(error); }
   }
@@ -153,18 +183,25 @@ export function createIntakeUseCases(db: Db) {
     try {
       const bundle = parseBundle(cmd.bundle); requestKey(cmd.idempotencyKey);
       if (bundle.project_code !== cmd.projectCode) throw invalid('候选包项目与当前项目不一致');
-      const hash = intakeHash(bundle);
+      const hash = intakeHash(bundle), qualityCandidate = qualityBundle(bundle), payloadHash = intakeHash(qualityCandidate);
       const code = await db.transaction(async tx => {
         const access = await accessProject(tx, cmd, 'write', true), repository = await repositoryOf(tx, access, bundle.repository_code);
         const [prior] = await tx.select().from(schema.intakeBatches).where(and(eq(schema.intakeBatches.project_id, access.project.id), eq(schema.intakeBatches.created_by, access.principal.id), eq(schema.intakeBatches.submit_key, cmd.idempotencyKey))).for('update');
-        if (prior) { if (prior.submit_hash !== hash) throw conflict('幂等键已用于不同的候选包'); return prior.code; }
+        if (prior) {
+          const { profile: _profile, ...legacyPayload } = bundle;
+          // The exact old hash proves the original format, including after later explicit profile confirmation.
+          // A replay returns the existing batch and never changes its now-confirmed enterprise profile or plan.
+          const legacyReplay = bundle.profile === 'pilot' && prior.submit_hash === intakeHash(legacyPayload);
+          if (prior.submit_hash !== hash && !legacyReplay) throw conflict('幂等键已用于不同的候选包');
+          return prior.code;
+        }
         const timestamp = now();
-        const [batch] = await tx.insert(schema.intakeBatches).values({ code: createPublicCode(), project_id: access.project.id, repository_id: repository.id,
-          namespace: bundle.namespace, created_by: access.principal.id, source_json: JSON.stringify(bundle.source), payload_hash: hash,
+        const [batch] = await tx.insert(schema.intakeBatches).values({ code: createPublicCode(), project_id: access.project.id, repository_id: repository?.id ?? null,
+          namespace: bundle.namespace, created_by: access.principal.id, source_json: JSON.stringify(bundle.source), payload_hash: payloadHash, ...qualityFields(qualityCandidate, 1, payloadHash),
           submit_key: cmd.idempotencyKey, submit_hash: hash, status: 'draft', revision: 1, created_at: timestamp, updated_at: timestamp }).returning();
         if (!batch) throw new DomainError('internal_error', '无法保存接入批次');
         await tx.insert(schema.intakeItems).values(bundle.items.map(item => ({ batch_id: batch.id, item_key: item.key, kind: item.kind, item_json: JSON.stringify(item), status: 'pending' as const })));
-        await intakeAudit(tx, access, 'intake_batch', batch.id, 'intake.submitted', { batch_code: batch.code, payload_hash: hash, repository_code: repository.code });
+        await intakeAudit(tx, access, 'intake_batch', batch.id, 'intake.submitted', { batch_code: batch.code, payload_hash: payloadHash, repository_code: repository?.code ?? null, profile: bundle.profile });
         return batch.code;
       });
       return detail({ ...cmd, code });
@@ -178,8 +215,9 @@ export function createIntakeUseCases(db: Db) {
         checkRevision(batch, cmd.baseRevision); assertNotRunning(batch);
         if (!isProjectManager(access.role.role) && (batch.created_by !== access.principal.id || batch.plan_hash !== null)) throw new DomainError('intake_forbidden', '只能修改本人未冻结的候选');
         if (batch.status === 'applied') throw conflict('已发布批次不可修改');
+        if (batch.profile === 'enterprise' && bundle.profile !== 'enterprise') throw conflict('企业档位不能降为试点档位');
         const repository = await repositoryOf(tx, access, bundle.repository_code);
-        if (bundle.project_code !== cmd.projectCode || repository.id !== batch.repository_id || bundle.namespace !== batch.namespace) throw invalid('批次项目、仓库和命名空间不能修改');
+        if (bundle.project_code !== cmd.projectCode || (repository?.id ?? null) !== batch.repository_id || bundle.namespace !== batch.namespace) throw invalid('批次项目、来源和命名空间不能修改');
         const rows = await itemsOf(tx, batch), sourceChanged = intakeHash(bundle.source) !== intakeHash(JSON.parse(batch.source_json));
         for (const row of rows.filter(completed)) {
           const next = bundle.items.find(item => item.key === row.item_key);
@@ -188,9 +226,10 @@ export function createIntakeUseCases(db: Db) {
         for (const row of rows.filter(row => !completed(row))) await tx.delete(schema.intakeItems).where(eq(schema.intakeItems.id, row.id));
         const pending = bundle.items.filter(item => !rows.some(row => completed(row) && row.item_key === item.key));
         if (pending.length) await tx.insert(schema.intakeItems).values(pending.map(item => ({ batch_id: batch.id, item_key: item.key, kind: item.kind, item_json: JSON.stringify(item), status: 'pending' as const })));
-        await tx.update(schema.intakeBatches).set({ source_json: JSON.stringify(bundle.source), payload_hash: intakeHash(bundle), revision: batch.revision + 1,
-          plan_hash: null, status: 'draft', stop_requested: false, updated_at: now() }).where(eq(schema.intakeBatches.id, batch.id));
-        await intakeAudit(tx, access, 'intake_batch', batch.id, 'intake.replaced', { revision: batch.revision + 1, payload_hash: intakeHash(bundle) });
+        const revision = batch.revision + 1, candidate = qualityBundle(bundle), payloadHash = intakeHash(candidate);
+        await tx.update(schema.intakeBatches).set({ source_json: JSON.stringify(bundle.source), payload_hash: payloadHash, revision, ...qualityFields(candidate, revision, payloadHash),
+          plan_hash: null, frozen_quality_json: null, status: 'draft', stop_requested: false, updated_at: now() }).where(eq(schema.intakeBatches.id, batch.id));
+        await intakeAudit(tx, access, 'intake_batch', batch.id, 'intake.replaced', { revision, payload_hash: payloadHash, profile: bundle.profile });
       });
       return detail(cmd);
     } catch (error) { return fail(error); }
@@ -204,6 +243,15 @@ export function createIntakeUseCases(db: Db) {
         checkRevision(batch, input.base_revision); assertNotRunning(batch);
         if (batch.status === 'applied' || batch.status === 'cancelled') throw conflict('已完成或取消批次不能重新审阅');
         const rows = await itemsOf(tx, batch), targets = await intakeTargets(tx, access.project.id), bindings = await bindingRows(tx, batch);
+        const profile = input.profile ?? batch.profile;
+        if (!profile) throw conflict('历史批次未记录档位；请明确选择试点或企业档位后冻结新计划');
+        if (batch.profile === 'enterprise' && profile !== 'enterprise') throw conflict('企业档位不能降为试点档位');
+        const candidate = present(await storedBundle(tx, batch, rows, profile)), revision = batch.revision + 1, payloadHash = intakeHash(candidate);
+        const report = evaluateBatchQuality(candidate, revision, payloadHash);
+        if (profile === 'enterprise' && report.summary.blockers > 0) {
+          const issues = report.issues.filter(issue => issue.severity === 'blocker').slice(0, 3).map(issue => issue.message).join('；');
+          throw new DomainError('intake_conflict', `企业候选有 ${report.summary.blockers} 个质量阻断问题：${issues}。请以企业档位替换候选草稿后查看完整报告，修复后再冻结计划`, { quality_report: report });
+        }
         if (input.decisions.length !== rows.length || input.decisions.some(decision => !rows.some(row => row.item_key === decision.key))) throw invalid('必须逐项明确新增、关联或跳过');
         const reviewed = rows.map(row => ({ ...row, decision_json: JSON.stringify(present(input.decisions.find(decision => decision.key === row.item_key))) }));
         for (const row of reviewed) {
@@ -221,10 +269,10 @@ export function createIntakeUseCases(db: Db) {
         }
         for (const row of reviewed.filter(row => !completed(row))) await tx.update(schema.intakeItems).set({ decision_json: row.decision_json,
           status: present(decisionOf(row)).action === 'skip' ? 'skipped' : 'pending', error: null }).where(eq(schema.intakeItems.id, row.id));
-        const revision = batch.revision + 1;
-        const planHash = intakeHash({ batch: batch.code, revision, payload: batch.payload_hash, decisions: reviewed.map(row => present(decisionOf(row))).sort((a, b) => a.key < b.key ? -1 : 1) });
-        await tx.update(schema.intakeBatches).set({ revision, plan_hash: planHash, status: 'ready', updated_at: now() }).where(eq(schema.intakeBatches.id, batch.id));
-        await intakeAudit(tx, access, 'intake_batch', batch.id, 'intake.reviewed', { revision, plan_hash: planHash, decisions: input.decisions });
+        const frozen = frozenQuality(candidate, report, revision), planHash = intakePlanHash(batch.code, revision, payloadHash, sortedDecisions(reviewed), frozen);
+        await tx.update(schema.intakeBatches).set({ revision, payload_hash: payloadHash, ...qualityFields(candidate, revision, payloadHash), frozen_quality_json: JSON.stringify(frozen),
+          plan_hash: planHash, status: 'ready', updated_at: now() }).where(eq(schema.intakeBatches.id, batch.id));
+        await intakeAudit(tx, access, 'intake_batch', batch.id, 'intake.reviewed', { revision, plan_hash: planHash, decisions: input.decisions, profile, quality_rule_version: report.rule_version });
       });
       return detail(cmd);
     } catch (error) { return fail(error); }
@@ -238,8 +286,9 @@ export function createIntakeUseCases(db: Db) {
         if (!isProjectManager(access.role.role) && (batch.created_by !== access.principal.id || batch.plan_hash)) throw new DomainError('intake_forbidden', '只有项目管理员可以停止已审阅发布计划');
         if (batch.status === 'applied') return;
         const rows = await itemsOf(tx, batch), count = rows.filter(completed).length;
+        const candidate = await storedBundle(tx, batch, rows), revision = batch.revision + 1;
         await tx.update(schema.intakeBatches).set({ stop_requested: true, status: count ? 'partial' : batch.status === 'draft' || batch.status === 'ready' ? 'cancelled' : 'stopped',
-          revision: batch.revision + 1, updated_at: now() }).where(eq(schema.intakeBatches.id, batch.id));
+          revision, ...(candidate ? qualityFields(candidate, revision, batch.payload_hash) : {}), updated_at: now() }).where(eq(schema.intakeBatches.id, batch.id));
         await tx.update(schema.intakeAttempts).set({ status: 'stopped', finished_at: now() }).where(and(eq(schema.intakeAttempts.batch_id, batch.id), eq(schema.intakeAttempts.status, 'running')));
         await intakeAudit(tx, access, 'intake_batch', batch.id, 'intake.stopped', { applied_count: count });
       });
@@ -255,13 +304,24 @@ export function createIntakeUseCases(db: Db) {
       const attempt = await db.transaction(async tx => {
         const access = await accessProject(tx, cmd, 'manage', true), batch = await batchOf(tx, access, cmd.code, true);
         const [prior] = await tx.select().from(schema.intakeAttempts).where(and(eq(schema.intakeAttempts.batch_id, batch.id), eq(schema.intakeAttempts.idempotency_key, input.idempotency_key))).for('update');
-        if (prior) { if (prior.plan_hash !== input.plan_hash || prior.principal_id !== access.principal.id) throw conflict('幂等键已用于不同的计划或操作者'); return prior; }
+        if (prior) {
+          if (prior.plan_hash !== input.plan_hash || prior.principal_id !== access.principal.id) throw conflict('幂等键已用于不同的计划或操作者');
+          if (prior.status === 'running' && (batch.profile || batch.frozen_quality_json)) {
+            // A failed resumption stops its durable attempt in the outer error handler.
+            attemptId = prior.id;
+            const rows = await itemsOf(tx, batch), candidate = await storedBundle(tx, batch, rows);
+            if (!candidate || !frozenQualityMatches(batch, candidate, sortedDecisions(rows))) throw conflict('恢复发布的质量依据缺失、过期或已变化；请重新审阅');
+          }
+          return prior;
+        }
         if (!batch.plan_hash || input.plan_hash !== batch.plan_hash) throw conflict('请先审阅并冻结当前发布计划');
         if (!['ready', 'partial', 'stopped'].includes(batch.status)) throw conflict('当前批次不允许开始新的发布尝试');
         const [running] = await tx.select().from(schema.intakeAttempts).where(and(eq(schema.intakeAttempts.batch_id, batch.id), eq(schema.intakeAttempts.status, 'running')));
         if (running) throw conflict('已有发布正在执行');
         const rows = await itemsOf(tx, batch);
         if (rows.some(row => !decisionOf(row))) throw conflict('存在未审阅候选');
+        const candidate = await storedBundle(tx, batch, rows);
+        if (!candidate || !frozenQualityMatches(batch, candidate, sortedDecisions(rows))) throw conflict('冻结质量依据缺失、过期或已变化；请重新审阅并冻结计划');
         const targets = await intakeTargets(tx, access.project.id), bindings = await bindingRows(tx, batch);
         for (const row of rows.filter(row => !completed(row))) {
           const decision = present(decisionOf(row)), item = itemOf(row);
@@ -321,6 +381,12 @@ export function createIntakeUseCases(db: Db) {
       if (attempt.plan_hash !== batch.plan_hash) throw conflict('发布计划已变化');
       if (!await tryLockProjectSystemFolders(tx)) throw new IntakeMaterialBusy();
       const rows = await itemsOf(tx, batch);
+      // Historical running attempts retain their original resumability; all newly frozen plans carry this basis.
+      if (batch.profile || batch.frozen_quality_json) {
+        const candidate = await storedBundle(tx, batch, rows);
+        // The full evaluator ran at freeze/new apply. Per-item signature checks retain the immutable basis without rerunning all text rules.
+        if (!candidate || !frozenQualityMatches(batch, candidate, sortedDecisions(rows), { recheckRules: false })) throw conflict('冻结质量依据已变化，发布已停止；请重新审阅');
+      }
       const row = rows.filter(row => row.status === 'pending').sort((a, b) => kindOrder[a.kind as IntakeKind] - kindOrder[b.kind as IntakeKind] || (a.id < b.id ? -1 : 1))[0];
       if (!row) {
         await tx.update(schema.intakeBatches).set({ status: rows.some(row => row.status === 'failed' || row.status === 'blocked') ? 'partial' : 'applied', updated_at: now() }).where(eq(schema.intakeBatches.id, batch.id));
@@ -367,7 +433,7 @@ export function createIntakeUseCases(db: Db) {
                     title: item.title, summary: item.summary || item.title, content: item.content_markdown, keywords: [] })).document.code; break;
                 }
                 case 'requirement': code = (await writeRequirement(itemTx, access, { moduleId: present(module).id, featureId: feature?.id ?? null, documentId: document?.id ?? null,
-                  title: item.title, body: item.content_markdown, acceptanceCriteria: [], openQuestions: item.gaps })).requirement.code; break;
+                  title: item.title, body: item.content_markdown, acceptanceCriteria: item.acceptance_criteria ?? [], openQuestions: item.gaps })).requirement.code; break;
                 case 'architecture': code = (await writeArchitecture(itemTx, access, { title: item.title, summary: item.summary,
                   content: { content_kind: 'mermaid', source_content: present(item.diagram_source), notes_markdown: item.content_markdown, preview_svg: null } })).code; break;
               }

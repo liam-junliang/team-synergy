@@ -4,7 +4,8 @@ import { schema, type Db } from '@team-synergy/persistence';
 import { DomainError, assertAuditedChange, toAuditEvent } from '@team-synergy/domain';
 import { createPublicCode } from './public-code.js';
 import { fail, insertAudit, now, type TaskResult } from './task-service.js';
-import { collectProjectStandardsDocuments, ensureProjectStandardsFolder } from './project-standards.js';
+import { collectProjectStandardsDocuments } from './project-standards.js';
+import { ensureProjectSystemFolders } from './project-document-folders.js';
 
 const HOME_FIELDS = {
   overview: 'overview_document_id',
@@ -27,6 +28,7 @@ export interface ProjectHome {
   overview: ProjectHomeDocument | null;
   guide: ProjectHomeDocument | null;
   standards: ProjectHomeDocument[];
+  overview_folder_code: string;
   standards_folder_code: string;
 }
 type Project = typeof schema.projects.$inferSelect;
@@ -46,7 +48,7 @@ function bindingsOf(value: ProjectHomeBindings): ProjectHomeBindings {
   return value;
 }
 
-async function homeView(db: Reader, project: Project, principal: User, member: Member, standardsFolderCode: string): Promise<ProjectHome> {
+async function homeView(db: Reader, project: Project, principal: User, member: Member, overviewFolderCode: string, standardsFolderCode: string): Promise<ProjectHome> {
   const [documents, folders] = await Promise.all([
     db.select().from(schema.projectDocuments).where(and(eq(schema.projectDocuments.project_id, project.id), eq(schema.projectDocuments.status, 'active'))),
     db.select().from(schema.projectDocumentFolders).where(eq(schema.projectDocumentFolders.project_id, project.id)),
@@ -60,7 +62,8 @@ async function homeView(db: Reader, project: Project, principal: User, member: M
     return document ? documentView(document) : null;
   };
   return { project_code: project.code, can_edit: isProjectManager(member.role) && project.status === 'active',
-    overview: documentFor('overview'), guide: documentFor('guide'), standards_folder_code: standardsFolderCode,
+    overview: documentFor('overview'), guide: documentFor('guide'), overview_folder_code: overviewFolderCode,
+    standards_folder_code: standardsFolderCode,
     standards: collectProjectStandardsDocuments(project.id, folders, documents).map(documentView) };
 }
 
@@ -73,8 +76,8 @@ export function createProjectHomeUseCases(db: Db) {
       const member = await effectiveProjectMember(db, project.id, principal.id);
       if (!member) throw new DomainError('project_forbidden', '项目不存在或当前用户无权访问');
       const data = await db.transaction(async tx => {
-        const folder = await ensureProjectStandardsFolder(tx, project.id);
-        return homeView(tx, project, principal, member, folder.code);
+        const folders = await ensureProjectSystemFolders(tx, project.id);
+        return homeView(tx, project, principal, member, folders.overview.code, folders.standards.code);
       });
       return { ok: true, data };
     } catch (error) { return fail(error); }
@@ -104,6 +107,12 @@ export function createProjectHomeUseCases(db: Db) {
           )).for('share').limit(1);
           if (!document) throw new DomainError('project_home_document_invalid', '首页只能关联当前项目的文档');
           if (document.status !== 'active') throw new DomainError('project_home_document_archived', '已归档文档不能关联项目首页');
+          const [folder] = document.folder_id ? await tx.select().from(schema.projectDocumentFolders).where(
+            eq(schema.projectDocumentFolders.id, document.folder_id),
+          ).for('share').limit(1) : [];
+          if (!folder || folder.system_role !== 'overview') {
+            throw new DomainError('project_home_document_folder_invalid', '项目说明和参与指引必须来自“项目说明”目录');
+          }
           changes[field] = document.id;
         }
         const [updated] = await tx.update(schema.projects).set(changes).where(eq(schema.projects.id, project.id)).returning();
@@ -112,8 +121,8 @@ export function createProjectHomeUseCases(db: Db) {
           action: 'project.home_updated', payload: bindings };
         assertAuditedChange(audit);
         await insertAudit(tx, toAuditEvent(audit, createPublicCode(), now()));
-        const folder = await ensureProjectStandardsFolder(tx, project.id);
-        return await homeView(tx, updated, principal, member, folder.code);
+        const folders = await ensureProjectSystemFolders(tx, project.id);
+        return await homeView(tx, updated, principal, member, folders.overview.code, folders.standards.code);
       });
       return { ok: true, data: result };
     } catch (error) { return fail(error); }

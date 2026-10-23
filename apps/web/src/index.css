@@ -136,7 +136,7 @@ select.form-control {
   margin-block: 1.5rem 0.75rem;
 }
 
-.markdown-document :where([id]) {
+.markdown-document :where([id], [data-source-line]) {
   scroll-margin-top: calc(var(--document-reader-header-height, 0px) + 1.5rem);
 }
 

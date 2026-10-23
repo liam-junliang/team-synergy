@@ -9,7 +9,7 @@ import { closeDb, openDb } from '@team-synergy/persistence';
 import { schema } from '@team-synergy/persistence';
 import { buildServer } from '../../core-api/dist/server.js';
 
-const DEFAULT_TEST_DATABASE_URL = process.env.ACP_TEST_DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/acp_test';
+const DEFAULT_TEST_DATABASE_URL = process.env.TSP_TEST_DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/team_synergy_test';
 
 function quoteIdentifier(value) {
   return `"${value.replaceAll('"', '""')}"`;

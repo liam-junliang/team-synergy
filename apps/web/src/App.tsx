@@ -18,6 +18,7 @@ import { summarizeTaskBrief } from './taskCardSummary';
 import { DEFAULT_TASK_BOARD_FILTERS, filterBoardTasks, sortBoardTasks, type TaskBoardFilters } from './taskBoardFilters';
 import { PersonSearchSelect } from './PersonSearchSelect';
 import { TASK_BOARD_REFRESH_INTERVAL_MS } from './queryPolicy';
+import { SystemAgentPanel } from './SystemAgentPanel';
 
 const TaskDetail = lazy(() => import('./TaskDetail').then((module) => ({ default: module.TaskDetail })));
 const RequirementsWorkbench = lazy(() => import('./RequirementsWorkbench').then((module) => ({ default: module.RequirementsWorkbench })));
@@ -324,7 +325,7 @@ export default function App() {
   return (
     <ProjectDisplayNamesProvider projectCode={projectCode}>
     <div className="flex h-screen min-w-[320px] flex-col overflow-hidden">
-      <header className="z-10 grid shrink-0 grid-cols-1 items-center gap-x-4 gap-y-2 border-b border-slate-200 bg-slate-950 px-4 py-2.5 text-white shadow-sm sm:grid-cols-[minmax(0,1fr)_auto] lg:px-6 xl:grid-cols-[auto_minmax(0,1fr)_auto]">
+      <header className="z-40 grid shrink-0 grid-cols-1 items-center gap-x-4 gap-y-2 border-b border-slate-200 bg-slate-950 px-4 py-2.5 text-white shadow-sm sm:grid-cols-[minmax(0,1fr)_auto] lg:px-6 xl:grid-cols-[auto_minmax(0,1fr)_auto]">
         <a href={session.is_system_admin ? "/admin/teams" : "/teams"} className="col-start-1 row-start-1 flex items-center gap-2 text-left" aria-label={t(session.is_system_admin ? "系统管理" : "返回团队与项目")}>
           <span className="grid h-8 w-8 grid-cols-2 gap-1 rounded-lg bg-cyan-600 p-1.5" aria-hidden="true"><i className="rounded-sm bg-white" /><i className="rounded-sm bg-cyan-200" /><i className="rounded-sm bg-cyan-200" /><i className="rounded-sm bg-white" /></span>
           <span><strong className="block text-sm leading-tight">Team Synergy</strong><span className="block text-[9px] font-semibold tracking-[0.16em] text-slate-400">{inAdminConsole ? 'SYSTEM ADMIN' : 'TEAM WORKSPACE'}</span></span>
@@ -367,6 +368,7 @@ export default function App() {
         {projectCode && view === 'handovers' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载交接记录…")}</div>}><ProjectHandoversWorkbench key={projectCode} projectCode={projectCode} handoverCode={route.handoverCode} /></Suspense>}
         {view === 'account' && <main className="min-h-0 flex-1 overflow-y-auto bg-slate-50 p-5 lg:p-7"><section className="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><h1 className="text-xl font-bold text-slate-900">{t('我的账号')}</h1><p className="mt-4 text-sm text-slate-700">{session.display_name} <span className="text-slate-500">@{session.account}</span></p><button type="button" className="ui-button ui-button-secondary mt-5" onClick={() => setAccountOpen(true)}>{t('管理我的账号')}</button></section></main>}
       </ErrorBoundary>
+      {projectCode && !inAdminConsole && <SystemAgentPanel key={`${session.code}:${projectCode}`} projectCode={projectCode} projectName={projectQuery.data?.name ?? projectCode} userCode={session.code} />}
     </div>
     </ProjectDisplayNamesProvider>
   );

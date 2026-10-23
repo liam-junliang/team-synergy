@@ -8,6 +8,20 @@
  */
 
 const STATUS_BY_CODE: Readonly<Record<string, number>> = {
+  system_agent_unavailable: 503,
+  system_agent_job_not_found: 404,
+  system_agent_input_invalid: 422,
+  system_agent_proposal_invalid: 422,
+  system_agent_base_revision_invalid: 422,
+  system_agent_document_unsupported: 422,
+  system_agent_document_too_large: 422,
+  system_agent_quote_mismatch: 409,
+  system_agent_request_conflict: 409,
+  system_agent_revision_conflict: 409,
+  system_agent_confirmation_mismatch: 409,
+  system_agent_state_conflict: 409,
+  system_agent_execution_expired: 409,
+  project_document_revision_conflict: 409,
   intake_invalid: 422,
   intake_conflict: 409,
   intake_forbidden: 403,

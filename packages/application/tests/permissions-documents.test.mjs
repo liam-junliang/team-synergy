@@ -54,7 +54,10 @@ function reviseMaterials(ctx, material, principalCode) {
 test('former document authors downgraded to Viewer retain reads but cannot revise any material or folder', async () => {
   const ctx = await setup('team_write');
   const material = await createMaterials(ctx);
-  data(await ctx.home.updateHome({ projectCode: ctx.project.code, principalCode: ctx.users.admin.code, bindings: { overview_document_code: material.document.document_code } }));
+  const homeView = data(await ctx.home.getHome(ctx.project.code, ctx.users.admin.code));
+  const homeDocument = data(await ctx.docs.createDocument({ projectCode: ctx.project.code, principalCode: ctx.users.admin.code,
+    folderCode: homeView.overview_folder_code, kind: 'doc', title: 'Overview', content: '# Overview' }));
+  data(await ctx.home.updateHome({ projectCode: ctx.project.code, principalCode: ctx.users.admin.code, bindings: { overview_document_code: homeDocument.document_code } }));
   await ctx.db.update(schema.members).set({ role: 'viewer' }).where(and(eq(schema.members.project_id, ctx.project.id), eq(schema.members.principal_id, ctx.users.author.id)));
   const principalCode = ctx.users.author.code;
   for (const result of await Promise.all(reviseMaterials(ctx, material, principalCode))) denied(result);

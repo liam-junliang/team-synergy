@@ -274,6 +274,34 @@
       "when": 1792378800000,
       "tag": "0039_project_intake",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1792382400000,
+      "tag": "0040_project_library_root",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1792386000000,
+      "tag": "0041_intake_quality_gate",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1792389600000,
+      "tag": "0042_intake_material_sources",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1792540800000,
+      "tag": "0043_system_agent_jobs",
+      "breakpoints": true
     }
   ]
 }

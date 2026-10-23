@@ -1,0 +1,12 @@
+# Method sources and local adaptations
+
+Read when maintaining this skill or assessing why a workflow step exists. These are method references, not dependencies, enterprise certification or evidence of our own success rate. Reviewed on 2026-10-21; upstream documents may evolve.
+
+| Primary source | Useful method | Team Synergy adaptation |
+| --- | --- | --- |
+| [Spec Kit: existing projects](https://github.github.io/spec-kit/guides/existing-projects.html) | Adopt around a bounded change, use real repository constraints, clarify uncertainty and reconcile artifacts as they evolve. Initialization does not infer the existing system's specifications. | scope.md separates inventory work from change work and distinguishes observations from intended outcomes. We retain our evidence capture and intake review contract; we do not run Spec Kit initialization. |
+| [OpenSpec: existing projects](https://github.com/Fission-AI/OpenSpec/blob/main/docs/existing-projects.md) | Grow existing-project specifications through focused changes and explicit deltas. | increments.md uses ADDED/MODIFIED/REMOVED as readable semantic records, with stable identities and impact discovery. These labels neither change our schema nor delete platform entities. |
+| [Superpowers: writing-skills](https://github.com/obra/superpowers/blob/main/skills/writing-skills/SKILL.md) | Observe Agent behavior on realistic cases, compare a baseline, and revise instructions in response to demonstrated failures. | Skill changes use isolated forward tests where they add confidence. We do not require a full evaluation campaign for every ordinary document edit or adopt unrelated workflow rules. |
+| [Anthropic: skill-creator](https://github.com/anthropics/skills/blob/main/skills/skill-creator/SKILL.md) | Evaluate actual outputs qualitatively and quantitatively, iterate, and broaden cases after improvements. | evaluation.md separates protocol checks, semantic review and skill comparisons, preserving inputs and limits. A small sample supports only a scoped conclusion. |
+
+The specific requirements for captured hashes, line bounds, candidate relationships, review plans and publication come from Team Synergy's existing contract. Controlled test setup, consistent cross-document rules and precise claim evidence also address defects observed in our own material-only trial. These local controls supplement the borrowed methods; they are not claims about what those projects guarantee.

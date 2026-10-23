@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [string]$DatabaseUrl = $env:ACP_DATABASE_URL,
+  [string]$DatabaseUrl = $env:TSP_DATABASE_URL,
   [int]$ApiPort = 8080,
   [int]$WebPort = 5173,
   [int]$StartupTimeoutSeconds = 45
@@ -16,14 +16,14 @@ $startedAt = (Get-Date).ToString('o')
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 
 if ([string]::IsNullOrWhiteSpace($DatabaseUrl)) {
-  $DatabaseUrl = 'postgres://postgres:postgres@127.0.0.1:5432/acp'
+  $DatabaseUrl = 'postgres://postgres:postgres@127.0.0.1:5432/team_synergy'
 }
 
 New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
 
 function Write-Step {
   param([string]$Message)
-  Write-Host "[ACP] $Message" -ForegroundColor Cyan
+  Write-Host "[TSP] $Message" -ForegroundColor Cyan
 }
 
 function Get-HttpStatus {
@@ -155,7 +155,7 @@ try {
     $databasePort = 5432
   }
 } catch {
-  throw 'ACP_DATABASE_URL is not a valid PostgreSQL connection string.'
+  throw 'TSP_DATABASE_URL is not a valid PostgreSQL connection string.'
 }
 
 Write-Step "Checking PostgreSQL at $databaseHost`:$databasePort"
@@ -163,10 +163,31 @@ if (-not (Test-TcpPort -HostName $databaseHost -Port $databasePort)) {
   throw "Cannot connect to PostgreSQL at $databaseHost`:$databasePort. Start PostgreSQL first."
 }
 
-$env:ACP_DATABASE_URL = $DatabaseUrl
+$env:TSP_DATABASE_URL = $DatabaseUrl
 $env:ACP_CORE_API_URL = "http://127.0.0.1:$ApiPort"
 $env:NO_PROXY = '127.0.0.1,localhost'
 $env:no_proxy = '127.0.0.1,localhost'
+
+# Deployment configuration contains paths/settings only. Secret contents stay in the selected credential store.
+$agentConfigPath = $env:TSP_SYSTEM_AGENT_CONFIG_FILE
+if ([string]::IsNullOrWhiteSpace($agentConfigPath)) {
+  $agentConfigPath = Join-Path (Split-Path $repoRoot -Parent) 'system-agent.config.json'
+}
+if (Test-Path -LiteralPath $agentConfigPath -PathType Leaf) {
+  $agentConfig = Get-Content -LiteralPath $agentConfigPath -Raw | ConvertFrom-Json
+  $agentSettingNames = @(
+    'TSP_SYSTEM_AGENT_ENABLED', 'TSP_SYSTEM_AGENT_DSH_BIN', 'TSP_SYSTEM_AGENT_WORKSPACE_ROOT',
+    'TSP_SYSTEM_AGENT_DSH_CREDENTIALS_FILE', 'TSP_SYSTEM_AGENT_API_KEY_FILE',
+    'TSP_SYSTEM_AGENT_MODEL', 'TSP_SYSTEM_AGENT_TIMEOUT_MS', 'TSP_SYSTEM_AGENT_MAX_TOKENS'
+  )
+  foreach ($agentSetting in $agentConfig.PSObject.Properties) {
+    if ($agentSettingNames -notcontains $agentSetting.Name -or $agentSetting.Value -isnot [string]) {
+      throw 'System Agent deployment configuration contains an unsupported setting.'
+    }
+    [System.Environment]::SetEnvironmentVariable($agentSetting.Name, $agentSetting.Value, 'Process')
+  }
+  Write-Step 'Loaded System Agent deployment settings'
+}
 $previousState = Get-PreviousState
 
 $apiUrl = "http://127.0.0.1:$ApiPort/health"

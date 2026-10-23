@@ -37,3 +37,4 @@ export { createDeviceAuthorizationUseCases } from './device-authorization-use-ca
 export { createSystemSettingsUseCases, type SystemSettingsView } from './system-settings-use-cases.js';
 export { createAdminGovernanceUseCases } from './admin-governance-use-cases.js';
 export { createIntakeUseCases } from './intake-use-cases.js';
+export { createSystemAgentUseCases, normalizeSystemAgentProposal } from './system-agent-use-cases.js';
