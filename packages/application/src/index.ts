@@ -45,3 +45,4 @@ export * from './operational-metrics.js';
 export { bootstrapPasswordTtlMinutes, resetLocalAdminPassword } from './admin-recovery.js';
 
 export { exportAuditPage } from './audit-export.js';
+export * from './login-security.js';

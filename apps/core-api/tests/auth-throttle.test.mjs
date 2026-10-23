@@ -20,7 +20,9 @@ test('password login persists failures and sixth request returns Retry-After thr
   if (attempt > 5) assert.ok(Number(response.headers['retry-after']) > 0);
  }
  const failures = await db.select().from(schema.auditEvents).where(eq(schema.auditEvents.action, 'user.login_failed'));
- assert.equal(failures.length, 5);
+ assert.equal(failures.filter(row => JSON.parse(row.payload).reason === 'invalid_credentials').length, 5);
+ assert.equal(failures.filter(row => JSON.parse(row.payload).reason === 'rate_limited').length, 7);
+ assert.equal(failures.length, 12);
  assert.ok(!JSON.stringify(failures, (_, value) => typeof value === 'bigint' ? String(value) : value).includes('WrongPass'));
 });
 test('account limits survive API recreation and rotating source IPs', async () => {

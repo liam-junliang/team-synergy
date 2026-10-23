@@ -1422,3 +1422,22 @@ export const intakeAttempts = pgTable('intake_attempts', {
 }, t => [uniqueIndex('uq_intake_attempts_request').on(t.batch_id, t.idempotency_key),
   uniqueIndex('uq_intake_attempts_running').on(t.batch_id).where(sql`${t.status} = 'running'`),
   check('ck_intake_attempts_status', sql`${t.status} in ('running','completed','stopped')`)]);
+
+/** Anonymous authentication observations are separate from principal-required domain audits. */
+export const authSecurityEvents = pgTable('auth_security_events', {
+  id: identityId(),
+  occurred_at: timestamp('occurred_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  kind: text('kind', { enum: ['login_failed', 'locked', 'unlocked'] }).notNull(),
+  reason: text('reason', { enum: ['invalid_credentials', 'locked', 'rate_limited', 'failure_limit', 'expired', 'password_changed', 'local_admin_reset'] }).notNull(),
+  principal_id: bigint('principal_id', { mode: 'bigint' }),
+  account_hash: text('account_hash').notNull(),
+  ip_hash: text('ip_hash'),
+}, t => [
+  index('idx_auth_security_time').on(t.occurred_at),
+  index('idx_auth_security_account_time').on(t.account_hash, t.occurred_at),
+  index('idx_auth_security_ip_time').on(t.ip_hash, t.occurred_at),
+  check('ck_auth_security_kind', sql`${t.kind} in ('login_failed', 'locked', 'unlocked')`),
+  check('ck_auth_security_reason', sql`${t.reason} in ('invalid_credentials','locked','rate_limited','failure_limit','expired','password_changed','local_admin_reset')`),
+  check('ck_auth_security_account_hash', sql`${t.account_hash} ~ '^[a-f0-9]{64}$'`),
+  check('ck_auth_security_ip_hash', sql`${t.ip_hash} is null or ${t.ip_hash} ~ '^[a-f0-9]{64}$'`),
+]);

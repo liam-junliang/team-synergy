@@ -1,3 +1,4 @@
+import { auditLoginUnlock } from './login-security.js';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { schema, type Db } from '@team-synergy/persistence';
 import { DomainError, assertAuditedChange, toAuditEvent } from '@team-synergy/domain';
@@ -29,6 +30,7 @@ export async function resetLocalAdminPassword(db: Db, command: {
       await tx.execute(sql`lock table device_authorization_requests in exclusive mode`);
       const [admin] = await tx.select().from(schema.users).where(eq(schema.users.account, account)).for('update').limit(1);
       if (!admin?.is_system_admin || admin.status !== 'active' || admin.deleted_at || admin.pending_deletion) throw new DomainError('admin_recovery_forbidden', 'Only an active platform administrator can be recovered');
+      await auditLoginUnlock(tx, admin, 'local_admin_reset');
       const timestamp = now();
       const expiresAt = new Date(Date.now() + ttl * 60_000).toISOString();
       const revokedAuthorizations = await tx.update(schema.deviceAuthorizationRequests)

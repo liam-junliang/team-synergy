@@ -20,6 +20,11 @@ export function unauthorized(reply: FastifyReply) {
   });
 }
 
+/** Both kinds are cryptographically resolved by middleware; legacy declarations do not qualify. */
+export function hasAuthenticatedSession(request: FastifyRequest): boolean {
+  return new Set<string>(['bearer', 'cookie']).has(request.authKind ?? '') && !!request.principal;
+}
+
 /** Exact anonymous endpoints; release filenames remain validated by the distribution handler. */
 export function isPublicRoute(method: string, pathname: string): boolean {
   if (method === 'GET' && ((pathname === '/health' || pathname === '/ready') || ['/cli/manifest.json', '/cli/install.ps1', '/cli/install.sh'].includes(pathname))) return true;

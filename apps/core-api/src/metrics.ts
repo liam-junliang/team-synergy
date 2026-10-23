@@ -2,9 +2,9 @@ import { performance } from 'node:perf_hooks';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { Counter, Gauge, Histogram, Registry } from 'prom-client';
 import { TaskStatusSchema } from '@team-synergy/contracts';
-import { readOperationalMetrics } from '@team-synergy/application';
+import { readOperationalMetrics, readLoginFailureTotals, LOGIN_FAILURE_REASONS } from '@team-synergy/application';
 import { observeSlowQueries, withDatabaseRequestContext, type Db } from '@team-synergy/persistence';
-import { unauthorized } from './auth.js';
+import { hasAuthenticatedSession, unauthorized } from './auth.js';
 
 const agentStatuses = ['queued', 'running', 'awaiting_review', 'applied', 'rejected', 'failed', 'cancelled'] as const;
 const methods = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
@@ -29,6 +29,12 @@ export function registerMetrics(app: FastifyInstance, db: Db) {
   const jobs = new Gauge({ name: 'tsp_system_agent_jobs', help: 'Current persisted System Agent jobs by bounded status.', labelNames: ['status'], registers: [registry] });
   const success = new Gauge({ name: 'tsp_system_agent_generation_success_ratio',
     help: 'Successful generations (awaiting review, applied or rejected) divided by successful plus failed generations. Zero when no completed generations exist.', registers: [registry] });
+  new Counter({ name: 'login_failures_total', help: 'Persisted failed password login observations by fixed reason.', labelNames: ['reason'], registers: [registry],
+    async collect() {
+      const rows = await readLoginFailureTotals(db);
+      this.reset();
+      for (const reason of LOGIN_FAILURE_REASONS) this.inc({ reason }, rows.find(row => row.reason === reason)?.count ?? 0);
+    } });
   const starts = new WeakMap<FastifyRequest, number>();
   const removeObserver = observeSlowQueries(db, event => app.log.warn({ ...event }, 'Slow database query'));
   app.addHook('onClose', async () => { removeObserver(); registry.clear(); });
@@ -43,7 +49,7 @@ export function registerMetrics(app: FastifyInstance, db: Db) {
     starts.delete(request);
   });
   app.get('/metrics', async (request, reply) => {
-    if (request.authKind !== 'bearer' || !request.principal) return unauthorized(reply);
+    if (!hasAuthenticatedSession(request) || !request.principal) return unauthorized(reply);
     const current = await readOperationalMetrics(db, request.principal).catch(() => null);
     if (!current) return reply.code(503).send({ ok: false, error: { code: 'metrics_unavailable', message: '运行指标暂不可用' } });
     if (!current.ok) return reply.code(403).send(current);
@@ -54,7 +60,8 @@ export function registerMetrics(app: FastifyInstance, db: Db) {
     const generated = ['awaiting_review', 'applied', 'rejected'].reduce((total, status) => total + (jobCounts.get(status as typeof agentStatuses[number]) ?? 0), 0);
     const completed = generated + (jobCounts.get('failed') ?? 0);
     success.set(completed ? generated / completed : 0);
-    return reply.type(registry.contentType).send(await registry.metrics());
+    try { return reply.type(registry.contentType).send(await registry.metrics()); }
+    catch { return reply.code(503).send({ ok: false, error: { code: 'metrics_unavailable', message: '运行指标暂不可用' } }); }
   });
   return registry;
 }
