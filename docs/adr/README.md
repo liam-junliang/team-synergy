@@ -16,5 +16,7 @@ ADR 记录已经生效且会约束实现的架构选择。讨论材料和开源�
 | [ADR-0010](0010-numeric-primary-keys-and-public-codes.md) | Accepted | 数字主键关联与无实体前缀公开编码 |
 | [ADR-0011](0011-project-scoped-material-fences.md) | Accepted | 项目级共享上下文与排他材料栅栏 |
 | [ADR-0012](0012-operations-boundaries.md) | Accepted | 受控运维入口与敏感审计边界 |
+| [ADR-0013](0013-drawio-origin-isolation.md) | Accepted | 固定外部 draw.io origin 与逐事件协议校验 |
+| [ADR-0014](0014-browser-cookie-and-login-security.md) | Accepted | HttpOnly 浏览器凭据、会话 CSRF 与登录安全观测 |
 
 每份 ADR 必须包含 `superseded_by`：有效决策为 `null`，被取代时填写新 ADR 文件名，同时更新本索引状态。文档变更与代码一同提交并经过 PR 评审。

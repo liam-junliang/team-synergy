@@ -88,11 +88,11 @@
 
 | 编号 | 现状与证据 | 目标与施工要点 | 验收标准（DoD） | 状态 | 工作量 |
 |---|---|---|---|---|---|
-| **B-01** | 实测响应头仅 `Date/Connection/Keep-Alive/Content-Type/Content-Length`：无 CSP、无 `X-Content-Type-Options`、无 `X-Frame-Options`、无 HSTS | 接 `@fastify/helmet`；CSP 先以 `report-only` 上线收集，再转强制；`frame-ancestors 'none'`；HTTPS 环境加 HSTS | `curl -I` 可见 CSP、`X-Content-Type-Options`、`X-Frame-Options`、`Referrer-Policy`；CSP 报告期无新增违规；Web 主流程无控制台 CSP 报错 | ⬜ | 1 人日 |
-| **B-02** | 设备令牌存 `localStorage`：`api.ts:1208,1212,2752`。缓解面已存在（S-08：无 innerHTML、Markdown 不解析 raw HTML） | ① 登录改为 `Set-Cookie: HttpOnly; Secure; SameSite=Lax` + 双提交 CSRF token；② 保留 `Authorization: Bearer` 给 CLI（CLI 不走 Cookie）；③ Web 端删除 localStorage 令牌读写，仅保留用户展示信息 | XSS 注入点无法读取令牌（人工验证 `document.cookie` 不含令牌）；Web 登录/刷新/登出全流程正常；CSRF 缺失时跨站 POST 被拒；CLI 鉴权不受影响 | 🟡 令牌仍在 localStorage，但 XSS 面已收敛 | 3 人日 |
-| **B-03** | draw.io 编辑器 iframe 同时具备 `allow-scripts allow-same-origin`：`DrawioEditor.tsx:92-94` | ① 将 draw.io 载体放到独立子域（不同 origin），或② 保留同源但移除 `allow-same-origin` 并验证嵌入协议仍工作；③ `postMessage` 增加 `event.origin` 白名单与消息结构校验 | iframe 内脚本无法访问父页面 `localStorage`/`cookie`；编辑-保存-预览全链路正常；非法 origin 的消息被丢弃且有用例 | ⬜ | 2 人日 |
-| **B-04** | 失败登录无审计、无锁定、无告警出口（见 A-03） | 在 A-03 基础上：审计表新增 `user.login_failed`/`user.locked`；指标 `login_failures_total`；支持按账号/IP 聚合查询 | 连续失败后审计表有对应记录；`/metrics` 可见计数；锁定与解锁都有审计 | ⬜ | 1 人日 |
-| **B-05** | 全局 `bodyLimit: 8 * 1024 * 1024`（`server.ts:70`）对登录同样生效：实测 7 MB 口令被接受 | 全局降到 1 MiB；认证类路由 16 KiB；文档/架构图/原型按现有 8/24/30 MiB 显式声明（已有 8 处，补齐其余） | 登录 20 KiB 返回 413；文档上传仍可到 24 MiB；413 响应保持 `{ok:false,error:{code,message}}` 结构（见 E-04） | 🟡 已有 8 处路由级 bodyLimit | 1 人日 |
+| **B-01** | 实测响应头仅 `Date/Connection/Keep-Alive/Content-Type/Content-Length`：无 CSP、无 `X-Content-Type-Options`、无 `X-Frame-Options`、无 HSTS | 接 `@fastify/helmet`；CSP 先以 `report-only` 上线收集，再转强制；`frame-ancestors 'none'`；HTTPS 环境加 HSTS | `curl -I` 可见 CSP、`X-Content-Type-Options`、`X-Frame-Options`、`Referrer-Policy`；CSP 报告期无新增违规；Web 主流程无控制台 CSP 报错 | 🟡 报告模式已上线，观察期未结束（证据见 55） | 1 人日 |
+| **B-02** | 设备令牌存 `localStorage`：`api.ts:1208,1212,2752`。缓解面已存在（S-08：无 innerHTML、Markdown 不解析 raw HTML） | ① 登录改为 `Set-Cookie: HttpOnly; Secure; SameSite=Lax` + 双提交 CSRF token；② 保留 `Authorization: Bearer` 给 CLI（CLI 不走 Cookie）；③ Web 端删除 localStorage 令牌读写，仅保留用户展示信息 | XSS 注入点无法读取令牌（人工验证 `document.cookie` 不含令牌）；Web 登录/刷新/登出全流程正常；CSRF 缺失时跨站 POST 被拒；CLI 鉴权不受影响 | ✅ 已完成（证据见 55） | 3 人日 |
+| **B-03** | draw.io 编辑器 iframe 同时具备 `allow-scripts allow-same-origin`：`DrawioEditor.tsx:92-94` | ① 将 draw.io 载体放到独立子域（不同 origin），或② 保留同源但移除 `allow-same-origin` 并验证嵌入协议仍工作；③ `postMessage` 增加 `event.origin` 白名单与消息结构校验 | iframe 内脚本无法访问父页面 `localStorage`/`cookie`；编辑-保存-预览全链路正常；非法 origin 的消息被丢弃且有用例 | ✅ 已完成（证据见 55） | 2 人日 |
+| **B-04** | 失败登录无审计、无锁定、无告警出口（见 A-03） | 在 A-03 基础上：审计表新增 `user.login_failed`/`user.locked`；指标 `login_failures_total`；支持按账号/IP 聚合查询 | 连续失败后审计表有对应记录；`/metrics` 可见计数；锁定与解锁都有审计 | ✅ 已完成（证据见 55） | 1 人日 |
+| **B-05** | 全局 `bodyLimit: 8 * 1024 * 1024`（`server.ts:70`）对登录同样生效：实测 7 MB 口令被接受 | 全局降到 1 MiB；认证类路由 16 KiB；文档/架构图/原型按现有 8/24/30 MiB 显式声明（已有 8 处，补齐其余） | 登录 20 KiB 返回 413；文档上传仍可到 24 MiB；413 响应保持 `{ok:false,error:{code,message}}` 结构（见 E-04） | ✅ 已完成（证据见 55） | 1 人日 |
 
 ---
 
@@ -218,9 +218,9 @@ pnpm -r --workspace-concurrency=1 test    # 用例数不得减少
 | 批次 | 项数 | ⬜ 待施工 | 🟡 部分 | ⛔ 待决策 | 完成判据 |
 |---|---|---|---|---|---|
 | A 止血 | 6 | 0 | 0 | 0 | ✅ 6/6 已验收，证据见 53-remediation-execution.md |
-| B 安全 | 5 | 3 | 2 | 0 | 安全头齐全；令牌不在 localStorage；iframe 隔离 |
+| B 安全 | 5 | 0 | 1 | 0 | ✅ B-02～B-05；B-01 已上线报告模式，待真实观察后切强制；证据见 55 |
 | C 数据 | 4 | 1 | 2 | 1 | 5 个核心 FK；巡检为 0；核心表 timestamptz；C-04 需先决策 |
 | D 运维 | 5 | 0 | 0 | 0 | ✅ 5/5 已验收，证据见 54-remediation-batch-d.md |
 | E 治理 | 10 | 4 | 5 | 0 | ✅ E-02 文档入库；OpenAPI ≥ 90%；单文件 ≤ 400 行 |
 | F 清理 | 4 | 4 | 0 | 0 | 无死代码；根目录干净 |
-| **合计** | **34** | **12** | **9** | **1** | 已完成 12 项（A、D、E-02） |
+| **合计** | **34** | **9** | **8** | **1** | 已完成 16 项（A、D、E-02、B-02～B-05） |

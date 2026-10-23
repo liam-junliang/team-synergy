@@ -56,7 +56,7 @@ migrate 非 0、readiness 失败、迁移 head/hash 不匹配或关键业务失�
 
 ## 批次 D：运维指标与审计出口
 
-`GET /metrics` 返回 Prometheus 文本，必须携带当前有效系统管理员 Bearer 凭据。请为采集器使用受控的管理员设备凭据，通过秘密文件注入，不把令牌写进抓取 URL、命令历史或日志。未认证为 401，普通成员为 403。指标标签只含方法、路由模板、状态码和固定状态枚举，不含账号、项目编码、请求参数或 SQL。
+`GET /metrics` 返回 Prometheus 文本，必须携带当前有效系统管理员会话（Bearer 或已验证的浏览器 Cookie）。请为采集器使用受控的管理员 Bearer 设备凭据，通过秘密文件注入，不把令牌写进抓取 URL、命令历史或日志。未认证为 401，普通成员为 403。指标标签只含方法、路由模板、状态码和固定状态枚举，不含账号、项目编码、请求参数或 SQL。
 
 指标包括 `tsp_http_requests_total`、`tsp_http_request_duration_seconds`、`tsp_db_pool_connections`、`tsp_tasks`、`tsp_system_agent_jobs`、`tsp_system_agent_generation_success_ratio`。查询超过 500ms 时日志只包含时长、route/method/request_id，不记录 SQL、参数或数据库异常。`TSP_DB_STATEMENT_TIMEOUT_MS` 默认 30000；0 仅用于受控长迁移/DDL，不建议关闭在线 API 超时。没有请求上下文的后台查询仅记录时长。
 
@@ -99,3 +99,24 @@ expand/contract：先新增可空列，分批回填并部署兼容双读/双写�
 大表索引采用 `CREATE INDEX CONCURRENTLY` / `DROP INDEX CONCURRENTLY`；大表重建使用 `REINDEX ... CONCURRENTLY`。这些命令必须放在独立手工 DDL 文件，禁止写入 Drizzle journal（迁移器包事务）。上线前备份，记录数据库/版本、DDL 文件摘要、开始/结束时间、锁/耗时、实际索引状态；在维护窗口单独 psql 自动提交执行，不开启 BEGIN。查询 pg_index 确认 indisvalid/indisready；失败的 INVALID 索引应确认依赖后单独 DROP INDEX CONCURRENTLY，再按运行记录重试。不要伪造 __drizzle_migrations 来标记手工 DDL。
 
 大表 SET NOT NULL、类型转换、表重写或大批 UPDATE 应先做容量和锁时间评估；回填分批提交，使用 NOT VALID/VALIDATE 的适用约束或兼容窗口，statement_timeout 与 lock_timeout 明确设置，超时/异常立即停止发布，按前文恢复流程处置。
+## 批次 B：浏览器会话和登录安全
+
+Web 的会话与安装 proof 改放 HttpOnly Cookie，升级后原 localStorage 凭据直接删除，需要重新登录一次。生产使用 `__Host-` Cookie（Secure、SameSite=Lax、Path=/、无 Domain）；开发只允许 Host 和直连客户端均为回环时使用 HTTP。平台不接受从 forwarded 头推导的降级。部署在 HTTPS 网关后时设置 API 的 `TSP_WEB_ORIGIN=https://实际平台域名`（包含非默认端口），保留原始 Host；网关本身设置 HSTS。普通公网 HTTP 不属于支持的浏览器部署方式。
+
+CLI 继续使用 Bearer。浏览器的 CSRF 只存内存，刷新时从 `/auth/web/session` 恢复；跨站 Origin、缺失/伪造/跨会话 CSRF 均拒绝。退出只有服务端吊销并清 Cookie 成功后才切换到登录页；网络失败保留登录界面并提示重试。安装 proof Cookie 退出后保留，以便下次口令登录仍对应同一浏览器设备。
+
+`user.login_failed`、`user.locked`、`user.unlocked` 可通过原审计出口获取。未知账号只进入 `auth_security_events`，不伪造用户主体。锁到期的解锁在下一次密码尝试时懒记录；改密和本机恢复在真实清锁时记录。指标 `login_failures_total{reason="invalid_credentials|locked|rate_limited"}` 是数据库持久观察总量，抓取不会重复累加；不要与“用户输入错误密码次数”混为一谈。
+
+系统管理员可查询 `GET /admin/security/login-events?group_by=ip&since=2026-10-23T00:00:00Z&limit=50`。也支持 group_by=account、until、offset、account_hash/ip_hash；默认最近一天，最大 31 天，limit 1..200、offset 0..100000。返回哈希分组的失败/锁定/解锁数。原 IP/账号不写安全观察表，哈希仍可关联且可能被字典推断，查询权限和导出保留策略应等同安全审计。该接口没有关闭认证、解锁账号或删除安全事实的能力。
+
+## CSP 报告窗口与安全响应头
+
+API 使用 Helmet；Vite dev/preview 和 nginx Web 入口独立设置 nosniff、DENY、no-referrer。HTTP 不发送 HSTS；真正面向用户的 HTTPS 终止层必须发送 `Strict-Transport-Security: max-age=31536000`，不能相信客户端自带的 X-Forwarded-Proto。上线后分别检查页面与 `/api/ready` 的最终外部 HTTPS 响应头。
+
+本批于 2026-10-23 开始报告模式，最早在 2026-10-30 根据真实使用报告复核切换，不自动切换或创建定时任务。基础 `frame-ancestors 'none'; object-src 'none'; base-uri 'none'` 在 Web 立即强制。完整策略的 `Content-Security-Policy-Report-Only` 包含 `/api/security/csp-report`；浏览器原生报告无需 CSRF。服务端每分钟最多记录 120 条固定白名单 directive，不记录 blocked/document URL、源码片段或 Cookie。检测日志 `CSP policy violation`，联系实际流程重新复现，不能把没有日志直接当作全部功能通过。
+
+报告窗口覆盖登录/刷新/改密/退出、任务看板、文档 Markdown/图片、Mermaid/draw.io 编辑与预览、HTML 原型及受沙箱限制的外部 URL 预览，并观察浏览器控制台。真实长期使用无新增违规且关键流程复测通过后，API/Vite 设置 `TSP_CSP_MODE=enforce` 并重启；nginx 将完整策略的响应头名从 Report-Only 改为 Content-Security-Policy，执行 nginx -t 后发布。若强制后出现新违规，回到报告模式定位，保留基础禁止被嵌入的策略。
+
+当前生产 Web 策略保留 unsafe-inline（既有沙箱 HTML 原型需要）以及 HTTPS 外部预览 frame-src，未声称严格 CSP 已完成；后续收紧必须保持 S-08 并重新验证原型。draw.io 仍固定指向 embed.diagrams.net 的独立 origin，不能未经复核改成同源载体。图源会发送到该第三方服务；本批没有改成离线编辑器。
+
+请求体默认 1 MiB，认证 POST 16 KiB，普通交接/需求文档显式 8 MiB，架构文档 24 MiB，原型 30 MiB；既有 intake/testing/skills 的独立限制保留。解析超限统一 HTTP 413 和 request_body_too_large envelope，具体内容验证仍可在更小的领域限制处拒绝。
