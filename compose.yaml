@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: team_synergy
+      POSTGRES_USER: team_synergy
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the deployment environment}
+    volumes:
+      - database:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U team_synergy -d team_synergy"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  migrate:
+    build:
+      context: .
+      target: api
+    environment:
+      TSP_DATABASE_URL: postgres://team_synergy:${POSTGRES_PASSWORD}@postgres:5432/team_synergy
+    command: ["node", "dist/migrate.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+  api:
+    stop_grace_period: 35s
+    build:
+      context: .
+      target: api
+    environment:
+      TSP_DATABASE_URL: postgres://team_synergy:${POSTGRES_PASSWORD}@postgres:5432/team_synergy
+      TSP_AUTO_MIGRATE: "false"
+      NODE_ENV: production
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports: ["127.0.0.1:8080:8080"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+  web:
+    build:
+      context: .
+      target: web
+    depends_on:
+      api:
+        condition: service_healthy
+    ports: ["127.0.0.1:5173:8080"]
+    restart: unless-stopped
+volumes:
+  database:

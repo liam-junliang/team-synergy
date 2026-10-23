@@ -1,0 +1,14 @@
+.git
+**/node_modules
+**/dist
+**/tests
+docs
+tmp
+.omx
+.agent
+.tsp
+.env
+.env.*
+*.log
+output
+backups

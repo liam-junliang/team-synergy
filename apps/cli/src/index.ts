@@ -2699,6 +2699,19 @@ registerTestingCommands(program, { requireApiClient, resolveProjectCode, printRe
 registerSkillCommands(program, { requireApiClient, resolveProjectCode, printResult, failResult });
 registerIntakeCommands(program, { requireApiClient, resolveProjectCode, printResult, failResult });
 
+// Server-local operation: never forwarded through the control-plane HTTP API.
+program.command('db:migrate').description('在服务器本机应用数据库迁移').action(async () => {
+  try {
+    const { openDb, closeDb } = await import('@team-synergy/persistence');
+    const db = await openDb();
+    await closeDb(db);
+    printResult({ ok: true, data: { migrated: true } });
+  } catch {
+    printResult({ ok: false, error: { code: 'migration_failed', message: '数据库迁移失败，请检查部署配置与数据库状态' } });
+    process.exitCode = 1;
+  }
+});
+
 // ---- 机器模式 JSON 全覆盖（review 重要项 6） ----
 try {
   await program.parseAsync();
