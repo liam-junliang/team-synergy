@@ -1,4 +1,3 @@
-import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -6,7 +5,7 @@ import swagger from '@fastify/swagger';
 import { ProfileSchema, TaskStatusSchema } from '@team-synergy/contracts';
 import { canTransition } from '@team-synergy/domain';
 import { createSystemAgentUseCases, ensureSystemAdmin } from '@team-synergy/application';
-import { closeDb, openDb, type Db } from '@team-synergy/persistence';
+import { closeDb, openDb, databaseReady, resolveMigrationsFolder, type Db } from '@team-synergy/persistence';
 import { registerTaskRoutes } from './routes/tasks.js';
 import { registerDefectRoutes } from './routes/defects.js';
 import { registerUserRoutes } from './routes/users.js';
@@ -43,18 +42,11 @@ export interface BuildServerOptions {
   /** Override the default TSP_DATABASE_URL value when the server owns the database. */
   databaseUrl?: string;
   logger?: boolean;
+  migrate?: boolean;
 }
 
 function bundledMigrationsFolder(): string {
-  const currentDir = path.dirname(fileURLToPath(import.meta.url));
-  const bundledFolder = path.join(currentDir, 'migrations');
-  if (existsSync(path.join(bundledFolder, 'meta', '_journal.json'))) {
-    return bundledFolder;
-  }
-
-  // `tsx watch` executes this file from src/, while production runs from dist/.
-  // Development therefore falls back to the persistence package's source migrations.
-  return path.resolve(currentDir, '../../../packages/persistence/drizzle');
+  return resolveMigrationsFolder(path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrations'));
 }
 
 /** Build the modular Fastify server shared by production and inject-based tests. */
@@ -65,12 +57,13 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
     await openDb({
       databaseUrl: options.databaseUrl,
       migrationsFolder: bundledMigrationsFolder(),
+      migrate: options.migrate ?? process.env.TSP_AUTO_MIGRATE !== 'false',
     });
   // Self-contained image prototypes are posted as data URLs inside JSON.
   const app = Fastify({ logger: options.logger ?? true, bodyLimit: 8 * 1024 * 1024 });
 
   if (ownsDb) {
-    const bootstrap = await ensureSystemAdmin(db);
+    const bootstrap = await ensureSystemAdmin(db).catch(async error => { await closeDb(db); throw error; });
     if (bootstrap.initial_password) {
       // 初始密码是敏感凭据，不能进入结构化日志（会被采集聚合）。
       // 只输出到 stderr 一次，由部署者当场抄走；日志里仅保留账号与过期时间。
@@ -154,6 +147,13 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
       }
     }
     return payload;
+  });
+
+  app.get('/ready', async (_request, reply) => {
+    try {
+      if (await databaseReady(db, bundledMigrationsFolder())) return { status: 'ready' };
+    } catch { /* Dependency failures are readiness failures, never credential-bearing responses. */ }
+    return reply.code(503).send({ status: 'not_ready' });
   });
 
   app.get('/health', async () => ({

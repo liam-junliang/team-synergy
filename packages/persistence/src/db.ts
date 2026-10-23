@@ -1,6 +1,8 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Pool } from 'pg';
+import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { migrate as drizzleMigrate } from 'drizzle-orm/node-postgres/migrator';
 import * as schema from './schema.js';
@@ -18,7 +20,8 @@ export interface OpenDbOptions {
   migrate?: boolean;
 }
 
-function defaultMigrationsFolder(): string {
+export function resolveMigrationsFolder(bundledFolder?: string): string {
+  if (bundledFolder && existsSync(path.join(bundledFolder, 'meta/_journal.json'))) return bundledFolder;
   const currentDir = path.dirname(fileURLToPath(import.meta.url));
   return path.resolve(currentDir, '../drizzle');
 }
@@ -31,13 +34,19 @@ function defaultMigrationsFolder(): string {
 export async function openDb(options: OpenDbOptions = {}): Promise<Db> {
   const pool = new Pool({
     connectionString: options.databaseUrl ?? process.env.TSP_DATABASE_URL ?? DEFAULT_DATABASE_URL,
+    connectionTimeoutMillis: 3_000,
+  });
+  // pg emits idle-client disconnects outside query promises. Keep liveness alive;
+  // the next query obtains a new connection and readiness reports dependency failure.
+  pool.on('error', () => {
+    process.stderr.write('Database idle connection lost; readiness checks will retry.\n');
   });
   const db = drizzle(pool, { schema });
 
   try {
     if (options.migrate !== false) {
       await drizzleMigrate(db, {
-        migrationsFolder: options.migrationsFolder ?? defaultMigrationsFolder(),
+        migrationsFolder: resolveMigrationsFolder(options.migrationsFolder),
       });
     }
     return db;
@@ -53,3 +62,19 @@ export async function closeDb(db: Db): Promise<void> {
 }
 
 export { schema };
+
+/** Fail closed until the exact packaged migration head has been applied. */
+export async function databaseReady(db: Db, migrationsFolder?: string): Promise<boolean> {
+  await db.$client.query('select 1');
+  const folder = resolveMigrationsFolder(migrationsFolder);
+  const journal = JSON.parse(readFileSync(path.join(folder, 'meta/_journal.json'), 'utf8')) as {
+    entries: { tag: string; when: number }[];
+  };
+  const head = journal.entries.at(-1);
+  if (!head) return false;
+  const hash = createHash('sha256').update(readFileSync(path.join(folder, `${head.tag}.sql`), 'utf8')).digest('hex');
+  const result = await db.$client.query<{ hash: string; created_at: string }>(
+    'select hash, created_at from drizzle.__drizzle_migrations order by created_at desc limit 1',
+  );
+  return result.rows[0]?.hash === hash && Number(result.rows[0]?.created_at) === head.when;
+}
