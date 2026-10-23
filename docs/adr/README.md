@@ -19,5 +19,7 @@ ADR 记录已经生效且会约束实现的架构选择。讨论材料和开源�
 | [ADR-0013](0013-drawio-origin-isolation.md) | Accepted | 固定外部 draw.io origin 与逐事件协议校验 |
 | [ADR-0014](0014-browser-cookie-and-login-security.md) | Accepted | HttpOnly 浏览器凭据、会话 CSRF 与登录安全观测 |
 | [ADR-0015](0015-core-reference-integrity.md) | Accepted | 核心父子引用采用具名 RESTRICT 外键与分阶段验证 |
+| [ADR-0016](0016-core-time-expand-contract.md) | Accepted | 核心时间按展开、真实双写验证与切换收缩迁移 |
+| [ADR-0017](0017-multi-customer-boundaries.md) | Accepted | 独立客户、多客户受邀身份、显式版本交付与受控支持访问 |
 
 每份 ADR 必须包含 `superseded_by`：有效决策为 `null`，被取代时填写新 ADR 文件名，同时更新本索引状态。文档变更与代码一同提交并经过 PR 评审。
