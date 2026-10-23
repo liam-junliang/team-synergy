@@ -46,3 +46,4 @@ export { bootstrapPasswordTtlMinutes, resetLocalAdminPassword } from './admin-re
 
 export { exportAuditPage } from './audit-export.js';
 export * from './login-security.js';
+export { getWebSessionUser } from './web-session-user.js';
