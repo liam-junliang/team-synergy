@@ -1,6 +1,7 @@
+import { insertAudit } from './task-service.js';
 import { createHmac } from 'node:crypto';
 import { and, desc, eq, isNull } from 'drizzle-orm';
-import { DomainError } from '@team-synergy/domain';
+import { DomainError, toAuditEvent } from '@team-synergy/domain';
 import { schema, type Db } from '@team-synergy/persistence';
 import { createPublicCode, findRunByCode } from './public-code.js';
 import { hashToken } from './user-use-cases.js';
@@ -104,7 +105,7 @@ export function createExecutionUseCases(db: Db) {
       }
       const [session] = await tx.insert(schema.agentSessions).values({ code: createPublicCode(), run_id: run.id, device_id: identity.deviceId, execution_epoch: input.execution_epoch, start_key: input.start_key, agent_command: input.agent_command, launch_kind: input.launch_kind ?? 'custom', prompt_path: input.prompt_path ?? null, resumed_from_session_id: resumedId, status: 'starting', started_at: new Date().toISOString() }).returning();
       if (!session) throw new DomainError('internal_error', 'Session 写入失败');
-      await tx.insert(schema.auditEvents).values({ code: createPublicCode(), timestamp: new Date().toISOString(), principal_id: identity.principalId, run_id: run.id, action: input.resumed_from_session_code ? 'agent_session.resume' : 'agent_session.start', entity_type: 'agent_session', entity_id: session.id, base_snapshot: run.base_snapshot, from_state: null, to_state: 'starting', payload: JSON.stringify({ session_code: session.code }) });
+      await insertAudit(tx, toAuditEvent({ principal_id: identity.principalId, run_id: run.id, action: input.resumed_from_session_code ? 'agent_session.resume' : 'agent_session.start', entity_type: 'agent_session', entity_id: session.id, base_snapshot: run.base_snapshot, to: 'starting', payload: { session_code: session.code } }, createPublicCode(), new Date().toISOString()));
       return { ...publicSession(session, run.code), resumed_from_session_code: input.resumed_from_session_code ?? null, created: true };
     }),
     async state(code: string, identity: ExecutionIdentity, input: { status: 'running'|'finished'|'failed'|'cancelled'; process_id?: number; exit_code?: number|null; last_error?: string|null; last_output?: string|null; lease_token: string; execution_epoch: number }) {
@@ -118,7 +119,7 @@ export function createExecutionUseCases(db: Db) {
         if (!['starting','running'].includes(session.status)) return publicSession(session, run.code);
         const terminal = input.status !== 'running';
         const [updated] = await tx.update(schema.agentSessions).set({ status: input.status, process_id: input.process_id ?? session.process_id, finished_at: terminal ? new Date().toISOString() : null, exit_code: input.exit_code ?? null, last_error: input.last_error?.slice(0, 4000) ?? null, last_output: input.last_output?.slice(-32_000) ?? null }).where(eq(schema.agentSessions.id, session.id)).returning();
-        await tx.insert(schema.auditEvents).values({ code: createPublicCode(), timestamp: new Date().toISOString(), principal_id: identity.principalId, run_id: run.id, action: input.status === 'cancelled' ? 'agent_session.stop' : 'agent_session.status', entity_type: 'agent_session', entity_id: session.id, base_snapshot: run.base_snapshot, from_state: session.status, to_state: input.status, payload: JSON.stringify({ session_code: session.code, exit_code: input.exit_code, error: input.last_error }) });
+        await insertAudit(tx, toAuditEvent({ principal_id: identity.principalId, run_id: run.id, action: input.status === 'cancelled' ? 'agent_session.stop' : 'agent_session.status', entity_type: 'agent_session', entity_id: session.id, base_snapshot: run.base_snapshot, from: session.status, to: input.status, payload: { session_code: session.code, exit_code: input.exit_code, error: input.last_error } }, createPublicCode(), new Date().toISOString()));
         if (!updated) throw new DomainError('internal_error', 'Session 状态写入失败');
         return publicSession(updated, run.code);
       });

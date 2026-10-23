@@ -1,3 +1,4 @@
+import { redactAuditValue } from './audit-redaction.js';
 import { and, count, desc, eq, inArray } from 'drizzle-orm';
 import type { Db } from '@team-synergy/persistence';
 import { schema } from '@team-synergy/persistence';
@@ -112,7 +113,7 @@ export async function insertAudit(tx: Db | DbTx, evt: ReturnType<typeof toAuditE
     base_snapshot: evt.base_snapshot,
     from_state: evt.from,
     to_state: evt.to,
-    payload: evt.payload ? JSON.stringify(evt.payload) : undefined,
+    payload: evt.payload ? JSON.stringify(redactAuditValue(evt.payload)) : undefined,
   });
 }
 

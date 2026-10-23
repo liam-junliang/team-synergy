@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { registerAuditCommands } from './audit-export.js';
 import { Command } from 'commander';
 import { createWorkspace, cleanupWorkspace, identifyWorkspace } from '@team-synergy/integrations';
 import {
@@ -2693,6 +2694,7 @@ repository
     }
   });
 
+registerAuditCommands(program, requireApiClient);
 registerHandoverCommands(program, task);
 registerArchitectureCommands(program, { requireApiClient, resolveProjectCode, printResult, failResult });
 registerTestingCommands(program, { requireApiClient, resolveProjectCode, printResult, failResult });

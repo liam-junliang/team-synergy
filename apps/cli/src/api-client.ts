@@ -9,6 +9,8 @@ import { authDirectory, matchesLocalDeviceFingerprint, readAuthConfig } from './
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
+export interface AuditExportPage { items: Array<Record<string, unknown>>; snapshot: string; next_cursor: string | null }
+
 export interface ApiClientOptions {
   baseUrl?: string;
   principalCode?: string;
@@ -420,6 +422,9 @@ export function createApiClient(opts: ApiClientOptions) {
     },
     async listTeams(): Promise<ApiResult<Array<Record<string, unknown>>>> {
       return request('GET', '/teams');
+    },
+    async exportAudit(query: URLSearchParams): Promise<ApiResult<AuditExportPage>> {
+      return request('GET', `/audit/export?${query}`);
     },
     async addTeamMember(teamCode: string, body: { user_code: string; role: string }): Promise<ApiResult<Record<string, unknown>>> {
       return request('POST', `/teams/${encodeURIComponent(teamCode)}/members`, body);

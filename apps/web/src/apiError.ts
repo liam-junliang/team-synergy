@@ -3,6 +3,7 @@ import { getLocale } from './i18n.ts';
 // Translate stable service error codes, never arbitrary server/user-provided prose.
 const chineseErrors: Record<string, string> = {
   metrics_unavailable: '运行指标暂不可用，请稍后重试。',
+  audit_export_failed: '审计导出失败，请检查管理员身份与服务连接。',
   api_bad_response: '服务返回的分页数据无效，请刷新后重试。',
   validation_failed: '请求参数无效，请检查输入后重试。',
   slow_down: '请求过多，请稍后重试。',
@@ -13,6 +14,7 @@ const chineseErrors: Record<string, string> = {
 };
 const englishErrors: Record<string, string> = {
   metrics_unavailable: 'Operational metrics are temporarily unavailable.',
+  audit_export_failed: 'Audit export failed. Check administrator access and connectivity.',
   api_bad_response: 'The service returned an invalid page. Reload and try again.',
   validation_failed: 'Check the request parameters and try again.',
   unauthorized: 'Sign-in failed or your session has expired. Please sign in again.',

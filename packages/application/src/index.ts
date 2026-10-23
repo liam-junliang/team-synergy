@@ -43,3 +43,4 @@ export { createAuthRateLimiter } from './auth-rate-limit.js';
 export { listPrincipalDevices } from './device-reads.js';
 export * from './operational-metrics.js';
 
+export { exportAuditPage } from './audit-export.js';

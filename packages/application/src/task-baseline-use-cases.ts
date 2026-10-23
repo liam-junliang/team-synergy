@@ -1,11 +1,11 @@
 import { lockTaskProject } from './aggregate-lock.js';
 import { and, eq } from 'drizzle-orm';
 import { schema, type Db } from '@team-synergy/persistence';
-import { DomainError } from '@team-synergy/domain';
+import { DomainError, toAuditEvent } from '@team-synergy/domain';
 import { loadRequirementBaseline } from './baseline-use-cases.js';
 import { assertNoPendingHandover } from './execution-guard.js';
 import { createPublicCode } from './public-code.js';
-import { fail, now } from './task-service.js';
+import { fail, insertAudit, now } from './task-service.js';
 import { assertProjectAccess, effectiveProjectMember, isProjectManager } from './project-access.js';
 
 /** A baseline is an execution contract, so it can only be selected before any Run. */
@@ -51,10 +51,10 @@ export function createTaskBaselineUseCases(db: Db) {
           };
           await tx.update(schema.tasks).set({ requirement_baseline_id: loaded.row.id, source_requirement_revision_id: revisionId,
             base_snapshot: task.base_snapshot + 1 }).where(eq(schema.tasks.id, task.id));
-          await tx.insert(schema.auditEvents).values({ code: createPublicCode(), timestamp: now(), principal_id: principal.id,
+          await insertAudit(tx, toAuditEvent({ principal_id: principal.id,
             entity_type: 'task', entity_id: task.id, base_snapshot: task.base_snapshot, action: 'task.baseline_bound',
-            payload: JSON.stringify({ requirement_baseline_code: loaded.baseline.baseline_code, previous_baseline_id: task.requirement_baseline_id?.toString() ?? null,
-              content_hash: loaded.baseline.content_hash }) });
+            payload: { requirement_baseline_code: loaded.baseline.baseline_code, previous_baseline_id: task.requirement_baseline_id?.toString() ?? null,
+              content_hash: loaded.baseline.content_hash } }, createPublicCode(), now()));
           return { task_code: task.code, requirement_baseline_code: loaded.baseline.baseline_code, base_snapshot: task.base_snapshot + 1 };
         });
         return { ok: true as const, data };

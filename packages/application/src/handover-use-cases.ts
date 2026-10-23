@@ -3,11 +3,11 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type { Db } from '@team-synergy/persistence';
 import { schema } from '@team-synergy/persistence';
-import { DomainError } from '@team-synergy/domain';
+import { DomainError, toAuditEvent } from '@team-synergy/domain';
 import { ContextManifestSchema, HandoverSummarySchema, WorkspaceManifestSchema, type HandoverSummary, type WorkspaceManifest, type RequirementBaseline } from '@team-synergy/contracts';
 import { loadRequirementBaseline } from './baseline-use-cases.js';
 import { createPublicCode } from './public-code.js';
-import { fail, now, parseAcceptance } from './task-service.js';
+import { fail, insertAudit, now, parseAcceptance } from './task-service.js';
 import { UNRESOLVED_HANDOVER_STATUSES } from './execution-guard.js';
 import { issueRunLease } from './execution-use-cases.js';
 import { designPrototypeContentMetadata, designPrototypeRevisionColumns } from './design-prototype-content.js';
@@ -187,9 +187,9 @@ function changes(before: Versions, after: Versions) {
 
 export function createHandoverUseCases(db: Db) {
   async function audit(tx: Tx, action: string, actor: Actor, access: Access, handover?: Handover, payload?: unknown) {
-    await tx.insert(schema.auditEvents).values({ code: createPublicCode(), timestamp: now(), principal_id: actor.principal.id,
+    await insertAudit(tx, toAuditEvent({ principal_id: actor.principal.id,
       run_id: handover?.source_run_id, action, entity_type: 'task', entity_id: access.task.id, base_snapshot: access.task.base_snapshot,
-      payload: JSON.stringify({ handover_code: handover?.code, ...((payload ?? {}) as object) }) });
+      payload: { handover_code: handover?.code, ...((payload ?? {}) as object) } }, createPublicCode(), now()));
   }
   async function snapshot(tx: Tx, handover: Handover): Promise<Snapshot> {
     const [row] = handover.context_snapshot_id ? await tx.select().from(schema.contextSnapshots).where(eq(schema.contextSnapshots.id, handover.context_snapshot_id)).limit(1) : [];
