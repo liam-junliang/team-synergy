@@ -2,6 +2,7 @@ import { getLocale } from './i18n.ts';
 
 // Translate stable service error codes, never arbitrary server/user-provided prose.
 const chineseErrors: Record<string, string> = {
+  request_body_too_large: '请求内容超过大小限制，请缩小后重试。',
   metrics_unavailable: '运行指标暂不可用，请稍后重试。',
   audit_export_failed: '审计导出失败，请检查管理员身份与服务连接。',
   bootstrap_config_invalid: '管理员临时口令有效期配置无效，请联系运维人员。',
@@ -21,6 +22,7 @@ const chineseErrors: Record<string, string> = {
   intake_not_found: '当前项目中没有可访问的接入批次。',
 };
 const englishErrors: Record<string, string> = {
+  request_body_too_large: 'The request exceeds the size limit. Reduce it and try again.',
   metrics_unavailable: 'Operational metrics are temporarily unavailable.',
   audit_export_failed: 'Audit export failed. Check administrator access and connectivity.',
   bootstrap_config_invalid: 'The administrator credential lifetime configuration is invalid.',

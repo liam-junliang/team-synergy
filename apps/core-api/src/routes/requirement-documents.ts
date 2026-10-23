@@ -46,6 +46,7 @@ export function registerRequirementDocumentRoutes(app: FastifyInstance, db: Db):
 
   app.post<{ Params: { project_code: string }; Body: Record<string, unknown> }>(
     '/projects/:project_code/requirement-documents',
+    { bodyLimit: 8 * 1024 * 1024 },
     async (request) => {
       const body = request.body ?? {};
       return await uc.createDocument({
@@ -67,6 +68,7 @@ export function registerRequirementDocumentRoutes(app: FastifyInstance, db: Db):
 
   app.patch<{ Params: { document_code: string }; Body: Record<string, unknown> }>(
     '/requirement-documents/:document_code',
+    { bodyLimit: 8 * 1024 * 1024 },
     async (request) => {
       const body = request.body ?? {};
       return await uc.reviseDocument({

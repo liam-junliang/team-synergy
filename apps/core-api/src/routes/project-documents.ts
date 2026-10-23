@@ -69,6 +69,7 @@ export function registerProjectDocumentRoutes(app: FastifyInstance, db: Db): voi
 
   app.post<{ Params: { project_code: string }; Body: Record<string, unknown> }>(
     '/projects/:project_code/handoff/documents',
+    { bodyLimit: 8 * 1024 * 1024 },
     async (request) => {
       const body = request.body ?? {};
       return await uc.createDocument({
@@ -89,6 +90,7 @@ export function registerProjectDocumentRoutes(app: FastifyInstance, db: Db): voi
 
   app.patch<{ Params: { document_code: string }; Body: Record<string, unknown> }>(
     '/handoff-documents/:document_code',
+    { bodyLimit: 8 * 1024 * 1024 },
     async (request) => {
       const body = request.body ?? {};
       return await uc.reviseDocument({

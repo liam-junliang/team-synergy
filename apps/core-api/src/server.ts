@@ -61,8 +61,15 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
       migrationsFolder: bundledMigrationsFolder(),
       migrate: options.migrate ?? process.env.TSP_AUTO_MIGRATE !== 'false',
     });
-  // Self-contained image prototypes are posted as data URLs inside JSON.
-  const app = Fastify({ logger: options.logger ?? true, bodyLimit: 8 * 1024 * 1024 });
+  // Large document payloads must opt in at the route boundary.
+  const app = Fastify({ logger: options.logger ?? true, bodyLimit: 1024 * 1024 });
+  app.setErrorHandler((error, _request, reply) => {
+    if ((error as { code?: string }).code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
+      return reply.code(413).send({ ok: false, error: { code: 'request_body_too_large', message: 'Request body exceeds the allowed size' } });
+    }
+    // Preserve Fastify's existing validation and unexpected-error semantics.
+    return reply.send(error);
+  });
 
   if (ownsDb) {
     const bootstrap = await ensureSystemAdmin(db).catch(async error => { await closeDb(db); throw error; });
