@@ -4,6 +4,7 @@ import { SVG_PREVIEW_MAX_BYTES, svgImageUrl } from './diagramRendering';
 export const DRAWIO_ORIGIN = 'https://embed.diagrams.net';
 export const EMPTY_DRAWIO_SOURCE = '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel>';
 const MAX_SOURCE_BYTES = 6 * 1024 * 1024;
+const MAX_MESSAGE_BYTES = 24 * 1024 * 1024;
 
 export function drawioFrameUrl(readOnly: boolean): string {
   const url = new URL('/', DRAWIO_ORIGIN);
@@ -27,11 +28,35 @@ function record(value: unknown): Record<string, unknown> | null {
 }
 
 export function readDrawioEvent(event: Pick<MessageEvent, 'origin' | 'source' | 'data'>, frameWindow: Window | null): DrawioEvent | null {
-  if (!frameWindow || event.origin !== DRAWIO_ORIGIN || event.source !== frameWindow || typeof event.data !== 'string' || event.data.length > 24 * 1024 * 1024) return null;
+  if (!frameWindow || event.origin !== DRAWIO_ORIGIN || event.source !== frameWindow || !boundedText(event.data, MAX_MESSAGE_BYTES)) return null;
   const data = record(event.data);
-  if (!data || typeof data.event !== 'string') return null;
-  if (!['configure', 'init', 'load', 'save', 'export', 'exit'].includes(data.event)) return null;
-  return data as DrawioEvent;
+  return validEvent(data) ? data as DrawioEvent : null;
+}
+
+function boundedText(value: unknown, maxBytes: number): value is string {
+  return typeof value === 'string' && value.length <= maxBytes && new TextEncoder().encode(value).length <= maxBytes;
+}
+
+/** Validate consumed fields; unrelated upstream metadata may evolve independently. */
+function validEvent(data: Record<string, unknown> | null): boolean {
+  if (!data) return false;
+  const optionalSource = data.xml === undefined || boundedText(data.xml, MAX_SOURCE_BYTES);
+  const optionalError = data.error === undefined || data.error === null || boundedText(data.error, 4096);
+  switch (data.event) {
+    case 'configure': case 'init': return true;
+    case 'load': return optionalSource && optionalError;
+    case 'save': return boundedText(data.xml, MAX_SOURCE_BYTES) && (data.exit === undefined || typeof data.exit === 'boolean');
+    case 'exit': return typeof data.modified === 'boolean';
+    case 'export': {
+      const request = record(data.message);
+      return data.format === 'svg' && optionalSource && optionalError
+        && request?.action === 'export' && request.format === 'svg'
+        && boundedText(request.requestId, 128) && request.requestId.length > 0
+        && boundedText(request.xml, MAX_SOURCE_BYTES)
+        && (data.data === undefined && Boolean(data.error) || boundedText(data.data, 6 * SVG_PREVIEW_MAX_BYTES));
+    }
+    default: return false;
+  }
 }
 
 export function validateDrawioSource(source: string): void {

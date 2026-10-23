@@ -122,6 +122,7 @@ test('XML-only diagrams get a sandboxed read-only iframe without putting diagram
   assert.match(html, /referrerPolicy="no-referrer"/);
   assert.doesNotMatch(html, /mxGraphModel|srcDoc|allow-top-navigation|allow-popups/);
   const editor = renderToStaticMarkup(createElement(DrawioEditor, { source: sourceA, onSave() {}, onClose() {} }));
+  assert.equal(new URL(/<iframe[^>]+src="([^"]+)"/.exec(editor)[1]).origin, protocol.DRAWIO_ORIGIN);
   assert.match(editor, /chrome=1/);
   assert.match(editor, /draw.io 架构图编辑器/);
 });
@@ -257,4 +258,52 @@ test('draw.io SVG decoder accepts Unicode percent/base64 data and rejects non-SV
   for (const value of [null, svg, 'data:text/html,<svg/>', 'javascript:alert(1)', 'data:image/svg+xml,%E0%A4%A', 'data:image/svg+xml;base64,!!', 'data:image/svg+xml,<html/>']) {
     assert.equal(protocol.decodeDrawioSvg(value), null);
   }
+});
+
+test('draw.io message boundary rejects malformed event fields before session callbacks run', () => {
+  const frameWindow = {};
+  const envelope = value => ({ origin: protocol.DRAWIO_ORIGIN, source: frameWindow, data: JSON.stringify(value) });
+  const request = { action: 'export', format: 'svg', requestId: 'request-1', xml: sourceA };
+  for (const value of [
+    { event: 'save' }, { event: 'save', xml: {} }, { event: 'save', xml: sourceA, exit: 'true' },
+    { event: 'save', xml: 'x'.repeat(6 * 1024 * 1024 + 1) },
+    { event: 'save', xml: '界'.repeat(2 * 1024 * 1024 + 1) },
+    { event: 'load', error: {} }, { event: 'load', xml: [] },
+    { event: 'exit' }, { event: 'exit', modified: 'false' }, { event: 'exit', modified: 0 },
+    { event: 'export', format: 'html', message: request, data: 'data:text/html,hello' },
+    { event: 'export', format: 'svg', message: [], data: 'data:image/svg+xml,<svg/>' },
+    { event: 'export', format: 'svg', message: 'bad JSON', data: 'data:image/svg+xml,<svg/>' },
+    { event: 'export', format: 'svg', message: { ...request, action: 'load' }, data: 'data:image/svg+xml,<svg/>' },
+    { event: 'export', format: 'svg', message: { ...request, requestId: 123 }, data: 'data:image/svg+xml,<svg/>' },
+    { event: 'export', format: 'svg', message: request, data: {} },
+    { event: 'export', format: 'svg', message: request, data: 'data:image/svg+xml,<svg/>', error: {} },
+  ]) assert.equal(protocol.readDrawioEvent(envelope(value), frameWindow), null, JSON.stringify(value).slice(0, 160));
+
+  for (const value of [
+    { event: 'configure', version: 'future' }, { event: 'init' }, { event: 'load', error: null, scale: 1 },
+    { event: 'save', xml: sourceA, exit: true }, { event: 'exit', modified: false },
+    exportEvent(request), exportEvent(JSON.stringify(request)),
+    { event: 'export', format: 'svg', message: request, error: 'export failed' },
+  ]) assert.deepEqual(protocol.readDrawioEvent(envelope(value), frameWindow), value);
+});
+
+test('draw.io gated bridge preserves edit/export/preview flow and ignores forged state changes', () => {
+  const fixture = sessionFixture();
+  const frameWindow = {};
+  const receive = (value, overrides = {}) => {
+    const event = protocol.readDrawioEvent({ origin: protocol.DRAWIO_ORIGIN, source: frameWindow, data: JSON.stringify(value), ...overrides }, frameWindow);
+    if (event) fixture.session.receive(event);
+  };
+  receive({ event: 'configure' }); receive({ event: 'init' }); receive({ event: 'load', error: null });
+  receive({ event: 'save', xml: sourceB, exit: true });
+  const request = fixture.sent.at(-1);
+  for (const overrides of [{ origin: 'null' }, { origin: 'https://attacker.test' }, { source: {} }]) receive(exportEvent(request), overrides);
+  receive({ event: 'exit', modified: 'false' });
+  receive({ ...exportEvent(request), message: { ...request, action: 'load' } });
+  assert.deepEqual(fixture.saved, []); assert.deepEqual(fixture.exits, []);
+  assert.equal(fixture.loads, 1);
+  receive(exportEvent(JSON.stringify(request)));
+  assert.deepEqual(fixture.saved, [{ source: sourceB, previewSvg: svg }]);
+  receive({ event: 'exit', modified: false });
+  assert.deepEqual(fixture.exits, [false]);
 });
