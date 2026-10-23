@@ -351,6 +351,13 @@
       "when": 1792731600000,
       "tag": "0050_core_time_expand",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1792735200000,
+      "tag": "0051_core_time_contract",
+      "breakpoints": true
     }
   ]
 }

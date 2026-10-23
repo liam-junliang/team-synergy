@@ -1,0 +1,68 @@
+{
+  "restored": true,
+  "expand_committed": true,
+  "contract_applied": true,
+  "cleanup_dropped": true,
+  "restore_ms": 1747,
+  "backup_migration_count": 47,
+  "backup_head": 47,
+  "backup_head_hash_matches": true,
+  "expand_ms": 75,
+  "after_expand": {
+    "projects": {
+      "count": 3,
+      "all_business_fields_equal": true,
+      "exact_epoch_equal": true
+    },
+    "tasks": {
+      "count": 64,
+      "all_business_fields_equal": true,
+      "exact_epoch_equal": true
+    },
+    "audit_events": {
+      "count": 859,
+      "all_business_fields_equal": true,
+      "exact_epoch_equal": true
+    }
+  },
+  "contract_ms": 30,
+  "after_contract": {
+    "projects": {
+      "count": 3,
+      "all_business_fields_equal": true,
+      "exact_epoch_equal": true
+    },
+    "tasks": {
+      "count": 64,
+      "all_business_fields_equal": true,
+      "exact_epoch_equal": true
+    },
+    "audit_events": {
+      "count": 859,
+      "all_business_fields_equal": true,
+      "exact_epoch_equal": true
+    }
+  },
+  "three_typed_columns": true,
+  "microsecond_probe": {
+    "insert_microseconds_preserved": true,
+    "update_microseconds_preserved": true
+  },
+  "after_probe_rollback": {
+    "projects": {
+      "count": 3,
+      "all_business_fields_equal": true,
+      "exact_epoch_equal": true
+    },
+    "tasks": {
+      "count": 64,
+      "all_business_fields_equal": true,
+      "exact_epoch_equal": true
+    },
+    "audit_events": {
+      "count": 859,
+      "all_business_fields_equal": true,
+      "exact_epoch_equal": true
+    }
+  }
+}

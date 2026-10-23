@@ -32,11 +32,14 @@ before(async () => {
  try { await admin.query(`create database "${databaseName}"`); createdDatabase = true; }
  finally { await admin.end(); }
  client = new Client({ connectionString: url }); await client.connect();
- oldMigrations = await mkdtemp(path.join(tmpdir(), 'tsp-core-fk-upgrade-')); await mkdir(path.join(oldMigrations, 'meta'));
+ oldMigrations = await mkdtemp(path.join(tmpdir(), 'tsp-core-fk-upgrade-'));
  const journal = JSON.parse(await readFile(path.join(folder, 'meta/_journal.json'), 'utf8'));
- journal.entries = journal.entries.filter(entry => entry.idx <= 46);
- for (const entry of journal.entries) await copyFile(path.join(folder, `${entry.tag}.sql`), path.join(oldMigrations, `${entry.tag}.sql`));
- await (await import('node:fs/promises')).writeFile(path.join(oldMigrations, 'meta/_journal.json'), JSON.stringify(journal));
+ for (const [destination, maxTag] of [[oldMigrations, 47], [path.join(oldMigrations, 'time-expand'), 50]]) {
+  const entries = journal.entries.filter(entry => Number(entry.tag.slice(0, 4)) <= maxTag);
+  await mkdir(path.join(destination, 'meta'), { recursive: true });
+  for (const entry of entries) await copyFile(path.join(folder, `${entry.tag}.sql`), path.join(destination, `${entry.tag}.sql`));
+  await (await import('node:fs/promises')).writeFile(path.join(destination, 'meta/_journal.json'), JSON.stringify({ ...journal, entries }));
+ }
 });
 after(async () => {
  await client?.end();
@@ -86,8 +89,14 @@ test('legacy data upgrades without change; NOT VALID expand and VALIDATE are ide
   assert.equal(row.confdeltype, 'r'); assert.equal(row.confupdtype, 'a');
  }
  assert.deepEqual((await client.query('select row_to_json(tasks) as row from tasks')).rows, before);
+ const expanded = await openDb({ databaseUrl: url, migrationsFolder: path.join(oldMigrations, 'time-expand') }); await closeDb(expanded);
+ assert.equal((await client.query(`select count(*)::int as count from drizzle.__drizzle_migrations
+   where created_at=1792731600000 and xmin <> pg_current_xact_id()::text::xid`)).rows[0].count, 1, '0050 expand must commit before the separate contract migrator');
  const upgraded = await openDb({ databaseUrl: url, migrationsFolder: folder }); await closeDb(upgraded);
  assert.equal((await client.query('select id from tasks where id=$1',[fixture.task.id])).rows.length, 1);
+ assert.deepEqual((await client.query('select row_to_json(content) as row from (select id,feature_id,title,profile,status,acceptance,base_snapshot from tasks) content')).rows,
+   before.map(({ row }) => ({ row: Object.fromEntries(['id','feature_id','title','profile','status','acceptance','base_snapshot'].map(key => [key, row[key]])) })), 'cutover preserves the original task content and references');
+ assert.equal((await client.query('select created_at from tasks where id=$1',[fixture.task.id])).rows[0].created_at.toISOString(), '2026-10-23T00:00:00.000Z');
  const inserts = [
   ["insert into tasks(feature_id,title,profile,acceptance,base_snapshot,created_at) values ($1,'Orphan task','builder','[]',0,'2026-10-23T00:00:00Z')", [missingParent]],
   ["insert into members(principal_id,project_id,role,display_name,created_at) values ($1,$2,'member','Orphan member','2026-10-23T00:00:00Z')", [fixture.user.id,missingParent]],

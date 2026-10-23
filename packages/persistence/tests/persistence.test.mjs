@@ -92,6 +92,18 @@ async function freshDbThrough(maxTag) {
   }
 }
 
+/** Reproduce the committed expand release before the separately deployed cutover. */
+async function upgradeDbAfterCoreTimeExpand() {
+  const expanded = await freshDbThrough(50);
+  try {
+    const receipt = await expanded.$client.query(`SELECT count(*)::int AS n
+      FROM drizzle.__drizzle_migrations WHERE created_at = 1792731600000
+        AND xmin <> pg_current_xact_id()::text::xid`);
+    assert.equal(receipt.rows[0].n, 1, '0050 must be committed before starting the contract migrator');
+  } finally { await closeDb(expanded); }
+  return freshDb();
+}
+
 async function withDb(run, options = {}) {
   const db = await freshDb(options);
   try {
@@ -360,7 +372,7 @@ test('0026 repairs an already-migrated legacy handover table without losing its 
     assert.equal(before.rows[0].n, migrationJournal.entries.filter(entry => entry.when < repair.when).length);
     await assert.rejects(db.$client.query('SELECT drift_approval FROM task_handovers'), error => error.code === '42703');
   } finally { await closeDb(db); }
-  const repaired = await freshDb();
+  const repaired = await upgradeDbAfterCoreTimeExpand();
   try {
     const [preserved] = await repaired.select().from(schema.taskHandovers).where(eq(schema.taskHandovers.id, row.id));
     assert.equal(preserved.code, row.code);
@@ -387,7 +399,7 @@ test('0026 升级到 0027：保留既有需求任务，基线绑定默认空且�
     seeded = { requirement, task: { ...inserted.rows[0], id: BigInt(inserted.rows[0].id) } };
     await assert.rejects(previous.$client.query('SELECT requirement_baseline_id FROM tasks'), error => error.code === '42703');
   } finally { await closeDb(previous); }
-  const upgraded = await freshDb();
+  const upgraded = await upgradeDbAfterCoreTimeExpand();
   try {
     const [task] = await upgraded.select().from(schema.tasks).where(eq(schema.tasks.id, seeded.task.id));
     const [requirement] = await upgraded.select().from(schema.requirements).where(eq(schema.requirements.id, seeded.requirement.id));
@@ -419,10 +431,12 @@ test('0031 升级到 0032：独立架构图源与版本表不修改现有项目�
   const beforeProjects = (await oldDb.$client.query('SELECT * FROM projects ORDER BY id')).rows;
   const beforeFolders = await oldDb.select().from(schema.projectDocumentFolders);
   await closeDb(oldDb);
-  const db = await freshDb();
+  const db = await upgradeDbAfterCoreTimeExpand();
   try {
     const afterProjects = (await db.$client.query('SELECT * FROM projects ORDER BY id')).rows;
-    assert.deepEqual(afterProjects.map((row, index) => Object.fromEntries(Object.keys(beforeProjects[index]).map(key => [key, row[key]]))), beforeProjects);
+    assert.ok(afterProjects.every(row => row.created_at instanceof Date), '0051 returns the stored project creation instant as a PostgreSQL timestamp');
+    assert.deepEqual(afterProjects.map((row, index) => Object.fromEntries(Object.keys(beforeProjects[index]).map(key => [key, row[key]]))),
+      beforeProjects.map(row => ({ ...row, created_at: new Date(row.created_at) })), 'every original field and the exact creation instant survive the typed time cutover');
     assert.equal(afterProjects[0].owner_principal_id, user.id.toString(), '0034 resolves the unambiguous existing owner');
     assert.equal(afterProjects[0].created_by, null, 'Historic creator is not inferred without creation evidence');
     assert.equal(afterProjects[0].member_policy, 'private');
@@ -486,7 +500,7 @@ test('0032 升级到 0033：架构关联目录与类型升级保留所有正文�
     seeded = { project, user, emptyProject, standards, child, ordinary, document, docRevisions, architecture, architectureRevisions, requirement, requirementRevisions };
   } finally { await closeDb(previous); }
   let rootCode;
-  const upgraded = await freshDb();
+  const upgraded = await upgradeDbAfterCoreTimeExpand();
   try {
     const folders = await upgraded.select().from(schema.projectDocumentFolders);
     const roots = folders.filter(folder => folder.system_role === 'architecture');
@@ -548,7 +562,7 @@ test('0030 升级到 0031：需求系统目录保留原需求正文、历史、�
       revisions: await previous.select().from(schema.requirementDocumentRevisions).orderBy(schema.requirementDocumentRevisions.id) };
   } finally { await closeDb(previous); }
   let folderCode;
-  const upgraded = await freshDb();
+  const upgraded = await upgradeDbAfterCoreTimeExpand();
   try {
     const folders = await upgraded.select().from(schema.projectDocumentFolders);
     const roots = folders.filter(folder => folder.system_role === 'requirements');
@@ -621,7 +635,7 @@ test('0029 升级到 0030：固定规范目录只迁移明确绑定，保留同�
     seeded = { project, foreign, archivedProject, empty, user, bound, unrelated, descendant, archived, legacyFolder, child, history, audits };
     await assert.rejects(previous.$client.query('SELECT system_role FROM project_document_folders'), error => error.code === '42703');
   } finally { await closeDb(previous); }
-  const upgraded = await freshDb();
+  const upgraded = await upgradeDbAfterCoreTimeExpand();
   let rootCode;
   try {
     const folders = await upgraded.select().from(schema.projectDocumentFolders);
@@ -716,7 +730,7 @@ test('0034 升级到 0035：测试固定目录保留同名普通子树、正文�
       audits: await previous.select().from(schema.auditEvents).orderBy(schema.auditEvents.id) };
   } finally { await closeDb(previous); }
 
-  const upgraded = await freshDb();
+  const upgraded = await upgradeDbAfterCoreTimeExpand();
   let roots;
   let snapshots;
   try {

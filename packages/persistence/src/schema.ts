@@ -13,6 +13,7 @@ import {
   varchar,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+import { isoTimestamp } from './iso-timestamp.js';
 
 /**
  * Project Core 存储 Schema。
@@ -82,12 +83,14 @@ export const projects = pgTable(
     standards_document_id: bigint('standards_document_id', { mode: 'bigint' }),
     status: text('status', { enum: ['active', 'archived'] }).notNull().default('active'),
     current_snapshot: integer('current_snapshot').notNull().default(0),
-    created_at: text('created_at').notNull(),
+    created_at: isoTimestamp('created_at').notNull().default(sql`now()`),
   },
   (t) => [
     ...codeConstraints('projects', t),
     uniqueIndex('uq_projects_legacy_code').on(t.legacy_code),
     index('idx_projects_team').on(t.team_id),
+    index('idx_projects_created_at').on(t.created_at),
+    check('ck_projects_created_at_finite', sql`isfinite(${t.created_at}) and ${t.created_at} >= '0001-01-01T00:00:00Z'::timestamptz and ${t.created_at} < '10000-01-01T00:00:00Z'::timestamptz`),
     check('ck_projects_member_policy', sql`${t.member_policy} in ('private', 'team_read', 'team_write')`),
   ],
 );
@@ -952,7 +955,7 @@ export const tasks = pgTable(
     scope: text('scope'),
     base_snapshot: integer('base_snapshot').notNull(),
     execution_epoch: integer('execution_epoch').notNull().default(0),
-    created_at: text('created_at').notNull(),
+    created_at: isoTimestamp('created_at').notNull().default(sql`now()`),
   },
   (t) => [
     ...codeConstraints('tasks', t),
@@ -960,6 +963,7 @@ export const tasks = pgTable(
     uniqueIndex('uq_tasks_legacy_code').on(t.legacy_code),
     index('idx_tasks_feature').on(t.feature_id),
     index('idx_tasks_created_id').on(t.created_at.desc(), t.id.desc()),
+    check('ck_tasks_created_at_finite', sql`isfinite(${t.created_at}) and ${t.created_at} >= '0001-01-01T00:00:00Z'::timestamptz and ${t.created_at} < '10000-01-01T00:00:00Z'::timestamptz`),
     index('idx_tasks_feature_created_id').on(t.feature_id, t.created_at.desc(), t.id.desc()),
     index('idx_tasks_status').on(t.status),
     index('idx_tasks_assignee').on(t.assignee_principal_id),
@@ -1217,7 +1221,7 @@ export const auditEvents = pgTable(
     id: identityId(),
     code: publicCode(),
     legacy_code: text('legacy_code'),
-    timestamp: text('timestamp').notNull(),
+    timestamp: isoTimestamp('timestamp').notNull().default(sql`now()`),
     principal_id: bigint('principal_id', { mode: 'bigint' }).notNull(),
     run_id: bigint('run_id', { mode: 'bigint' }),
     action: text('action').notNull(),
@@ -1234,6 +1238,8 @@ export const auditEvents = pgTable(
     uniqueIndex('uq_audit_events_legacy_code').on(t.legacy_code),
     index('idx_audit_entity').on(t.entity_type, t.entity_id),
     index('idx_audit_principal').on(t.principal_id),
+    index('idx_audit_timestamp_id').on(t.timestamp, t.id),
+    check('ck_audit_events_timestamp_finite', sql`isfinite(${t.timestamp}) and ${t.timestamp} >= '0001-01-01T00:00:00Z'::timestamptz and ${t.timestamp} < '10000-01-01T00:00:00Z'::timestamptz`),
   ],
 );
 

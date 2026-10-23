@@ -43,6 +43,8 @@ export async function openDb(options: OpenDbOptions = {}): Promise<Db> {
   const pool = new Pool({
     connectionString: options.databaseUrl ?? process.env.TSP_DATABASE_URL ?? DEFAULT_DATABASE_URL,
     connectionTimeoutMillis: 3_000,
+    // Keep timestamp wire strings stable under database-level zone/DateStyle settings.
+    options: '-c timezone=UTC -c DateStyle=ISO,MDY',
     statement_timeout: statementTimeoutMs,
   });
   instrumentDatabasePool(pool);
