@@ -111,11 +111,11 @@
 
 | 编号 | 现状与证据 | 目标与施工要点 | 验收标准（DoD） | 状态 | 工作量 |
 |---|---|---|---|---|---|
-| **D-01** | 有 pino 结构化日志与 61 处审计写入；无 metrics、无 tracing、无慢查询日志、无业务指标 | ① `prom-client` 暴露 `/metrics`（HTTP 时延直方图、DB 连接池、任务状态计数、Agent 作业成功率）；② OTel HTTP 自动埋点（可选）；③ 慢查询：池级别 `statement_timeout` + 应用侧 >500 ms 打点 | `/metrics` 返回 Prometheus 文本；压测时能看到 QPS/时延/池占用；一次慢请求能在日志中定位到具体 route | 🟡 有日志与审计，无指标 | 2–3 人日 |
-| **D-02** | 审计事件只落库，无对外出口；安全团队接不进 SIEM | ① `tsp audit:export --since` 输出 NDJSON；② 可选 webhook 推送（失败重试 + 死信表）；③ 字段级脱敏（口令、令牌、密钥永不入库） | 导出命令能按时间窗输出完整事件；人为触发敏感操作后能在导出中出现；脱敏断言有用例 | ⬜ | 2 人日 |
-| **D-03** | `system-agent-runtime.ts:195` `mkdtemp` 后从不删除，每次生成遗留 home/workspace/tmp | ① `try/finally` 中 `rm(runDir, {recursive:true, force:true})`；② 保留最近 N 次失败现场（可配置），其余清理；③ 启动时清理超过 24 h 的历史目录 | 成功/失败/取消/超时四条路径后 `draft-*` 目录都被清理；启动清理逻辑有单测；磁盘占用不随使用时长增长 | ⬜ | 0.5 人日 |
-| **D-04** | 初始管理员口令 15 分钟过期，过期后只能重启重新生成，无文档化恢复路径 | ① TTL 改为环境变量 `TSP_BOOTSTRAP_TTL_MINUTES`（默认 30）；② 提供 `tsp admin:reset-password --account` 受控命令（需服务器本机执行 + 写审计）；③ runbook 写明步骤 | 过期后可用命令重置且不重启服务；重置写审计；TTL 可配置并有用例 | ⬜ | 1–2 人日 |
-| **D-05** | 43 个迁移含 24 处 DROP、19 处 ADD COLUMN NOT NULL，全部在启动时执行，无 down 迁移 | ① 立规范：破坏性变更必须 expand/contract 两步；② 迁移 CI 检查：禁止单迁移内同时 ADD NOT NULL 与 DROP；③ 大表 DDL 用 `CONCURRENTLY`（需 `migrate:false` + 手动执行） | CI 能对违反规范的迁移报错；新迁移全部通过检查；文档写明"哪些 DDL 必须手动执行" | ⬜ | 2 人日 |
+| **D-01** | 有 pino 结构化日志与 61 处审计写入；无 metrics、无 tracing、无慢查询日志、无业务指标 | ① `prom-client` 暴露 `/metrics`（HTTP 时延直方图、DB 连接池、任务状态计数、Agent 作业成功率）；② OTel HTTP 自动埋点（可选）；③ 慢查询：池级别 `statement_timeout` + 应用侧 >500 ms 打点 | `/metrics` 返回 Prometheus 文本；压测时能看到 QPS/时延/池占用；一次慢请求能在日志中定位到具体 route | ✅ 已完成（证据见 54） | 2–3 人日 |
+| **D-02** | 审计事件只落库，无对外出口；安全团队接不进 SIEM | ① `tsp audit:export --since` 输出 NDJSON；② 可选 webhook 推送（失败重试 + 死信表）；③ 字段级脱敏（口令、令牌、密钥永不入库） | 导出命令能按时间窗输出完整事件；人为触发敏感操作后能在导出中出现；脱敏断言有用例 | ✅ 已完成（证据见 54） | 2 人日 |
+| **D-03** | `system-agent-runtime.ts:195` `mkdtemp` 后从不删除，每次生成遗留 home/workspace/tmp | ① `try/finally` 中 `rm(runDir, {recursive:true, force:true})`；② 保留最近 N 次失败现场（可配置），其余清理；③ 启动时清理超过 24 h 的历史目录 | 成功/失败/取消/超时四条路径后 `draft-*` 目录都被清理；启动清理逻辑有单测；磁盘占用不随使用时长增长 | ✅ 已完成（证据见 54） | 0.5 人日 |
+| **D-04** | 初始管理员口令 15 分钟过期，过期后只能重启重新生成，无文档化恢复路径 | ① TTL 改为环境变量 `TSP_BOOTSTRAP_TTL_MINUTES`（默认 30）；② 提供 `tsp admin:reset-password --account` 受控命令（需服务器本机执行 + 写审计）；③ runbook 写明步骤 | 过期后可用命令重置且不重启服务；重置写审计；TTL 可配置并有用例 | ✅ 已完成（证据见 54） | 1–2 人日 |
+| **D-05** | 43 个迁移含 24 处 DROP、19 处 ADD COLUMN NOT NULL，全部在启动时执行，无 down 迁移 | ① 立规范：破坏性变更必须 expand/contract 两步；② 迁移 CI 检查：禁止单迁移内同时 ADD NOT NULL 与 DROP；③ 大表 DDL 用 `CONCURRENTLY`（需 `migrate:false` + 手动执行） | CI 能对违反规范的迁移报错；新迁移全部通过检查；文档写明"哪些 DDL 必须手动执行" | ✅ 已完成（证据见 54） | 2 人日 |
 
 ---
 
@@ -220,7 +220,7 @@ pnpm -r --workspace-concurrency=1 test    # 用例数不得减少
 | A 止血 | 6 | 0 | 0 | 0 | ✅ 6/6 已验收，证据见 53-remediation-execution.md |
 | B 安全 | 5 | 3 | 2 | 0 | 安全头齐全；令牌不在 localStorage；iframe 隔离 |
 | C 数据 | 4 | 1 | 2 | 1 | 5 个核心 FK；巡检为 0；核心表 timestamptz；C-04 需先决策 |
-| D 运维 | 5 | 4 | 1 | 0 | `/metrics` 可抓；临时目录不增长；runbook 可执行 |
+| D 运维 | 5 | 0 | 0 | 0 | ✅ 5/5 已验收，证据见 54-remediation-batch-d.md |
 | E 治理 | 10 | 4 | 5 | 0 | ✅ E-02 文档入库；OpenAPI ≥ 90%；单文件 ≤ 400 行 |
 | F 清理 | 4 | 4 | 0 | 0 | 无死代码；根目录干净 |
-| **合计** | **34** | **16** | **10** | **1** | 已完成 7 项（A-01～A-06、E-02） |
+| **合计** | **34** | **12** | **9** | **1** | 已完成 12 项（A、D、E-02） |

@@ -15,5 +15,6 @@ ADR 记录已经生效且会约束实现的架构选择。讨论材料和开源�
 | [ADR-0009](0009-modular-requirement-document-library.md) | Accepted | 模块化多需求文档与 Agent 渐进式上下文加载 |
 | [ADR-0010](0010-numeric-primary-keys-and-public-codes.md) | Accepted | 数字主键关联与无实体前缀公开编码 |
 | [ADR-0011](0011-project-scoped-material-fences.md) | Accepted | 项目级共享上下文与排他材料栅栏 |
+| [ADR-0012](0012-operations-boundaries.md) | Accepted | 受控运维入口与敏感审计边界 |
 
 每份 ADR 必须包含 `superseded_by`：有效决策为 `null`，被取代时填写新 ADR 文件名，同时更新本索引状态。文档变更与代码一同提交并经过 PR 评审。
