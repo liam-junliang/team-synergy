@@ -1,5 +1,6 @@
 import { performance } from 'node:perf_hooks';
 import type { Db } from './db.js';
+import { withReadOnlySnapshot } from './read-only-snapshot.js';
 
 interface IntegrityRule { readonly name: string; readonly references: readonly string[]; readonly query: string }
 /** Explicit reviewed parent tables. Never infer SQL identifiers from caller input or payloads. */
@@ -197,34 +198,13 @@ export const INTEGRITY_EXCEPTIONS = Object.freeze([
 /** One bounded, read-only, repeatable-read snapshot. No caller-provided SQL or identifiers. */
 export async function checkDatabaseIntegrity(db: Pick<Db, '$client'>) {
   const started = performance.now();
-  let expired = false;
-  const connecting = db.$client.connect();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const client = await Promise.race([connecting.then(client => { if (expired) client.release(); return client; }), new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => { expired = true; reject(new Error('Integrity connection deadline exceeded')); }, 9000);
-  })]).finally(() => { clearTimeout(timer); });
-  let released = false;
-  const release = (destroy = false) => { if (!released) { released = true; client.release(destroy); } };
-  let deadlineExpired = false;
-  const execute = async () => {
-    try {
-      await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-      const remaining = Math.max(1, 9000 - Math.ceil(performance.now() - started));
-      await client.query(`SET LOCAL statement_timeout = '${remaining}ms'`);
-      await client.query("SET LOCAL lock_timeout = '1000ms'");
-      const query = INTEGRITY_RELATIONS.map(check => `SELECT '${check.name}' AS name, q.count FROM (${check.query}) q`).join('\nUNION ALL\n');
-      const rows = await client.query<{ name: string; count: string }>(query);
-      const relations = rows.rows.map(row => ({ name: row.name, count: Number(row.count) }));
-      const total = relations.reduce((total, row) => total + row.count, 0);
-      if (!Number.isSafeInteger(total) || relations.some(row => !Number.isSafeInteger(row.count) || row.count < 0)) throw new Error('Invalid integrity count');
-      await client.query('COMMIT');
-      return { checked_at: new Date().toISOString(), duration_ms: Math.round(performance.now() - started), relations, total_orphans: total };
-    } catch (error) { if (!deadlineExpired) await client.query('ROLLBACK').catch(() => undefined); throw error; }
-    finally { release(); }
-  };
-  try {
-    return await Promise.race([execute(), new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(() => { deadlineExpired = true; release(true); reject(new Error('Integrity query deadline exceeded')); }, Math.max(1, 9000 - Math.ceil(performance.now() - started)));
-    })]);
-  } finally { clearTimeout(timer); }
+  const { relations, total } = await withReadOnlySnapshot(db, async client => {
+    const query = INTEGRITY_RELATIONS.map(check => `SELECT '${check.name}' AS name, q.count FROM (${check.query}) q`).join('\nUNION ALL\n');
+    const rows = await client.query<{ name: string; count: string }>(query);
+    const relations = rows.rows.map(row => ({ name: row.name, count: Number(row.count) }));
+    const total = relations.reduce((total, row) => total + row.count, 0);
+    if (!Number.isSafeInteger(total) || relations.some(row => !Number.isSafeInteger(row.count) || row.count < 0)) throw new Error('Invalid integrity count');
+    return { relations, total };
+  });
+  return { checked_at: new Date().toISOString(), duration_ms: Math.round(performance.now() - started), relations, total_orphans: total };
 }

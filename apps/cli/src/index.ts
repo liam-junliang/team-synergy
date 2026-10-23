@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { registerDbCheckOrphans } from './db-check-orphans.js';
+import { registerDbPlanTenants } from './db-plan-tenants.js';
 import { registerAdminRecoveryCommands } from './admin-recovery.js';
 import { registerAuditCommands } from './audit-export.js';
 import { Command } from 'commander';
@@ -2697,6 +2698,7 @@ repository
   });
 
 registerDbCheckOrphans(program);
+registerDbPlanTenants(program);
 registerAdminRecoveryCommands(program);
 registerAuditCommands(program, requireApiClient);
 registerHandoverCommands(program, task);
