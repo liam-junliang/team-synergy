@@ -100,10 +100,10 @@
 
 | 编号 | 现状与证据 | 目标与施工要点 | 验收标准（DoD） | 状态 | 工作量 |
 |---|---|---|---|---|---|
-| **C-01** | 零外键（`schema.ts:18` 明确"软引用"策略）；实测插入 5000 条 `feature_id` 不存在的任务全部成功 | ① 走 ADR 变更：把"软引用"限定在跨聚合弱关系，核心聚合补 FK；② 分批：`tasks.feature_id`、`members.project_id`、`features.project_id`、`runs.task_id`、`device_sessions.device_id`；③ 先 `NOT VALID` 加约束 → 修数据 → `VALIDATE CONSTRAINT`；④ 每个 FK 配 `ON DELETE RESTRICT`（不用 CASCADE） | 上述 5 个 FK 在 `information_schema` 可见且 `convalidated=true`；插入孤儿行返回 23503；删除被引用行被拒；迁移可在存量数据上幂等重跑 | 🟡 策略性选择，需 ADR 变更 | 5 人日 |
-| **C-02** | 无任何数据一致性巡检 | 新增 `tsp db:check-orphans`：对无 FK 的关系逐条 `left join` 计数；输出 JSON；可接 cron 并经 webhook 告警 | 命令能在 10 秒内跑完并输出各类孤儿计数；人为制造孤儿后能被检出；CI 中以"孤児数=0"为门禁 | ⬜ | 2 人日 |
-| **C-03** | 99 个时间列全为 `text`，`timestamp` 类型 0 个；无法用 `now()` 默认值、无法时区换算、无法区间索引 | ① 新表一律 `timestamptz`；② 存量按"加新列 → 回填 → 双写 → 切读 → 删旧列"分迁移推进，先做 `audit_events`、`tasks`、`projects` 三张核心表；③ 建 `ck_*_iso8601` 校验现存字符串格式作为过渡防线 | 三张核心表的 `*_at` 均为 `timestamptz`；`WHERE created_at > now() - interval '7 days'` 可用且走索引；旧列删除前有双写期验证记录 | 🟡 0 处类型化时间，需从零推进 | 5–8 人日 |
-| **C-04** | 零 RLS，多租户隔离完全依赖应用层 `assertProjectAccess`（86 处调用） | 决策项：是否引入 RLS。若引入：按 `team_id` 建 policy + 连接级 `SET LOCAL app.principal_id`；若不引入：C-02 巡检必须覆盖越权读路径 | 需先回答：是否有"同一数据库多客户"的部署诉求。**未决策前不要动** | ⛔ | 需决策 |
+| **C-01** | 零外键（`schema.ts:18` 明确"软引用"策略）；实测插入 5000 条 `feature_id` 不存在的任务全部成功 | ① 走 ADR 变更：把"软引用"限定在跨聚合弱关系，核心聚合补 FK；② 分批：`tasks.feature_id`、`members.project_id`、`features.project_id`、`runs.task_id`、`device_sessions.device_id`；③ 先 `NOT VALID` 加约束 → 修数据 → `VALIDATE CONSTRAINT`；④ 每个 FK 配 `ON DELETE RESTRICT`（不用 CASCADE） | 上述 5 个 FK 在 `information_schema` 可见且 `convalidated=true`；插入孤儿行返回 23503；删除被引用行被拒；迁移可在存量数据上幂等重跑 | ✅ 已完成（ADR-0015，证据见 56） | 5 人日 |
+| **C-02** | 无任何数据一致性巡检 | 新增 `tsp db:check-orphans`：对无 FK 的关系逐条 `left join` 计数；输出 JSON；可接 cron 并经 webhook 告警 | 命令能在 10 秒内跑完并输出各类孤儿计数；人为制造孤儿后能被检出；CI 中以"孤児数=0"为门禁 | ✅ 已完成（380 项只读巡检，证据见 56） | 2 人日 |
+| **C-03** | 99 个时间列全为 `text`，`timestamp` 类型 0 个；无法用 `now()` 默认值、无法时区换算、无法区间索引 | ① 新表一律 `timestamptz`；② 存量按"加新列 → 回填 → 双写 → 切读 → 删旧列"分迁移推进，先做 `audit_events`、`tasks`、`projects` 三张核心表；③ 建 `ck_*_iso8601` 校验现存字符串格式作为过渡防线 | 三张核心表的 `*_at` 均为 `timestamptz`；`WHERE created_at > now() - interval '7 days'` 可用且走索引；旧列删除前有双写期验证记录 | ✅ 已完成核心三列两阶段切换（证据见 56） | 5–8 人日 |
+| **C-04** | 共库多客户需求及独立客户、多客户邀请、逐版本交付和限时支持授权已确认；当前仍无业务 RLS | 按 ADR-0017 建独立 tenant 边界，先盘点归属、分离数据库角色并验证可信事务上下文，再逐聚合启用 RLS；不能把 team 直接当客户 | 评估与 PoC 已完成；C-04.1～8 的客户映射、真实应用角色、跨客户共享与权限矩阵通过后，才声明对应范围数据库隔离上线 | 🟡 评估/决策完成，实施未上线（见 57） | 分子批次推进 |
 
 ---
 
@@ -179,7 +179,7 @@ pnpm -r --workspace-concurrency=1 test    # 用例数不得减少
    ↓
 批次 B（B-05 请求体分层 → B-01 安全头 → B-04 失败审计 → B-02 令牌 Cookie → B-03 iframe 隔离）
    ↓
-批次 C（C-02 巡检 → C-01 外键 → C-03 时间类型 → C-04 RLS 待决策）
+批次 C（C-02 巡检 → C-01 外键 → C-03 时间类型 → C-04 RLS 评估/边界已定 → C-04.1～8 分阶段实施）
    ↓
 批次 E（E-02 文档入库 → E-01 基线重写 → E-10 版本收敛 → E-04 错误码 → E-03 OpenAPI → E-05 拆分 → E-06 版本化 → E-08 测试 → E-07 供应链 → E-09 lint）
    ↓
@@ -219,8 +219,8 @@ pnpm -r --workspace-concurrency=1 test    # 用例数不得减少
 |---|---|---|---|---|---|
 | A 止血 | 6 | 0 | 0 | 0 | ✅ 6/6 已验收，证据见 53-remediation-execution.md |
 | B 安全 | 5 | 0 | 1 | 0 | ✅ B-02～B-05；B-01 已上线报告模式，待真实观察后切强制；证据见 55 |
-| C 数据 | 4 | 1 | 2 | 1 | 5 个核心 FK；巡检为 0；核心表 timestamptz；C-04 需先决策 |
+| C 数据 | 4 | 0 | 1 | 0 | ✅ C-01～C-03：5 个有效 FK、380 项巡检为 0、核心三列 timestamptz；C-04 按已定边界分阶段实施，见 56/57 |
 | D 运维 | 5 | 0 | 0 | 0 | ✅ 5/5 已验收，证据见 54-remediation-batch-d.md |
 | E 治理 | 10 | 4 | 5 | 0 | ✅ E-02 文档入库；OpenAPI ≥ 90%；单文件 ≤ 400 行 |
 | F 清理 | 4 | 4 | 0 | 0 | 无死代码；根目录干净 |
-| **合计** | **34** | **9** | **8** | **1** | 已完成 16 项（A、D、E-02、B-02～B-05） |
+| **合计** | **34** | **8** | **7** | **0** | 已完成 19 项（A、D、E-02、B-02～B-05、C-01～C-03） |

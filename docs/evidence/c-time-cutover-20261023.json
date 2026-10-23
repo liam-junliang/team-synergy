@@ -1,0 +1,188 @@
+{
+  "checks": [
+    {
+      "stage": "runtime_before_contract",
+      "checked_at": "2026-10-23T09:16:40.303Z",
+      "checks": [
+        {
+          "table": "projects",
+          "column": "created_at",
+          "rows": 3,
+          "facts_and_instants_digest": "f416752e563bf1fb326048693031e407"
+        },
+        {
+          "table": "tasks",
+          "column": "created_at",
+          "rows": 64,
+          "facts_and_instants_digest": "e5ecac3004087e35bc8f402a9ac6c6c2"
+        },
+        {
+          "table": "audit_events",
+          "column": "timestamp",
+          "rows": 859,
+          "facts_and_instants_digest": "fcfcff754b59bf8d630b1c340d0371c2"
+        }
+      ],
+      "columns": [
+        {
+          "table_name": "audit_events",
+          "column_name": "timestamp",
+          "data_type": "text",
+          "is_nullable": "NO",
+          "column_default": null
+        },
+        {
+          "table_name": "projects",
+          "column_name": "created_at",
+          "data_type": "text",
+          "is_nullable": "NO",
+          "column_default": null
+        },
+        {
+          "table_name": "tasks",
+          "column_name": "created_at",
+          "data_type": "text",
+          "is_nullable": "NO",
+          "column_default": null
+        }
+      ],
+      "indices": [
+        {
+          "indexname": "idx_tasks_created_id"
+        },
+        {
+          "indexname": "idx_tasks_feature_created_id"
+        }
+      ],
+      "migration_head": {
+        "hash": "264d02ec790bbb71209fb958b73aa909a6909c8b1fe3198da76fdd5e1a9a9398",
+        "created_at": "1792731600000"
+      }
+    },
+    {
+      "stage": "runtime_before_contract",
+      "checked_at": "2026-10-23T09:31:19.368Z",
+      "checks": [
+        {
+          "table": "projects",
+          "column": "created_at",
+          "rows": 3,
+          "facts_and_instants_digest": "f416752e563bf1fb326048693031e407"
+        },
+        {
+          "table": "tasks",
+          "column": "created_at",
+          "rows": 64,
+          "facts_and_instants_digest": "e5ecac3004087e35bc8f402a9ac6c6c2"
+        },
+        {
+          "table": "audit_events",
+          "column": "timestamp",
+          "rows": 859,
+          "facts_and_instants_digest": "fcfcff754b59bf8d630b1c340d0371c2"
+        }
+      ],
+      "columns": [
+        {
+          "table_name": "audit_events",
+          "column_name": "timestamp",
+          "data_type": "text",
+          "is_nullable": "NO",
+          "column_default": null
+        },
+        {
+          "table_name": "projects",
+          "column_name": "created_at",
+          "data_type": "text",
+          "is_nullable": "NO",
+          "column_default": null
+        },
+        {
+          "table_name": "tasks",
+          "column_name": "created_at",
+          "data_type": "text",
+          "is_nullable": "NO",
+          "column_default": null
+        }
+      ],
+      "indices": [
+        {
+          "indexname": "idx_tasks_created_id"
+        },
+        {
+          "indexname": "idx_tasks_feature_created_id"
+        }
+      ],
+      "migration_head": {
+        "hash": "264d02ec790bbb71209fb958b73aa909a6909c8b1fe3198da76fdd5e1a9a9398",
+        "created_at": "1792731600000"
+      }
+    },
+    {
+      "stage": "runtime_contract",
+      "checked_at": "2026-10-23T09:31:58.661Z",
+      "checks": [
+        {
+          "table": "projects",
+          "column": "created_at",
+          "rows": 3,
+          "facts_and_instants_digest": "f416752e563bf1fb326048693031e407"
+        },
+        {
+          "table": "tasks",
+          "column": "created_at",
+          "rows": 64,
+          "facts_and_instants_digest": "e5ecac3004087e35bc8f402a9ac6c6c2"
+        },
+        {
+          "table": "audit_events",
+          "column": "timestamp",
+          "rows": 859,
+          "facts_and_instants_digest": "fcfcff754b59bf8d630b1c340d0371c2"
+        }
+      ],
+      "columns": [
+        {
+          "table_name": "audit_events",
+          "column_name": "timestamp",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "NO",
+          "column_default": "now()"
+        },
+        {
+          "table_name": "projects",
+          "column_name": "created_at",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "NO",
+          "column_default": "now()"
+        },
+        {
+          "table_name": "tasks",
+          "column_name": "created_at",
+          "data_type": "timestamp with time zone",
+          "is_nullable": "NO",
+          "column_default": "now()"
+        }
+      ],
+      "indices": [
+        {
+          "indexname": "idx_audit_timestamp_id"
+        },
+        {
+          "indexname": "idx_projects_created_at"
+        },
+        {
+          "indexname": "idx_tasks_created_id"
+        },
+        {
+          "indexname": "idx_tasks_feature_created_id"
+        }
+      ],
+      "migration_head": {
+        "hash": "3ac70f1a0333f080b942752bea293fd3def22fc23b1d90e98c9b8b4f2397add9",
+        "created_at": "1792735200000"
+      },
+      "facts_and_instants_preserved": true
+    }
+  ]
+}
