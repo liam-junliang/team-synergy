@@ -2,6 +2,8 @@ import { randomBytes, scrypt as nodeScrypt, timingSafeEqual } from 'node:crypto'
 
 const SALT_BYTES = 16;
 const DERIVED_KEY_BYTES = 64;
+// Same valid encoding/work factor as a stored password; no account lookup shortcut.
+export const DUMMY_PASSWORD_HASH = `scrypt$${'00'.repeat(SALT_BYTES)}$${'00'.repeat(DERIVED_KEY_BYTES)}`;
 
 function scrypt(password: string, salt: Buffer): Promise<Buffer> {
   return new Promise((resolve, reject) => {

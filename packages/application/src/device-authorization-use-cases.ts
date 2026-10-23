@@ -61,7 +61,7 @@ export function createDeviceAuthorizationUseCases(db: Db) {
         const timestamp = now();
         if (row.last_polled_at && Date.now() - Date.parse(row.last_polled_at) < row.interval_seconds * 1000) {
           await tx.update(schema.deviceAuthorizationRequests).set({ last_polled_at: timestamp, interval_seconds: Math.min(60, row.interval_seconds + 5) }).where(eq(schema.deviceAuthorizationRequests.id, row.id));
-          return fail(new DomainError('slow_down', '轮询过快，请增加至少 5 秒间隔'));
+          return fail(new DomainError('slow_down', '轮询过快，请增加至少 5 秒间隔', { retry_after: Math.min(60, row.interval_seconds + 5) }));
         }
         await tx.update(schema.deviceAuthorizationRequests).set({ last_polled_at: timestamp }).where(eq(schema.deviceAuthorizationRequests.id, row.id));
         if (row.status === 'pending' || !row.principal_id) return fail(new DomainError('authorization_pending', '等待浏览器授权'));

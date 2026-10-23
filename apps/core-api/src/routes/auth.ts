@@ -1,42 +1,40 @@
 import type { FastifyInstance } from 'fastify';
 import { eq } from 'drizzle-orm';
 import { isPublicCode } from '@team-synergy/contracts';
-import { createAuthUseCases, createDeviceAuthorizationUseCases } from '@team-synergy/application';
+import { createAuthUseCases, createDeviceAuthorizationUseCases, createAuthRateLimiter } from '@team-synergy/application';
 import { schema, type Db } from '@team-synergy/persistence';
 import { unauthorized } from '../auth.js';
 
 export function registerAuthRoutes(app: FastifyInstance, db: Db): void {
   const auth = createAuthUseCases(db);
   const deviceAuth = createDeviceAuthorizationUseCases(db);
-  const attempts = new Map<string, { count: number; expires: number }>();
-  function limited(key: string, maximum: number) {
-    const timestamp = Date.now();
-    for (const [entry, value] of attempts) if (value.expires <= timestamp) attempts.delete(entry);
-    const value = attempts.get(key) ?? { count: 0, expires: timestamp + 60_000 };
-    value.count += 1; attempts.set(key, value);
-    return value.count > maximum;
-  }
-  const throttled = (reply: import('fastify').FastifyReply) => reply.code(429).send({ ok: false, error: { code: 'slow_down', message: '请求过多，请稍后重试' } });
-
-  app.post<{ Body: Record<string, unknown> }>('/auth/device/start', async (request, reply) => {
-    if (limited(`start:${request.ip}`, 12)) return throttled(reply);
+  const limited = createAuthRateLimiter(db);
+  const throttled = (reply: import('fastify').FastifyReply, seconds: number) => reply.header('Retry-After', Math.max(1, seconds)).code(429).send({ ok: false, error: { code: 'slow_down', message: '请求过多，请稍后重试' } });
+  app.post<{ Body: Record<string, unknown> }>('/auth/device/start', { bodyLimit: 16 * 1024 }, async (request, reply) => {
+    const retry = await limited('start', request.ip, undefined, 12, 120);
+    if (retry) return throttled(reply, retry);
     return deviceAuth.start(request.body ?? {});
   });
-  app.post<{ Body: { device_code?: string } }>('/auth/device/token', async (request, reply) => {
-    if (limited(`token:${request.ip}`, 120)) return throttled(reply);
-    return deviceAuth.token(typeof request.body?.device_code === 'string' ? request.body.device_code : '');
+  app.post<{ Body: { device_code?: string } }>('/auth/device/token', { bodyLimit: 16 * 1024 }, async (request, reply) => {
+    const retry = await limited('token', request.ip, undefined, 120, 1200);
+    if (retry) return throttled(reply, retry);
+    const result = await deviceAuth.token(typeof request.body?.device_code === 'string' ? request.body.device_code : '');
+    if (!result.ok && result.error.code === 'slow_down') return throttled(reply, Number((result.error.details as { retry_after: number }).retry_after));
+    return result;
   });
   app.get<{ Querystring: { user_code?: string } }>('/auth/device/request', async (request, reply) => {
     if (request.authKind !== 'bearer' || !request.principal) return unauthorized(reply);
-    if (limited(`request:${request.principal}`, 30)) return throttled(reply);
+    const retry = await limited('request', request.ip, request.principal, 30, 300);
+    if (retry) return throttled(reply, retry);
     return deviceAuth.request(typeof request.query.user_code === 'string' ? request.query.user_code : '');
   });
-  app.post<{ Body: { user_code?: string; decision?: 'approve' | 'deny' } }>('/auth/device/approve', async (request, reply) => {
+  app.post<{ Body: { user_code?: string; decision?: 'approve' | 'deny' } }>('/auth/device/approve', { bodyLimit: 16 * 1024 }, async (request, reply) => {
     if (request.authKind !== 'bearer' || !request.principal) return unauthorized(reply);
-    if (limited(`approve:${request.principal}`, 30)) return throttled(reply);
+    const retry = await limited('approve', request.ip, request.principal);
+    if (retry) return throttled(reply, retry);
     return deviceAuth.approve(request.principal, typeof request.body?.user_code === 'string' ? request.body.user_code : '', request.body?.decision as 'approve' | 'deny');
   });
-  app.post<{ Body: { device_identity?: unknown } }>('/auth/device-identity', async (request, reply) => {
+  app.post<{ Body: { device_identity?: unknown } }>('/auth/device-identity', { bodyLimit: 16 * 1024 }, async (request, reply) => {
     if (request.authKind !== 'bearer' || !request.authDeviceToken) return unauthorized(reply);
     return auth.bindIdentity(request.authDeviceToken, request.body?.device_identity);
   });
@@ -49,8 +47,10 @@ export function registerAuthRoutes(app: FastifyInstance, db: Db): void {
       : eq(schema.users.legacy_code, value);
   }
 
-  app.post<{ Body: Record<string, unknown> }>('/auth/login', async (request, reply) => {
+  app.post<{ Body: Record<string, unknown> }>('/auth/login', { bodyLimit: 16 * 1024 }, async (request, reply) => {
     const body = request.body ?? {};
+    const retry = await limited('bind', request.ip, typeof body.bind_token === 'string' ? body.bind_token : undefined);
+    if (retry) return throttled(reply, retry);
     const result = await auth.bindDevice(
       typeof body.bind_token === 'string' ? body.bind_token : '',
       typeof body.device_name === 'string' ? body.device_name : '',
@@ -61,19 +61,23 @@ export function registerAuthRoutes(app: FastifyInstance, db: Db): void {
     return result;
   });
 
-  app.post<{ Body: Record<string, unknown> }>('/auth/password-login', async (request, reply) => {
+  app.post<{ Body: Record<string, unknown> }>('/auth/password-login', { bodyLimit: 16 * 1024 }, async (request, reply) => {
     const body = request.body ?? {};
+    const account = typeof body.account === 'string' ? body.account.trim().toLowerCase() : '';
+    const retry = await limited('password', request.ip, account);
+    if (retry) return throttled(reply, retry);
     const result = await auth.loginWithPassword(
       typeof body.account === 'string' ? body.account : '',
       typeof body.password === 'string' ? body.password : '',
       typeof body.device_name === 'string' ? body.device_name : '',
       body.device_identity,
     );
+    if (!result.ok && result.error.code === 'slow_down') return throttled(reply, Number((result.error.details as { retry_after: number }).retry_after));
     if (!result.ok) return unauthorized(reply);
     return result;
   });
 
-  app.post<{ Body: Record<string, unknown> }>('/auth/password-change', async (request, reply) => {
+  app.post<{ Body: Record<string, unknown> }>('/auth/password-change', { bodyLimit: 16 * 1024 }, async (request, reply) => {
     if (request.authKind !== 'bearer' || !request.principal || !request.authDeviceToken) return unauthorized(reply);
     const body = request.body ?? {};
     const result = await auth.changePassword(
@@ -88,7 +92,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Db): void {
     return result;
   });
 
-  app.post('/auth/logout', async (request, reply) => {
+  app.post('/auth/logout', { bodyLimit: 16 * 1024 }, async (request, reply) => {
     if (request.authKind !== 'bearer' || !request.authDeviceToken) return unauthorized(reply);
     const result = await auth.logout(request.authDeviceToken);
     if (!result.ok) return unauthorized(reply);

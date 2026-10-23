@@ -7,6 +7,7 @@ import {
   pgTable,
   primaryKey,
   text,
+  timestamp,
   uniqueIndex,
   varchar,
 } from 'drizzle-orm/pg-core';
@@ -655,6 +656,8 @@ export const users = pgTable(
     password_hash: text('password_hash'),
     must_change_password: boolean('must_change_password').notNull().default(false),
     password_expires_at: text('password_expires_at'),
+    login_failure_count: integer('login_failure_count').notNull().default(0),
+    login_locked_until: timestamp('login_locked_until', { withTimezone: true, mode: 'date' }),
     bind_token_hash: text('bind_token_hash'),
     bind_token_expires_at: text('bind_token_expires_at'),
     created_at: text('created_at').notNull(),
@@ -666,6 +669,15 @@ export const users = pgTable(
     uniqueIndex('uq_users_account').on(t.account),
   ],
 );
+
+/** Shared across API instances; identifiers are SHA-256, never credentials. */
+export const authRateLimits = pgTable('auth_rate_limits', {
+  key: text('key').primaryKey(),
+  minute_started_at: timestamp('minute_started_at', { withTimezone: true, mode: 'date' }).notNull(),
+  minute_count: integer('minute_count').notNull(),
+  hour_started_at: timestamp('hour_started_at', { withTimezone: true, mode: 'date' }).notNull(),
+  hour_count: integer('hour_count').notNull(),
+}, t => [index('idx_auth_rate_limits_expiry').on(t.hour_started_at)]);
 
 /** 团队成员关系：团队是项目的上级协作边界，独立于项目内角色。 */
 export const teamMembers = pgTable(
