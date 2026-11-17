@@ -28,11 +28,25 @@ feature_id: FEATURE-12
 severity: medium            # critical / high / medium / low
 reported_by: user-wang      # 测试、使用者或 Verifier Run
 found_in: v1.4.2            # 发现环境/版本
-description: 复现步骤与期望行为
+action_steps: 锁定测试账号后重置密码，用新密码再次登录
+expected_result: 登录成功，锁定计数清零
+actual_result: 登录仍返回账号已锁定
+evidence:
+  - kind: text
+    text: 'POST /login → 423 account_locked'
+description: 补充说明或历史原文
 related_requirement: REQ-0142  # 可选
 status: reported
 fix_tasks: [TASK-305]       # 由 tasks.defect_id 反查，可有多轮修复任务
 reported_at: 审计事件时间  # 由 defect.reported 事件派生
+```
+
+新手工报告须填写操作、预期和实际结果，并附至少一项证据。证据可用日志或响应文本、HTTP(S) 链接和原始文件，可混合提交。每份报告最多 20 项，附件合计最多 6 MiB。列表返回文件名、大小和摘要，项目成员可按证据下标下载原件。旧记录保留原始说明。从失败测试创建缺陷时，系统沿用执行时保存的步骤、预期、实际结果和已有证据。
+
+```sh
+tsp defect report --feature <feature_code> --severity medium --title "重置密码后仍显示已锁定" --action "重置后用新密码登录" --expected "进入首页" --actual "返回 423" --evidence-text "POST /login → 423 account_locked" --evidence-file ./login.png
+tsp defect list --project <project_code>
+tsp defect download <defect_code> 1 --out ./report-screenshot.png
 ```
 
 ### 1.3 状态约束
@@ -40,7 +54,7 @@ reported_at: 审计事件时间  # 由 defect.reported 事件派生
 - `fixing` 必须关联 `source=defect-fix` 且 `task.defect_id` 精确指向当前 Defect 的修复 Task；只校验同项目不够；
 - 修复 Task 与 Defect 必须属于同一个 Feature；其他来源的 Task 禁止写入 `defect_id`；
 - `fixing → retest` 前至少一个关联修复 Task 必须达到 `verified` 或 `closed`；
-- `retest → closed` 由 Owner 确认回归通过；回归失败走 `retest → triaged`，再创建下一轮修复任务；
+- `retest → closed` 由项目 Owner 或 Admin 确认回归通过。回归失败走 `retest → triaged`，再创建下一轮修复任务。
 - 修复 Task 的验收标准由 triage 时人确认的「期望行为」生成，不是 Agent 自行定义；
 - Defect 增改与状态变更进入审计事件（架构不变量 1）。
 
@@ -48,19 +62,19 @@ reported_at: 审计事件时间  # 由 defect.reported 事件派生
 
 ```text
 入口：项目「缺陷」工作台的「提交缺陷」弹窗 / 后续 Verifier Run 提交
-流程：报告 → Owner triage（确认是否处理、生成修复 Task 草稿）
+流程：报告 → 项目 Owner 或 Admin 分诊、关联修复 Task
      → 修复 Task 走既有 Claim → Run → Artifact/Evidence 闭环
-     → 关联 Task 完成验证后进入回归 → Owner 确认 close 或重新修复
+     → 关联 Task 完成验证后进入回归 → 项目 Owner 或 Admin 确认 close 或重新修复
 ```
 
-Defect 不破坏「Agent 权限不能超过所属人权限」：报告人人皆可，triage 与 close 是人的动作。
+有项目写权限的成员可以上报。成员 Agent 通过 CLI 操作时使用其所属账号的项目权限。
 
 ### 1.5 Web 工作台
 
 - 顶部统计待确认、修复中和待回归数量，主操作仅保留「提交缺陷」；
-- 左侧为可搜索、按状态/严重度筛选的缺陷队列，默认只显示未结束项；
-- 右侧阅读完整复现说明、五步进度、Feature/需求/上报信息以及全部关联修复任务；
-- 当前阶段允许的动作集中在详情右栏，创建修复任务使用弹窗，并自动生成包含缺陷背景、复现步骤、期望和交付要求的完整任务 brief；
+- 缺陷队列使用紧凑表格，每行一项。可按状态和严重度筛选，默认显示未结束项。
+- 打开某行的详情即可核对操作、预期、实际、证据和流程进度，也可查看关联需求或修复任务。
+- 在详情按当前角色分诊、安排修复或处理回归。修复任务的简报带入缺陷事实和证据，供执行者接手。
 - 缺陷页负责分诊和关联，任务的分派、领取、提交和验收继续由任务看板承担。
 
 ## 2. Task 来源分类

@@ -1,0 +1,256 @@
+{
+  "candidate_sha256": "c6fa5ca8a3b23ef5dc619bc2fb892cafa113b7fae45e023079e3ad7308639093",
+  "scope": "generated delivery Markdown and verification summary; excludes this manifest itself",
+  "files": [
+    {
+      "path": "audit/delivery-initial.md",
+      "bytes": 17322,
+      "sha256": "11eae5e37ede4d2044549112083e131c036fa0ddc168f31aa2f5a69b55e46a54"
+    },
+    {
+      "path": "audit/delivery-recheck-final.md",
+      "bytes": 3870,
+      "sha256": "3980dc5a2537669e8b13b3e5f4f41e88b662e251358dc715a99efa910d37f76e"
+    },
+    {
+      "path": "audit/delivery-recheck.md",
+      "bytes": 12014,
+      "sha256": "015f07d7e6b2b497b05ac033dbc4cc44f3d4f562b04d109cf48f2f65422cbec0"
+    },
+    {
+      "path": "audit/delivery-repair-map.md",
+      "bytes": 10967,
+      "sha256": "9723ad08096ce93a09a9d7fd081a7395107fe9239a176b502831322b7d992566"
+    },
+    {
+      "path": "audit/governance-exceptions-recheck-final.md",
+      "bytes": 3380,
+      "sha256": "47da9a256f0e443f3cbc090bc62b956ad6b29b82d907761c547e49472c2bc9d4"
+    },
+    {
+      "path": "audit/governance-exceptions-recheck.md",
+      "bytes": 7361,
+      "sha256": "994dd486bab4b130bc457f43835434ada27c231cbbcc2991b1778cf36bbc2116"
+    },
+    {
+      "path": "audit/governance-initial.md",
+      "bytes": 10791,
+      "sha256": "fe679c5351bd74d18e4fcac5301f14d8dac784131d2200e08ca73f135b2ecacd"
+    },
+    {
+      "path": "audit/governance-recheck.md",
+      "bytes": 11267,
+      "sha256": "6f913ec217b98b4d240606aa37658124b9eea87a9ac8615c2afdda067d3abe2b"
+    },
+    {
+      "path": "audit/governance-repair-map.md",
+      "bytes": 10024,
+      "sha256": "818a9e7c8986f566467851bcd25f339659e79b44e0baf45ecf0eaa2a28cf82ec"
+    },
+    {
+      "path": "audit/intelligence-final-recheck.md",
+      "bytes": 8422,
+      "sha256": "94a7449180290d838d0d92c06282423b7b342de14d2b4848f92c01108dfb3a82"
+    },
+    {
+      "path": "audit/intelligence-final-repair-map.md",
+      "bytes": 1814,
+      "sha256": "f0566d3e1b1f88cd783079993f5f7d94d318ca97240c2c51386e2feddb5b26a6"
+    },
+    {
+      "path": "audit/intelligence-initial.md",
+      "bytes": 19742,
+      "sha256": "79af232833b4edb980d310152a3a9b8f27c7a6b365d98810972d03e67b608be9"
+    },
+    {
+      "path": "audit/intelligence-recheck.md",
+      "bytes": 8647,
+      "sha256": "553492ece9090d2f2afe07a0d55482810d0be890acac306c91b939f3761cb92b"
+    },
+    {
+      "path": "audit/intelligence-repair-map.md",
+      "bytes": 9536,
+      "sha256": "d589b7849998c031c0ca3f1f8f5b0806c08bc93d22b21be2acfea44f955979b4"
+    },
+    {
+      "path": "audit/shared-initial.md",
+      "bytes": 11818,
+      "sha256": "f3ee1a96db4b8607a8305a7cd7299f3ff50a57f2fbb895818c3a5eacde6692b3"
+    },
+    {
+      "path": "audit/shared-recheck.md",
+      "bytes": 7433,
+      "sha256": "aa552a343733376459b0a7f364b7ed0b228c642d26339eeba394da5a98490604"
+    },
+    {
+      "path": "dossier/adr.md",
+      "bytes": 11471,
+      "sha256": "c41d5e71dc9c1d499815fb691bfb3f84362ddfbff4a40f8c6a99025db7dfe142"
+    },
+    {
+      "path": "dossier/api_data.md",
+      "bytes": 14281,
+      "sha256": "d9e65112ffe8e10a17f06c2192d6a31d71ea4692ff4ff644164e38e808425fe9"
+    },
+    {
+      "path": "dossier/architecture.md",
+      "bytes": 12522,
+      "sha256": "b2bc0b9d74c6bd9ceb5b22818550994aa60106602f6d08411a3ba860027eca48"
+    },
+    {
+      "path": "dossier/charter.md",
+      "bytes": 12004,
+      "sha256": "6d4b3b1a8a8ae4021bebb081bf17ee907772287f5baa2d6bd3cc59f6e9819d8d"
+    },
+    {
+      "path": "dossier/context.md",
+      "bytes": 12942,
+      "sha256": "53e4e25de2019f90527ecfd115e6cfec148a1dec1c12e870d0bb0aea6f61ca38"
+    },
+    {
+      "path": "dossier/domain.md",
+      "bytes": 15076,
+      "sha256": "1005c525832213da9b9f4d981410fe6bef08d9a88ba4f26d4b0b06d7998bf8a9"
+    },
+    {
+      "path": "dossier/nfr.md",
+      "bytes": 12207,
+      "sha256": "41f5be812d90892f922ee5f309f916a02f13c289b2b64cc0bc6ae09d703eaa36"
+    },
+    {
+      "path": "dossier/onboarding.md",
+      "bytes": 11527,
+      "sha256": "56b45b3f053fa8cb96eeb5c3dfbe687039f32e21fc76d35d280d37e74e221ae0"
+    },
+    {
+      "path": "dossier/requirements.md",
+      "bytes": 33973,
+      "sha256": "a863e17c59399c0d1d3d7525615c80a944f26a54f66fa656d9e9e16cdb522b78"
+    },
+    {
+      "path": "dossier/risk.md",
+      "bytes": 11469,
+      "sha256": "97128cc34a37223226e973dc16a47f09dab5eac6a7577f240eff54ee6e4fb38e"
+    },
+    {
+      "path": "dossier/runbook.md",
+      "bytes": 11646,
+      "sha256": "cf05f7b1ff6e0bb5abcbcc0013b6c76eb9187bec13d059e27e0be2a2ea63339d"
+    },
+    {
+      "path": "dossier/security.md",
+      "bytes": 11900,
+      "sha256": "1c79fa8fdae78f109bbe6133c0ca6fc096a3768082f44269ff19f124905455ca"
+    },
+    {
+      "path": "dossier/test_strategy.md",
+      "bytes": 13971,
+      "sha256": "2e5f4c52bb4253044bdbc54c04539c2d3953fa5b6eb5dc66949d9c9a4dc20410"
+    },
+    {
+      "path": "modules/m01-rules.md",
+      "bytes": 79190,
+      "sha256": "77542bc6cd79e535a8a0ba185c74d382673cd3d3d61ea14474f6017eb5992a72"
+    },
+    {
+      "path": "modules/m02-rules.md",
+      "bytes": 50553,
+      "sha256": "61ef5d43e212bb2112def3111f9b7bb080a295ef7bd942579e014ef6840d1e61"
+    },
+    {
+      "path": "modules/m03-rules.md",
+      "bytes": 35424,
+      "sha256": "59048e8dbe769c9c7fee1ee7e323e7bdefc5e1feb926c791ac75d41d8b4c905f"
+    },
+    {
+      "path": "modules/m04-rules.md",
+      "bytes": 37007,
+      "sha256": "c8245b870db0621dddb3a6a9f000a5d2970032a649e88043a1fe60e2d274b164"
+    },
+    {
+      "path": "modules/m05-rules.md",
+      "bytes": 75845,
+      "sha256": "423eae2ff91b544c898d2eb66aeccc199db8f992296abab59920680f34e55e14"
+    },
+    {
+      "path": "modules/m06-rules.md",
+      "bytes": 56423,
+      "sha256": "2d187fe45269953b3e96ed5ca5edf1ae0424f262ba30e2613f87598a07cc4ac5"
+    },
+    {
+      "path": "modules/m07-rules.md",
+      "bytes": 65874,
+      "sha256": "e5276f33227da61cc1bb675019990658db2218971471702e599e47a6efcf3f34"
+    },
+    {
+      "path": "modules/m08-rules.md",
+      "bytes": 17511,
+      "sha256": "070b544abe9f66c3b990ed7c8af58b2ec9a166e67b2784f1ec6167ce4540ff7a"
+    },
+    {
+      "path": "modules/m09-rules.md",
+      "bytes": 44554,
+      "sha256": "b46d0000e562a8b51f033fa57f2e08c14fc63e10970de200a60a9996bbab3d3f"
+    },
+    {
+      "path": "modules/m10-rules.md",
+      "bytes": 50470,
+      "sha256": "4a8a7f6d8c9d27a59a9ccc9e8a53a73e2eb1b73bde9abc2e44fbd1b18d1213df"
+    },
+    {
+      "path": "modules/m11-rules.md",
+      "bytes": 14812,
+      "sha256": "85b58a54a8ce2ae94a1f8fde1944b16e76cfe2673f0e32d4991032e6e20a443a"
+    },
+    {
+      "path": "modules/m12-rules.md",
+      "bytes": 9379,
+      "sha256": "8d873ca01a3da4e05548c59e9dc44b98eaea29be0895a04eac19d9f11a3df0e2"
+    },
+    {
+      "path": "modules/m13-rules.md",
+      "bytes": 20988,
+      "sha256": "8cfd1e9ff2eafaa4923d29e37e4e220c2f79d46a0c71d84fc22526183e71bd4e"
+    },
+    {
+      "path": "modules/m14-rules.md",
+      "bytes": 17660,
+      "sha256": "430ad6f1f530bf515bc845961b78e9f355b94fee2693e54a55ee6fc4ef8883c4"
+    },
+    {
+      "path": "README.md",
+      "bytes": 4698,
+      "sha256": "b9c6979bdcdd48f0048a2761ffbd4248aa79ba27cbff4eb7e3487241c993aeab"
+    },
+    {
+      "path": "TeamSynergy-完整需求文档.md",
+      "bytes": 666856,
+      "sha256": "0f78e0160841cd53e82b834e447a5a7dd8bbc41f92cbd71cdbd1dd361c10455f"
+    },
+    {
+      "path": "复核与校验.md",
+      "bytes": 2112,
+      "sha256": "62e5fa120a3b9655cd8cafb049e98938d01e190bc5b9f8bec74102a87204cf71"
+    },
+    {
+      "path": "对比报告.md",
+      "bytes": 11302,
+      "sha256": "ac418d7371c00d74d8ce9fb262d8c43b728364727133e97b368b206df70b00af"
+    },
+    {
+      "path": "接口与命令导航.md",
+      "bytes": 68507,
+      "sha256": "81256caec89eb83815c4513dfd8081e3d95156afe4e70a7fe42ce2ef1c328211"
+    },
+    {
+      "path": "校验摘要.json",
+      "bytes": 4674,
+      "sha256": "92198ec5fa47d3392d66d2209931f7ce304b42e6b92d84bf05f50342c1a4e77d"
+    },
+    {
+      "path": "验收追溯总表.md",
+      "bytes": 62233,
+      "sha256": "a092b6769f395ab500d329459f81f33e7987b6140309fa583bfaab62c162f371"
+    }
+  ]
+}

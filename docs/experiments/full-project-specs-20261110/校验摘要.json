@@ -1,0 +1,137 @@
+{
+  "client_date": "2026-11-10",
+  "candidate_sha256": "c6fa5ca8a3b23ef5dc619bc2fb892cafa113b7fae45e023079e3ad7308639093",
+  "counts": {
+    "chapters": 14,
+    "items": 212,
+    "requirements": 112,
+    "features": 63,
+    "modules": 10,
+    "rule_documents": 14,
+    "artifact_types": 13,
+    "required_artifacts": 11,
+    "capabilities": {
+      "included": 112,
+      "excluded": 2,
+      "unknown": 1
+    },
+    "acceptance_criteria": 299,
+    "verification_plans": 299,
+    "source_files": 676,
+    "conflicts": {
+      "open": 1,
+      "resolved": 1
+    },
+    "candidate_bytes": 2856880,
+    "candidate_sha256": "c6fa5ca8a3b23ef5dc619bc2fb892cafa113b7fae45e023079e3ad7308639093",
+    "distinct_business_rule_ids": 295,
+    "readable_identity_lines_added": 32
+  },
+  "protocol_valid": true,
+  "quality": {
+    "status": "blocked",
+    "summary": {
+      "blockers": 1,
+      "warnings": 16,
+      "needs_review": 3
+    },
+    "artifacts": {
+      "required": 11,
+      "present": 11,
+      "missing": [],
+      "complete": true
+    }
+  },
+  "integrity": {
+    "valid": true,
+    "scope": "bytes, locators, identities, chapter navigation, AC-plan pairing and local links only",
+    "source_files": 676,
+    "raw_snapshot_files": 675,
+    "evidence_entries": 2982,
+    "requirements": 112,
+    "acceptance_criteria": 299,
+    "markdown_local_links": 70,
+    "candidate_sha256": "c6fa5ca8a3b23ef5dc619bc2fb892cafa113b7fae45e023079e3ad7308639093",
+    "errors": [],
+    "business_acceptance_executed": false
+  },
+  "mermaid": {
+    "valid": true,
+    "occurrences": 7,
+    "unique_diagrams": 7,
+    "scope": "syntax parsing only; no browser rendering or business execution"
+  },
+  "semantic_review": {
+    "status": "已完成分组初审和定向复核；限定范围内的问题已修正，运行验证及政策批准另记",
+    "candidate_sha256": "c6fa5ca8a3b23ef5dc619bc2fb892cafa113b7fae45e023079e3ad7308639093",
+    "reports": [
+      {
+        "lane": "governance",
+        "report": "review\\governance-recheck.json",
+        "sha256": "cd9e32e0bd7c66b9097df5e9e7005489f784b10225b9544610274116ec6ddea9",
+        "verdict": "reviewed_with_limits"
+      },
+      {
+        "lane": "governance",
+        "report": "review\\governance-exceptions-recheck-final.json",
+        "sha256": "1bad239f1e8feb5f628cc941b3ee14ba6f63c00f8833c8bdb1344a2c84f37bbf",
+        "verdict": "reviewed_with_limits"
+      },
+      {
+        "lane": "delivery",
+        "report": "review\\delivery-recheck.json",
+        "sha256": "f12123d0026c1c331c10e7fc76d315600f985da700ced655951e809baa24bd58",
+        "verdict": "needs_revision"
+      },
+      {
+        "lane": "delivery",
+        "report": "review\\delivery-recheck-final.json",
+        "sha256": "2f79db30204842a805d2c09b5f229721789e0ac609c62613cb4bb5724f977fae",
+        "verdict": "reviewed_with_limits"
+      },
+      {
+        "lane": "intelligence",
+        "report": "review\\intelligence-final-recheck.json",
+        "sha256": "8118217322e6d6b3ac0d100a6a88497c4b407f430b29055920b99dd2101173e0",
+        "verdict": "reviewed_with_limits"
+      },
+      {
+        "lane": "shared",
+        "report": "review\\shared-recheck.json",
+        "sha256": "710e7b4eb5e763411bd7c82150b28af965c9db5df5cd0758659a3198851b9546",
+        "verdict": "closed_with_limits"
+      }
+    ],
+    "open_business_policy_conflicts": 1,
+    "business_acceptance_executed": false,
+    "scope_note": "Initial reviewers inspected all112 requirement summaries/specifications and shared13; source-deep coverage is bounded. Later rechecks close named changes, not every code branch."
+  },
+  "remote": {
+    "batch_code": "9XWPVRZXJ75FDD092B94",
+    "source_equal": true,
+    "items_equal": true,
+    "item_count": 212,
+    "all_pending": true,
+    "status": "draft",
+    "applied_count": 0,
+    "plan_hash": null,
+    "approval": "not_requested",
+    "candidate_sha256": "c6fa5ca8a3b23ef5dc619bc2fb892cafa113b7fae45e023079e3ad7308639093"
+  },
+  "canonical_source": {
+    "captured_source_files": 675,
+    "canonical_source_still_equal": true,
+    "differences": [],
+    "note": "New generated delivery docs are outside captured675; no product implementation changed by this run."
+  },
+  "business_acceptance_executed": false,
+  "service_health": {
+    "api_health": 200,
+    "api_ready": 200,
+    "web_http": 200,
+    "scope": "HTTP readiness, not browser interaction or business acceptance"
+  },
+  "deliverable_review_sha256": "dea3819dbc3ecc3dbb1f07b5a6d1829c04266e4571137e1b094e22a318992f95",
+  "git_diff_check": "passed; pre-existing LF/CRLF notices only",
+  "output": "F:\\workspace\\team-synergy\\docs\\experiments\\full-project-specs-20261110"
+}

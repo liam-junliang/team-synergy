@@ -1,0 +1,673 @@
+{
+  "inventoryPatterns": [
+    "apps/core-api/src/routes/*.ts",
+    "apps/web/src/*Workbench.tsx",
+    "apps/cli/src/memory*.ts",
+    "apps/cli/src/intake*.ts",
+    "apps/cli/src/code-understanding*.ts",
+    "apps/cli/src/skill*.ts"
+  ],
+  "surfaces": [
+    {
+      "path": "apps/agentd/src/supervisor.ts",
+      "module": "M08"
+    },
+    {
+      "path": "apps/cli/src/code-understanding-context.ts",
+      "module": "M10"
+    },
+    {
+      "path": "apps/cli/src/code-understanding-plugins.ts",
+      "module": "M10"
+    },
+    {
+      "path": "apps/cli/src/code-understanding-snapshot.ts",
+      "module": "M10"
+    },
+    {
+      "path": "apps/cli/src/code-understanding.ts",
+      "module": "M10"
+    },
+    {
+      "path": "apps/cli/src/intake-code-knowledge.ts",
+      "module": "M10"
+    },
+    {
+      "path": "apps/cli/src/intake-delivery.ts",
+      "module": "M10"
+    },
+    {
+      "path": "apps/cli/src/intake-enterprise.ts",
+      "module": "M10"
+    },
+    {
+      "path": "apps/cli/src/intake-materials.ts",
+      "module": "M10"
+    },
+    {
+      "path": "apps/cli/src/intake-skill.ts",
+      "module": "M10"
+    },
+    {
+      "path": "apps/cli/src/intake-source.ts",
+      "module": "M10"
+    },
+    {
+      "path": "apps/cli/src/intake.ts",
+      "module": "M10"
+    },
+    {
+      "path": "apps/cli/src/memory-authorization.ts",
+      "module": "M13"
+    },
+    {
+      "path": "apps/cli/src/memory-capture.ts",
+      "module": "M13"
+    },
+    {
+      "path": "apps/cli/src/memory-context.ts",
+      "module": "M13"
+    },
+    {
+      "path": "apps/cli/src/memory-dsh-capture.ts",
+      "module": "M13"
+    },
+    {
+      "path": "apps/cli/src/memory-dsh-lifecycle.ts",
+      "module": "M13"
+    },
+    {
+      "path": "apps/cli/src/memory-mcp.ts",
+      "module": "M13"
+    },
+    {
+      "path": "apps/cli/src/memory-native-capture.ts",
+      "module": "M13"
+    },
+    {
+      "path": "apps/cli/src/memory-opencode-capture.ts",
+      "module": "M13"
+    },
+    {
+      "path": "apps/cli/src/memory-opencode-lifecycle.ts",
+      "module": "M13"
+    },
+    {
+      "path": "apps/cli/src/memory-personal.ts",
+      "module": "M13"
+    },
+    {
+      "path": "apps/cli/src/memory-working-context.ts",
+      "module": "M13"
+    },
+    {
+      "path": "apps/cli/src/memory.ts",
+      "module": "M13"
+    },
+    {
+      "path": "apps/cli/src/project-binding.ts",
+      "module": "M03"
+    },
+    {
+      "path": "apps/cli/src/project-workspace.ts",
+      "module": "M03"
+    },
+    {
+      "path": "apps/cli/src/skill-context.ts",
+      "module": "M11"
+    },
+    {
+      "path": "apps/cli/src/skill-sync.ts",
+      "module": "M11"
+    },
+    {
+      "path": "apps/cli/src/skills.ts",
+      "module": "M11"
+    },
+    {
+      "path": "apps/core-api/src/routes/admin-governance.ts",
+      "module": "M12"
+    },
+    {
+      "path": "apps/core-api/src/routes/architecture-documents.ts",
+      "module": "M05"
+    },
+    {
+      "path": "apps/core-api/src/routes/audit.ts",
+      "module": "M12"
+    },
+    {
+      "path": "apps/core-api/src/routes/auth.ts",
+      "module": "M01"
+    },
+    {
+      "path": "apps/core-api/src/routes/baselines.ts",
+      "module": "M04"
+    },
+    {
+      "path": "apps/core-api/src/routes/cli-distribution.ts",
+      "module": "M12"
+    },
+    {
+      "path": "apps/core-api/src/routes/code-understanding.ts",
+      "module": "M10"
+    },
+    {
+      "path": "apps/core-api/src/routes/defects.ts",
+      "module": "M09"
+    },
+    {
+      "path": "apps/core-api/src/routes/design-prototypes.ts",
+      "module": "M05"
+    },
+    {
+      "path": "apps/core-api/src/routes/devices.ts",
+      "module": "M01"
+    },
+    {
+      "path": "apps/core-api/src/routes/document-quality.ts",
+      "module": "M06"
+    },
+    {
+      "path": "apps/core-api/src/routes/execution.ts",
+      "module": "M08"
+    },
+    {
+      "path": "apps/core-api/src/routes/handovers.ts",
+      "module": "M08"
+    },
+    {
+      "path": "apps/core-api/src/routes/intake.ts",
+      "module": "M10"
+    },
+    {
+      "path": "apps/core-api/src/routes/login-security.ts",
+      "module": "M12"
+    },
+    {
+      "path": "apps/core-api/src/routes/memory-management.ts",
+      "module": "M13"
+    },
+    {
+      "path": "apps/core-api/src/routes/memory.ts",
+      "module": "M13"
+    },
+    {
+      "path": "apps/core-api/src/routes/ownership.ts",
+      "module": "M02"
+    },
+    {
+      "path": "apps/core-api/src/routes/personal-memory.ts",
+      "module": "M13"
+    },
+    {
+      "path": "apps/core-api/src/routes/project-documents.ts",
+      "module": "M06"
+    },
+    {
+      "path": "apps/core-api/src/routes/project-materials.ts",
+      "module": "M06"
+    },
+    {
+      "path": "apps/core-api/src/routes/projects.ts",
+      "module": "M03"
+    },
+    {
+      "path": "apps/core-api/src/routes/requirement-collaboration.ts",
+      "module": "M04"
+    },
+    {
+      "path": "apps/core-api/src/routes/requirement-documents.ts",
+      "module": "M04"
+    },
+    {
+      "path": "apps/core-api/src/routes/requirements.ts",
+      "module": "M04"
+    },
+    {
+      "path": "apps/core-api/src/routes/skills.ts",
+      "module": "M11"
+    },
+    {
+      "path": "apps/core-api/src/routes/system-agent.ts",
+      "module": "M11"
+    },
+    {
+      "path": "apps/core-api/src/routes/system-settings.ts",
+      "module": "M12"
+    },
+    {
+      "path": "apps/core-api/src/routes/tasks.ts",
+      "module": "M07"
+    },
+    {
+      "path": "apps/core-api/src/routes/teams.ts",
+      "module": "M02"
+    },
+    {
+      "path": "apps/core-api/src/routes/testing.ts",
+      "module": "M09"
+    },
+    {
+      "path": "apps/core-api/src/routes/users.ts",
+      "module": "M01"
+    },
+    {
+      "path": "apps/web/src/AccountWorkbench.tsx",
+      "module": "M01"
+    },
+    {
+      "path": "apps/web/src/ArchitectureWorkbench.tsx",
+      "module": "M05"
+    },
+    {
+      "path": "apps/web/src/CodeUnderstandingWorkbench.tsx",
+      "module": "M10"
+    },
+    {
+      "path": "apps/web/src/DefectsWorkbench.tsx",
+      "module": "M09"
+    },
+    {
+      "path": "apps/web/src/DesignWorkbench.tsx",
+      "module": "M05"
+    },
+    {
+      "path": "apps/web/src/DeviceAuthorization.tsx",
+      "module": "M01"
+    },
+    {
+      "path": "apps/web/src/IntakeWorkbench.tsx",
+      "module": "M10"
+    },
+    {
+      "path": "apps/web/src/OwnershipTransferPanel.tsx",
+      "module": "M02"
+    },
+    {
+      "path": "apps/web/src/PersonalMemoryWorkbench.tsx",
+      "module": "M13"
+    },
+    {
+      "path": "apps/web/src/ProjectDocumentsWorkbench.tsx",
+      "module": "M06"
+    },
+    {
+      "path": "apps/web/src/ProjectHandoversWorkbench.tsx",
+      "module": "M08"
+    },
+    {
+      "path": "apps/web/src/ProjectMemberManagement.tsx",
+      "module": "M02"
+    },
+    {
+      "path": "apps/web/src/ProjectOverviewWorkbench.tsx",
+      "module": "M03"
+    },
+    {
+      "path": "apps/web/src/ProjectPlanWorkbench.tsx",
+      "module": "M03"
+    },
+    {
+      "path": "apps/web/src/ProjectStructureWorkbench.tsx",
+      "module": "M03"
+    },
+    {
+      "path": "apps/web/src/ProjectsWorkbench.tsx",
+      "module": "M02"
+    },
+    {
+      "path": "apps/web/src/RequirementDiscoveryWorkbench.tsx",
+      "module": "M04"
+    },
+    {
+      "path": "apps/web/src/RequirementsWorkbench.tsx",
+      "module": "M04"
+    },
+    {
+      "path": "apps/web/src/SkillsWorkbench.tsx",
+      "module": "M11"
+    },
+    {
+      "path": "apps/web/src/TeamWorkbench.tsx",
+      "module": "M02"
+    },
+    {
+      "path": "apps/web/src/TestExecutions.tsx",
+      "module": "M09"
+    },
+    {
+      "path": "apps/web/src/TestingWorkbench.tsx",
+      "module": "M09"
+    }
+  ],
+  "modules": [
+    {
+      "id": "M01",
+      "document": "modules/M01-identity.md",
+      "features": [
+        "M01-F01",
+        "M01-F02",
+        "M01-F03",
+        "M01-F04",
+        "M01-F05",
+        "M01-F06"
+      ]
+    },
+    {
+      "id": "M02",
+      "document": "modules/M02-project-access.md",
+      "features": [
+        "M02-F01",
+        "M02-F02",
+        "M02-F03",
+        "M02-F04",
+        "M02-F05",
+        "M02-F06",
+        "M02-F07"
+      ]
+    },
+    {
+      "id": "M03",
+      "document": "modules/M03-planning.md",
+      "features": [
+        "M03-F01",
+        "M03-F02",
+        "M03-F03",
+        "M03-F04",
+        "M03-F05",
+        "M03-F06",
+        "M03-F07"
+      ]
+    },
+    {
+      "id": "M04",
+      "document": "modules/M04-requirements.md",
+      "features": [
+        "M04-F01",
+        "M04-F02",
+        "M04-F03",
+        "M04-F04",
+        "M04-F05",
+        "M04-F06",
+        "M04-F07",
+        "M04-F08",
+        "M04-F09"
+      ]
+    },
+    {
+      "id": "M05",
+      "document": "modules/M05-design.md",
+      "features": [
+        "M05-F01",
+        "M05-F02",
+        "M05-F03",
+        "M05-F04",
+        "M05-F05",
+        "M05-F06"
+      ]
+    },
+    {
+      "id": "M06",
+      "document": "modules/M06-documents.md",
+      "features": [
+        "M06-F01",
+        "M06-F02",
+        "M06-F03",
+        "M06-F04",
+        "M06-F05",
+        "M06-F06",
+        "M06-F07"
+      ]
+    },
+    {
+      "id": "M07",
+      "document": "modules/M07-task.md",
+      "features": [
+        "M07-F01",
+        "M07-F02",
+        "M07-F03",
+        "M07-F04",
+        "M07-F05",
+        "M07-F06",
+        "M07-F07",
+        "M07-F08",
+        "M07-F09"
+      ]
+    },
+    {
+      "id": "M08",
+      "document": "modules/M08-run-handover.md",
+      "features": [
+        "M08-F01",
+        "M08-F02",
+        "M08-F03",
+        "M08-F04",
+        "M08-F05",
+        "M08-F06",
+        "M08-F07",
+        "M08-F08",
+        "M08-F09",
+        "M08-F10",
+        "M08-F11"
+      ]
+    },
+    {
+      "id": "M09",
+      "document": "modules/M09-quality-defect.md",
+      "features": [
+        "M09-F01",
+        "M09-F02",
+        "M09-F03",
+        "M09-F04",
+        "M09-F05",
+        "M09-F06",
+        "M09-F07",
+        "M09-F08",
+        "M09-F09"
+      ]
+    },
+    {
+      "id": "M10",
+      "document": "modules/M10-code-intake.md",
+      "features": [
+        "M10-F01",
+        "M10-F02",
+        "M10-F03",
+        "M10-F04",
+        "M10-F05",
+        "M10-F06",
+        "M10-F07",
+        "M10-F08",
+        "M10-F09"
+      ]
+    },
+    {
+      "id": "M11",
+      "document": "modules/M11-agent-skills.md",
+      "features": [
+        "M11-F01",
+        "M11-F02",
+        "M11-F03",
+        "M11-F04",
+        "M11-F05",
+        "M11-F06",
+        "M11-F07",
+        "M11-F08",
+        "M11-F09",
+        "M11-F10",
+        "M11-F11"
+      ]
+    },
+    {
+      "id": "M12",
+      "document": "modules/M12-governance.md",
+      "features": [
+        "M12-F01",
+        "M12-F02",
+        "M12-F03",
+        "M12-F04",
+        "M12-F05",
+        "M12-F06",
+        "M12-F07",
+        "M12-F08"
+      ]
+    },
+    {
+      "id": "M13",
+      "document": "modules/M13-memory.md",
+      "features": [
+        "M13-F01",
+        "M13-F02",
+        "M13-F03",
+        "M13-F04",
+        "M13-F05"
+      ]
+    }
+  ],
+  "artifacts": [
+    "design-brief.md",
+    "architecture.md",
+    "contracts.md",
+    "operations.md",
+    "interaction-design.md",
+    "acceptance.md",
+    "intake-protocol.md",
+    "prototypes/access.md",
+    "prototypes/delivery.md",
+    "prototypes/knowledge.md",
+    "prototypes/review.md"
+  ],
+  "journeys": [
+    {
+      "id": "access",
+      "features": [
+        "M02-F05",
+        "M02-F06"
+      ],
+      "prototype": "prototypes/access.html",
+      "states": [
+        "members",
+        "preview",
+        "blocked",
+        "saved",
+        "readonly"
+      ],
+      "acceptance": "acceptance.md",
+      "case": "AC-ACCESS"
+    },
+    {
+      "id": "planning",
+      "features": [
+        "M03-F04",
+        "M03-F05"
+      ],
+      "prototype": "prototypes/access.html",
+      "states": [
+        "plan",
+        "schedule",
+        "schedule-error",
+        "schedule-saved"
+      ],
+      "acceptance": "acceptance.md",
+      "case": "AC-PLAN"
+    },
+    {
+      "id": "review",
+      "features": [
+        "M04-F03",
+        "M04-F06",
+        "M04-F07",
+        "M04-F08"
+      ],
+      "prototype": "prototypes/review.html",
+      "states": [
+        "topic",
+        "decision",
+        "confirmed",
+        "baseline",
+        "conflict",
+        "rebased",
+        "frozen"
+      ],
+      "acceptance": "acceptance.md",
+      "case": "AC-REVIEW"
+    },
+    {
+      "id": "handover",
+      "features": [
+        "M08-F07",
+        "M08-F08",
+        "M08-F09",
+        "M08-F10"
+      ],
+      "prototype": "prototypes/delivery.html",
+      "states": [
+        "h-start",
+        "h-noack",
+        "h-wrong-device",
+        "h-ready",
+        "h-drift",
+        "h-approved",
+        "h-active"
+      ],
+      "acceptance": "acceptance.md",
+      "case": "AC-HANDOVER"
+    },
+    {
+      "id": "defect",
+      "features": [
+        "M09-F04",
+        "M09-F06",
+        "M09-F08",
+        "M09-F09"
+      ],
+      "prototype": "prototypes/delivery.html",
+      "states": [
+        "q-failed",
+        "q-pass",
+        "q-blocked",
+        "q-retest",
+        "q-closed",
+        "q-reopened"
+      ],
+      "acceptance": "acceptance.md",
+      "case": "AC-DEFECT"
+    },
+    {
+      "id": "knowledge",
+      "features": [
+        "M13-F03",
+        "M13-F04",
+        "M13-F05"
+      ],
+      "prototype": "prototypes/knowledge.html",
+      "states": [
+        "shared-result",
+        "personal-result",
+        "revision-conflict",
+        "no-result"
+      ],
+      "acceptance": "acceptance.md",
+      "case": "AC-MEMORY"
+    },
+    {
+      "id": "intake",
+      "features": [
+        "M10-F01",
+        "M10-F02",
+        "M10-F07",
+        "M10-F08"
+      ],
+      "prototype": "intake-protocol.md",
+      "states": [
+        "scope-pinned",
+        "candidate-reviewed",
+        "plan-frozen",
+        "plan-partial"
+      ],
+      "acceptance": "acceptance.md",
+      "case": "AC-INTAKE"
+    }
+  ]
+}

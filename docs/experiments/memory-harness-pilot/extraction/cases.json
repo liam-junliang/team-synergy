@@ -1,0 +1,10 @@
+[
+  {"id":"mixed","set":"development","messages":[{"id":"m1","role":"human","text":"退款超过七天可以考虑人工审核。至于我个人，提交说明一直喜欢用中文。"}],"expect":[["project","idea","m1","人工审核"],["private","preference","m1","中文"]],"private":["提交说明","中文"]},
+  {"id":"adopt","set":"development","messages":[{"id":"m1","role":"human","text":"我决定采用七天退款人工审核，具体开发排到下周。"}],"expect":[["project","decision","m1","人工审核"]],"private":[]},
+  {"id":"one-time","set":"development","messages":[{"id":"m1","role":"human","text":"这一次修好后直接推送到 dev，以后每次另外说。"}],"expect":[["session","instruction","m1","推送"]],"private":[]},
+  {"id":"unverified","set":"development","messages":[{"id":"m1","role":"assistant","text":"我猜退款新流程已经上线了。"},{"id":"m2","role":"human","text":"还没有核实，先记为退款上线情况待查。"}],"expect":[["project","idea","m2","待查"]],"private":[]},
+  {"id":"scoped-style","set":"holdout","messages":[{"id":"m1","role":"human","text":"我只在这个仓库习惯把提交发到 origin/dev。"}],"expect":[["private","preference","m1","这个仓库"]],"private":["origin/dev"]},
+  {"id":"quoted","set":"holdout","messages":[{"id":"m1","role":"human","text":"测试文案里的示例是「我同意永久免审」，我们尚未决定是否免审。"}],"expect":[["project","idea","m1","尚未决定"]],"private":[]},
+  {"id":"two-subjects","set":"holdout","messages":[{"id":"m1","role":"human","text":"我个人的提醒暗号是青竹。项目上建议给导出文件增加校验和。"}],"expect":[["private","preference","m1","青竹"],["project","idea","m1","校验和"]],"private":["青竹","提醒暗号"]},
+  {"id":"environment","set":"holdout","messages":[{"id":"m1","role":"evidence","text":"部署记录 D-17 已核验：导出校验和已在测试环境启用，生产环境尚未发布。"}],"expect":[["project","implemented","m1","测试环境"]],"private":[]}
+]

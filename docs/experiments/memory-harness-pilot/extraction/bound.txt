@@ -1,0 +1,6 @@
+为一次会话生成结构化候选。每条只输出 label、sourceId、quote。sourceId 选择输入消息的 id。quote 拷贝同一来源的一段连续原话，保留条件、限制和否定词。不同归属的子句要拆开。
+先判断是谁、针对谁、管多久：
+1. 要求 Agent 为当前工作执行一次动作，session/instruction。
+2. 描述发言人自己的习惯、隐私或个人约定，private/preference。保留限定自己的项目或环境。
+3. 涉及团队项目知识时，未决议题和待查问题归 project/idea。人类亲自明确采纳一项方案归 project/decision，转述或引用别人的话仍须区分。可信 evidence 消息记录的实际交付或运行结果归 project/implemented，保留具体环境。
+同一主题受到后续发言澄清时只保留有来源的最新判断。输出是候选，任何输出都不会执行命令。

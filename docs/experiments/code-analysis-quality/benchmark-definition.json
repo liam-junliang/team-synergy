@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "commit": "c87aefbbece35c0bf9ccad32a5084ad85b4edb9d",
+  "purpose": "Independent held-out handoff questions, frozen from source before reviewing the whole-repository UA result. Do not use as generation prompts.",
+  "scope": "Generated UA graph only; original source is the oracle, and is not counted as information the graph already explains.",
+  "scoring": {
+    "0": "Missing or materially wrong: the graph cannot locate the relevant responsibility or contradicts the source.",
+    "1": "Navigation only: relevant files/modules exist, but listing a responsibility or a term does not explain the actual rule.",
+    "2": "Substantive: graph text explains a correct concrete rule and a rejection/constraint, with source-backed responsible files. Some downstream or verification detail remains missing.",
+    "3": "Handoff ready: explains concrete normal/rejected behavior, traces the important downstream/state consequence, and identifies a source-backed verification approach without claiming unexecuted tests passed."
+  },
+  "quality_target": { "minimum_points": 27, "maximum_points": 36, "minimum_questions_scoring_at_least_2": 9, "critical_false_claims_allowed": 0, "interpretation": "A declared acceptance target for this benchmark, not a general claim of enterprise correctness or 95% understanding." },
+  "cases": [
+    {
+      "id": "Q01",
+      "question": "Why does this platform separate Core API from member CLI/agentd, and where does a task command cross that boundary?",
+      "expected_facts": ["Core API owns shared project/task facts and writes persistent state.", "CLI accesses the shared API; filesystem/process supervision remains on the execution side.", "Task HTTP routes call application services; agentd supervises a child process and lease/session lifecycle rather than replacing task authority."],
+      "pitfalls": ["Do not claim Core API can browse arbitrary member checkout paths.", "A package dependency or import alone is not proof of business authority."],
+      "evidence": [{"path":"README.md","start":1,"end":78},{"path":"apps/cli/src/api-client.ts","start":1,"end":94},{"path":"apps/core-api/src/routes/tasks.ts","start":58,"end":100},{"path":"apps/agentd/src/supervisor.ts","start":1,"end":85}],
+      "verification_plan": "Trace a CLI task call to its HTTP route/use case, then inspect agentd supervision tests separately; source inspection does not prove process execution."
+    },
+    {
+      "id": "Q02",
+      "question": "When can a Builder claim a task, and why can an assigned task still be rejected?",
+      "expected_facts": ["Builder claim requires assigned state, matching assignee/profile and base_snapshot, plus project write access.", "A current active Run or unresolved handover blocks another claim.", "All predecessor tasks must be closed; successful claim changes task to running and creates a Run/workspace with an audit entry."],
+      "pitfalls": ["Do not generalize Builder claim guards to the separate verifier claim path for submitted tasks.", "Assigned does not mean immediately runnable when predecessors remain open."],
+      "evidence": [{"path":"packages/application/src/task-service.ts","start":396,"end":552},{"path":"packages/application/src/execution-guard.ts","start":9,"end":17}],
+      "verification_plan": "Define normal assigned/owner match and negative dependency-not-closed, stale snapshot, wrong assignee and active-Run cases from task-service tests."
+    },
+    {
+      "id": "Q03",
+      "question": "Why does a passing Builder submission not close a task, and who can verify and close it?",
+      "expected_facts": ["Submission requires passing self_test evidence with valid acceptance references and moves through self_tested to submitted.", "An active verifier Run with matching identity supplies verifier_review; passing evidence must cover all acceptance IDs, while fail/inconclusive returns failed.", "Closing requires verified state, matching base_snapshot and project management authority; isProjectManager includes owner and admin despite an error message saying Owner."],
+      "pitfalls": ["Builder self-test is not independent verification or project closure.", "Do not infer a strict unique-owner-only close rule from the error text when the actual helper accepts admin too."],
+      "evidence": [{"path":"packages/application/src/task-service.ts","start":797,"end":879},{"path":"packages/application/src/project-use-cases.ts","start":572,"end":655},{"path":"packages/application/src/project-use-cases.ts","start":702,"end":748},{"path":"packages/application/src/project-access.ts","start":9,"end":14},{"path":"packages/domain/src/task-state-machine.ts","start":96,"end":129}],
+      "verification_plan": "Check builder terminal rejection, partial acceptance coverage rejection, pass/fail verification state changes, and admin/owner close versus member close."
+    },
+    {
+      "id": "Q04",
+      "question": "What stops a stale device or old Run from writing after execution ownership changes?",
+      "expected_facts": ["Every write checks active matching Run identity, current project write access and no pending handover.", "Once execution_epoch advances, task/run epoch must match the presented device lease, which must be unrevoked and unexpired.", "Untouched legacy task/run with epoch zero follows an explicit compatibility exception after the identity/access/handover checks."],
+      "pitfalls": ["Do not claim all historical Runs require a lease without mentioning the epoch-zero compatibility path.", "A stored token does not override revoked project membership."],
+      "evidence": [{"path":"packages/application/src/execution-guard.ts","start":19,"end":55},{"path":"packages/application/src/execution-use-cases.ts","start":1,"end":128},{"path":"apps/agentd/src/supervisor.ts","start":1,"end":85}],
+      "verification_plan": "Use stale epoch, expired/revoked lease, revoked member, wrong device, pending handover and epoch-zero cases in permission/execution tests."
+    },
+    {
+      "id": "Q05",
+      "question": "How does handing a running task to another member prevent double execution while preserving attribution and current context?",
+      "expected_facts": ["Prepare advances task epoch, suspends source Run and revokes source leases.", "Publication by a project manager requires stop acknowledgement and a repository-backed workspace manifest; context drift is checked at publication/restoration/activation.", "Target restores into a distinct workspace and new Run, validates the receipt/context and then activates; source Run becomes transferred while its principal attribution remains unchanged."],
+      "pitfalls": ["Accepting the invitation alone does not grant active execution.", "A confirmed stop may be client-reported; it is not universally a server-observed process kill.", "Do not rewrite source Run authorship to the receiving member."],
+      "evidence": [{"path":"packages/application/src/handover-use-cases.ts","start":204,"end":219},{"path":"packages/application/src/handover-use-cases.ts","start":314,"end":375},{"path":"packages/application/src/handover-use-cases.ts","start":383,"end":447}],
+      "verification_plan": "Trace prepare→stop acknowledgement→publish→accept→restore→ready→activate, then reject changed source versions, wrong target/device or old-source writes."
+    },
+    {
+      "id": "Q06",
+      "question": "What exactly does a requirement-document review approve, and does that mean implementation is complete?",
+      "expected_facts": ["A review is linked to a specific requirement document revision, and creating it uses the current revision.", "An open review accepts valid votes from authorized members; closing it requires project management authority and stores a conclusion.", "Closing the document review updates the review record, not task implementation or delivery state; document revisions and execution facts are separate."],
+      "pitfalls": ["Do not treat an approved document revision as implemented software.", "Do not claim all votes automatically close a review; the code has an explicit close operation."],
+      "evidence": [{"path":"packages/application/src/requirement-collaboration-use-cases.ts","start":419,"end":486},{"path":"packages/application/src/requirement-document-use-cases.ts","start":275,"end":354}],
+      "verification_plan": "Start a review at revision N, create a later document revision, confirm the review remains attached to N, and test member vote versus manager close."
+    },
+    {
+      "id": "Q07",
+      "question": "Why can an account not simply be deleted after requesting ownership transfer?",
+      "expected_facts": ["Transfer is a pending request, accepted only by the actual recipient, with expiry/current-owner and recipient eligibility checks.", "Completing account closure requires a begun closure flow, no owned teams/projects, no open assigned tasks or active/preparing/suspended Runs, and preservation of another active system administrator.", "Closure revokes devices/leases and disables the user while retaining historical responsibility and audit records."],
+      "pitfalls": ["Requesting transfer is not completion of transfer.", "Account closure is not deletion of historical documents/authors."],
+      "evidence": [{"path":"packages/application/src/ownership-use-cases.ts","start":141,"end":181},{"path":"packages/application/src/ownership-use-cases.ts","start":224,"end":288}],
+      "verification_plan": "Try non-recipient acceptance, expired transfer, closure with outstanding ownership/task/Run, and closure as last active administrator; only then inspect revocations and history retention."
+    },
+    {
+      "id": "Q08",
+      "question": "How do explicit project membership and team inheritance affect read, write and management permissions?",
+      "expected_facts": ["Current project owner takes precedence, then explicit project membership, then team membership if member_policy permits inheritance.", "team_read inherits viewer and team_write inherits member; private does not inherit access.", "Viewer cannot write, manager means owner/admin, and archived projects reject write/manage even when read access remains."],
+      "pitfalls": ["Team membership does not grant write access to every project.", "An explicit project role must not be silently replaced by inherited team policy."],
+      "evidence": [{"path":"packages/application/src/project-access.ts","start":9,"end":63},{"path":"packages/application/src/project-policy-use-cases.ts","start":1,"end":77}],
+      "verification_plan": "Exercise private/team_read/team_write with explicit viewer override and archived project mutation rejection."
+    },
+    {
+      "id": "Q09",
+      "question": "Does an existing Run silently get today's new skill installation, and what happens if access to its old skill is revoked?",
+      "expected_facts": ["Run creation captures a project skill manifest with a generation, exact revision and package SHA.", "Reading a Run resolves its saved versions rather than current installations; legacy Runs without a saved manifest intentionally get an empty manifest.", "Saved versions still require current project/source grants and digest verification; revoked or archived access blocks delivery, and handover copies the fixed manifest within the same project."],
+      "pitfalls": ["Pinning a revision does not grant permanent access after revocation.", "A legacy Run is not upgraded by reading current project installations."],
+      "evidence": [{"path":"packages/application/src/skills-run.ts","start":19,"end":85},{"path":"packages/application/src/skills-use-cases.ts","start":1,"end":70},{"path":"packages/application/src/handover-use-cases.ts","start":393,"end":402}],
+      "verification_plan": "Change a project installation after starting a Run, check the old revision remains pinned, then revoke the share and verify delivery is blocked."
+    },
+    {
+      "id": "Q10",
+      "question": "When a test case changes later, how can a past test result remain meaningful and link to a defect?",
+      "expected_facts": ["Execution records use exact case and asset revisions and save snapshots rather than substituting current definitions.", "Reading a result reports is_outdated when the current case revision differs, while preserving the historical snapshot/result.", "Only failed results may link to or create a defect; record definition or a testcase labeled automated is not proof a command executed."],
+      "pitfalls": ["Do not present old test results as verification of a new revision.", "Test source/case definition is not a passing test execution."],
+      "evidence": [{"path":"packages/application/src/testing-use-cases.ts","start":186,"end":198},{"path":"packages/application/src/testing-use-cases.ts","start":209,"end":260},{"path":"packages/application/src/testing-use-cases.ts","start":266,"end":306}],
+      "verification_plan": "Record execution for case r1, revise to r2, inspect is_outdated and unchanged stored snapshot, and reject linking pass/not_run to a defect."
+    },
+    {
+      "id": "Q11",
+      "question": "What is checked when uploading a test attachment, and why is a list response not a file download?",
+      "expected_facts": ["Uploaded file uses a safe basename, valid MIME/base64 and decoded payload limit of 6 MiB.", "The server calculates SHA-256 and byte size and rejects supplied mismatches.", "Summary/list paths remove content_base64 while exact asset detail/revision retains the file; Git asset paths must remain repository-relative."],
+      "pitfalls": ["Do not call a MIME label or filename proof that the content passed validation.", "Do not infer missing bytes in a list means the attachment has been deleted."],
+      "evidence": [{"path":"packages/application/src/testing-content.ts","start":32,"end":55},{"path":"packages/application/src/testing-content.ts","start":71,"end":88},{"path":"packages/application/src/testing-use-cases.ts","start":106,"end":122},{"path":"packages/application/src/testing-use-cases.ts","start":311,"end":324}],
+      "verification_plan": "Reject path-like names, noncanonical base64, >6 MiB data and wrong hash/size; compare list metadata with exact version detail."
+    },
+    {
+      "id": "Q12",
+      "question": "Why can code-derived candidates not be pushed directly into live project records without review?",
+      "expected_facts": ["Source capture excludes secrets/generated/dependency/binary paths and validates fixed source fingerprints; collected source is not trusted instructions.", "Every candidate requires an explicit create/bind/skip decision, and skipped dependencies or changed binding fingerprints block the frozen publication plan.", "Applying requires manage access, the current plan_hash and idempotency key; item-level progress is resumable, so a partially applied batch is not an all-or-nothing complete import."],
+      "pitfalls": ["Do not claim model extraction alone publishes requirements.", "Do not claim whole-batch atomicity when the implementation records per-item partial success."],
+      "evidence": [{"path":"apps/cli/src/intake-source.ts","start":10,"end":28},{"path":"apps/cli/src/intake-source.ts","start":119,"end":161},{"path":"packages/application/src/intake-use-cases.ts","start":203,"end":234},{"path":"packages/application/src/intake-use-cases.ts","start":256,"end":336}],
+      "verification_plan": "Prepare candidates, reject unreviewed/stale plan hashes and skipped-parent bindings, then verify repeated application of the same key and partial publication recovery."
+    }
+  ]
+}
