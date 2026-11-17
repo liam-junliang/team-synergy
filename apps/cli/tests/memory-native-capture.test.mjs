@@ -1,15 +1,48 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
 import { createNativeCaptureBridge, nativeCaptureEventId } from '../dist/memory-native-capture.js';
 
 const cliPath = fileURLToPath(new URL('../dist/index.js',import.meta.url));
+function outboxFile(config) {
+  const key=createHash('sha256').update(JSON.stringify([config.owner,config.harness,config.hostSessionId,config.memorySession])).digest('hex');
+  const directory=path.join(config.memberHome,'memory-native-outbox');mkdirSync(directory,{recursive:true});
+  return path.join(directory,key+'.sqlite');
+}
+
+async function nativeEnqueueProcess(t,f,event,onBusy=()=>{}) {
+  // Observe real SQLite errors without replacing any database operation or timer.
+  const program=`import {DatabaseSync} from 'node:sqlite';
+    import {enqueueNativeCapture} from ${JSON.stringify(new URL('../dist/memory-native-capture.js',import.meta.url).href)};
+    const exec=DatabaseSync.prototype.exec;
+    DatabaseSync.prototype.exec=function(sql){try{return exec.call(this,sql);}catch(error){
+      process.send({kind:'sqlite-error',code:error.code,errcode:error.errcode});throw error;}};
+    process.once('message',async({config,event})=>{try{process.send({kind:'result',ok:true,data:await enqueueNativeCapture(config,event)});}
+      catch(error){process.send({kind:'result',ok:false,code:error.code,errcode:error.errcode});}finally{process.disconnect();}});
+    process.send({kind:'ready'});`;
+  const child=spawn(process.execPath,['--input-type=module','-e',program],{cwd:f.config.cwd,
+    env:{...process.env,AGENTCTL_HOME:f.config.memberHome},windowsHide:true,stdio:['ignore','ignore','ignore','ipc']});
+  t.after(()=>{if(child.exitCode===null)child.kill();});
+  const done=once(child,'close'),ready=once(child,'message');
+  const sqliteErrors=[];let result,notified=false;
+  child.on('message',message=>{
+    if(message.kind==='sqlite-error'){
+      sqliteErrors.push(message);
+      if((message.errcode&255)===5&&!notified){notified=true;onBusy();}
+    }else if(message.kind==='result')result=message;
+  });
+  await ready;child.send({config:f.config,event});
+  assert.equal((await done)[0],0);assert.ok(result);
+  return {...result,sqliteErrors};
+}
 async function fixture(t,harness='dsh') {
   const directory = mkdtempSync(path.join(tmpdir(),'tsp-native-outbox-'));
   const cwd = path.join(directory,'repo'),memberHome=path.join(directory,'member');
@@ -87,6 +120,52 @@ test('parallel native notifications and drains preserve one durable event',async
   await Promise.all([f.bridge.enqueue(event),f.bridge.enqueue(event)]);
   await Promise.all([f.bridge.drain(),f.bridge.drain()]);
   assert.equal(f.jobs.size,1);assert.equal(f.posts.length,1);assert.equal((await f.bridge.status()).events.length,1);
+});
+
+test('cold native initialization recovers real WAL lock errors across processes before durable ACK',async t=>{
+  const f=await fixture(t),event=f.event(),file=outboxFile(f.config),holder=new DatabaseSync(file);
+  holder.exec('BEGIN IMMEDIATE');let released=false,busy=0;
+  const release=()=>{if(!released){holder.exec('ROLLBACK');holder.close();released=true;}};t.after(release);
+  // A RESERVED rollback-journal lock makes WAL conversion return SQLITE_BUSY
+  // immediately even with busy_timeout set. Release after both processes see it.
+  const results=await Promise.all([0,1].map(()=>nativeEnqueueProcess(t,f,event,()=>{if(++busy===2)release();})));
+  assert.equal(busy,2);
+  for(const result of results){
+    assert.equal(result.sqliteErrors[0].errcode&255,5);
+    assert.equal(result.ok,true,JSON.stringify(result));assert.equal(result.data.durable,true);
+  }
+  const db=new DatabaseSync(file);
+  try{assert.deepEqual(db.prepare('SELECT event_id,source_text FROM events').all().map(row=>({...row})),
+    [{event_id:event.eventId,source_text:event.sourceText}]);}finally{db.close();}
+  await Promise.all([f.bridge.drain(),f.bridge.drain()]);
+  assert.equal(f.posts.length,1);assert.equal(f.jobs.size,1);
+  assert.deepEqual(f.posts[0],{sessionId:f.config.memorySession,eventId:event.eventId,sourceText:event.sourceText});
+  await assert.rejects(f.bridge.enqueue({...event,sourceText:'同一消息被改写'}),{code:'memory_event_changed'});
+});
+
+test('native initialization retries are bounded and never turn an unreleased lock into durable ACK',async t=>{
+  const f=await fixture(t),holder=new DatabaseSync(outboxFile(f.config));holder.exec('BEGIN IMMEDIATE');
+  const started=Date.now();let result;
+  try{result=await nativeEnqueueProcess(t,f,f.event());}finally{holder.exec('ROLLBACK');holder.close();}
+  assert.equal(result.ok,false);assert.equal(result.errcode&255,5);
+  assert.ok(result.sqliteErrors.length>1,'a transient lock must be retried');
+  assert.ok(Date.now()-started<10000,'retry budget must finish before the bridge deadline');
+  assert.equal(f.posts.length,0);
+});
+
+test('native initialization does not retry corrupt storage and rechecks identity after contention',async t=>{
+  const corrupt=await fixture(t),file=outboxFile(corrupt.config);writeFileSync(file,'not a sqlite database');
+  const rejected=await nativeEnqueueProcess(t,corrupt,corrupt.event());
+  assert.equal(rejected.ok,false);assert.equal(rejected.errcode,26);assert.equal(rejected.sqliteErrors.length,1);
+  assert.equal(readFileSync(file,'utf8'),'not a sqlite database');
+  const changed=await fixture(t),holder=new DatabaseSync(outboxFile(changed.config));holder.exec('BEGIN IMMEDIATE');let released=false;
+  const release=()=>{if(!released){holder.exec('ROLLBACK');holder.close();released=true;}};t.after(release);
+  const result=await nativeEnqueueProcess(t,changed,changed.event(),()=>{
+    const auth=JSON.parse(readFileSync(changed.authFile,'utf8'));
+    writeFileSync(changed.authFile,JSON.stringify({...auth,user_code:'member-B',device_token:'different-device'}));release();
+  });
+  assert.equal(result.ok,false);assert.equal(result.code,'memory_binding_changed');
+  assert.equal(changed.posts.length,0);assert.equal(corrupt.posts.length,0);
 });
 
 test('a detached native pump retries a transient ACK failure without another user turn',async t=>{
