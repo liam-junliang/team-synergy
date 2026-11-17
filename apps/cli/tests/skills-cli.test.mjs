@@ -34,6 +34,7 @@ async function setup(t) {
       state.installations = [{ ...item, ...body, files: undefined, blocked: false, blocked_reason: null }]; state.generation++;
       return send({ project_code: 'project-one', generation: state.generation, installations: state.installations });
     }
+    if (url.pathname === '/skills/platform/skill-one') return send({ code: 'skill-one', scope_type: 'platform', revisions: [{ ...item, published_at: '2026-11-17', release_version: '1.0.0' }] });
     if (url.pathname === '/skills/skill-one' && req.method === 'GET') return send({ code: 'skill-one', name: 'review', current_revision: 2, revisions: [{ ...item, revision: 1 }, { ...item, revision: 2 }] });
     return send({ code: 'skill-one', ...body });
   });
@@ -114,4 +115,19 @@ test('invalid input fails before network mutations', async t => {
     ['sync', '--run', '../outside'], ['sync', '--run', 'CON'], ['sync', '--run', runCode, '--project', 'project-one'],
   ]) assert.equal((await run(...args)).status, 1, args.join(' '));
   assert.equal(calls.length, 0);
+});
+
+test('platform commands ignore ambient binding and exports reject tampering and linked destinations without overwriting', async t => {
+  const { run, root, calls, state } = await setup(t);
+  await run('catalog', '--platform'); assert.equal(calls.at(-1).url, '/skills/platform');
+  await run('search', 'review', '--platform'); assert.equal(calls.at(-1).url, '/skills/platform?q=review');
+  await run('show', 'skill-one', '--platform'); assert.equal(calls.at(-1).url, '/skills/platform/skill-one');
+  const linked = path.join(root, 'linked'); symlinkSync(path.join(root, 'source'), linked, process.platform === 'win32' ? 'junction' : 'dir');
+  assert.equal((await run('export', 'skill-one', '--revision', '2', '--directory', path.join(linked, 'out'))).error.code, 'skill_symlink_forbidden');
+  const before = calls.length;
+  assert.equal((await run('catalog', '--platform', '--project', 'bad')).error.code, 'skill_scope_invalid'); assert.equal(calls.length, before);
+  state.manifests.skills[0].package_sha256 = '0'.repeat(64);
+  const destination = path.join(root, 'tampered-export');
+  assert.equal((await run('export', 'skill-one', '--revision', '2', '--directory', destination)).error.code, 'skill_package_invalid');
+  assert.equal(existsSync(destination), false);
 });

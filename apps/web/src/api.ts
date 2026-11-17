@@ -3104,6 +3104,8 @@ export function linkTestResultDefect(executionCode: string, resultCode: string, 
 
 import type { SkillSummary, SkillDetail, SkillScope, SkillCreateInput, SkillReviseInput, SkillShareInput, SkillInstallInput, ProjectSkills } from '../../../packages/contracts/src/skills';
 export type * from '../../../packages/contracts/src/skills';
+export function listPlatformSkills(): Promise<SkillSummary[]> { return fetchEnvelope('/skills/platform'); }
+export function getPlatformSkill(code: string): Promise<SkillDetail> { return fetchEnvelope(`/skills/platform/${encodeURIComponent(code)}`); }
 export function listSkills(scope: SkillScope, code: string, view: 'owned' | 'available' | 'shared' = 'owned'): Promise<SkillSummary[]> {
   return fetchEnvelope(`/skills?${new URLSearchParams({ [`${scope}_code`]: code, view })}`);
 }

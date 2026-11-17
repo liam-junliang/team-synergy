@@ -15,6 +15,14 @@ type Project = { project_code: string };
 export function registerSkillRoutes(app: FastifyInstance, db: Db) {
   const uc = createSkillsUseCases(db);
   registerSkillReader(app, uc);
+  app.get<{ Querystring: { q?: string } }>('/skills/platform', async (request, reply) => {
+    if (!request.principal) return unauthorized(reply);
+    return uc.listPlatformSkills({ principalCode: request.principal, query: request.query.q });
+  });
+  app.get<{ Params: Code }>('/skills/platform/:code', async (request, reply) => {
+    if (!request.principal) return unauthorized(reply);
+    return uc.getSkill({ principalCode: request.principal, code: request.params.code, source: 'platform' });
+  });
   app.get<{ Querystring: { team_code?: string; project_code?: string; view?: 'owned' | 'available' | 'shared'; q?: string } }>('/skills', async (request, reply) => {
     if (!request.principal) return unauthorized(reply);
     return uc.listSkills({ principalCode: request.principal, teamCode: request.query.team_code, projectCode: request.query.project_code, view: request.query.view, query: request.query.q });

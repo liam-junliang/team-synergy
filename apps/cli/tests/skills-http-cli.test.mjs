@@ -1,8 +1,10 @@
 import { test } from 'node:test';
+import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { schema } from '@team-synergy/persistence';
 import { eq } from 'drizzle-orm';
 import { ensurePlatformSkillRelease } from '@team-synergy/application';
@@ -28,6 +30,34 @@ test('a clean member workspace discovers and syncs the complete released platfor
     const r = await context.runCli(args, { ACP_DEVICE_TOKEN: user.code, ACP_PRINCIPAL_CODE: '', ACP_PRINCIPAL_ID: '' }, { cwd:workspace });
     return JSON.parse(r.out);
   }
+  const globalCatalog = await cli(member, ['skill', 'catalog', '--platform']);
+  assert.equal(globalCatalog.data[0].code, published.skill_code);
+  const globalDetail = await cli(member, ['skill', 'show', published.skill_code, '--platform', '--revision', '1']);
+  assert.equal(globalDetail.data.revisions[0].package_sha256, release.package_sha256);
+  const destination = path.join(context.tmp, 'exported-builtin');
+  const exported = await cli(member, ['skill', 'export', published.skill_code, '--revision', '1', '--directory', destination]);
+  assert.equal(exported.ok, true, JSON.stringify(exported));
+  for (const file of release.files) assert.equal(createHash('sha256').update(readFileSync(path.join(destination, file.path))).digest('hex'), file.sha256);
+  assert.equal((await cli(member, ['skill', 'export', published.skill_code, '--revision', '1', '--directory', destination])).error.code, 'skill_export_conflict');
+  assert.equal(existsSync(path.join(workspace, '.tsp')), false);
+  mkdirSync(context.authHome, { recursive: true });
+  writeFileSync(path.join(context.authHome, 'auth.json'), JSON.stringify({ api_url: context.apiUrl, device_token: member.code, user_code: member.code, device_name: 'Platform reader test' }));
+  const selected = { skill: published.skill_code, revision: 1 };
+  const tool = await cli(member, ['tools', 'call', 'read_platform_skill', '--input', JSON.stringify(selected)]);
+  assert.equal(tool.ok, true, JSON.stringify(tool));
+  const child = spawn(process.execPath, [fileURLToPath(new URL('../dist/index.js', import.meta.url)), 'mcp'], {
+    cwd: workspace, windowsHide: true, env: context.env(), stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let output = '', error = '';
+  child.stdout.on('data', value => output += value); child.stderr.on('data', value => error += value);
+  const closed = new Promise((resolve, reject) => { child.on('close', resolve); child.on('error', reject); });
+  child.stdin.end([{ id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25' } },
+    { id: 2, method: 'tools/call', params: { name: 'read_platform_skill', arguments: selected } }]
+    .map(frame => JSON.stringify({ jsonrpc: '2.0', ...frame })).join('\n') + '\n');
+  assert.equal(await closed, 0, error);
+  const frames = output.trim().split('\n').map(line => JSON.parse(line));
+  assert.deepEqual(JSON.parse(frames[1].result.content[0].text), JSON.parse(tool.data.content[0].text));
+  assert.equal(existsSync(path.join(workspace, '.agent')), false);
   const catalog = await cli(owner, ['skill','search',release.name,'--project',project.code]);
   assert.equal(catalog.data[0].scope_type,'platform');
   assert.equal(catalog.data[0].can_edit,false);

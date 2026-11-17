@@ -1,6 +1,6 @@
 import { useDeferredValue, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { archiveSkill, getProjectSkills, getSkill, installProjectSkill, listSkills, publishSkill, revokeSkillShare,
+import { archiveSkill, getProjectSkills, getSkill, getPlatformSkill, listPlatformSkills, installProjectSkill, listSkills, publishSkill, revokeSkillShare,
   type ProjectSummary, type TeamSummary, type SkillDetail, type SkillScope, type SkillSummary, type ProjectSkills, type ProjectSkillInstallation } from './api';
 import { t, formatDateTime } from './i18n';
 import { CopyCommand, SkillError } from './SkillShared';
@@ -9,7 +9,8 @@ import { WorkspaceDialog } from './WorkspaceDialog';
 import { SkillEditor, SkillInstallEditor, SkillShareEditor } from './SkillDialogs';
 import { skillFileChanges, skillFileText } from './skills';
 
-type Tab = 'project' | 'team' | 'shared';
+export type SkillLibraryTab = 'platform' | 'owned' | 'shared' | 'project';
+type Tab = SkillLibraryTab;
 type Entry = Pick<SkillSummary, 'code' | 'name' | 'description' | 'scope_type' | 'scope_code'> & { installation?: ProjectSkillInstallation; skill?: SkillSummary };
 
 export function skillEntryStatus(entry: Entry) {
@@ -41,8 +42,16 @@ export function SkillContentReader({ skill, initialRevision, onEdit, onAction, b
   const previous = skill.revisions.filter(item => item.revision < (revision?.revision ?? 0)).sort((a, b) => b.revision - a.revision)[0];
   const changes = revision && previous ? skillFileChanges(revision.files, previous.files) : [];
   const showInstall = Boolean(projectSkills?.can_manage && !skill.archived && skill.available_revisions.length);
+  function download() {
+    if (!revision || skill.scope_type !== 'platform' || !revision.published_at) return;
+    const url = URL.createObjectURL(new Blob([JSON.stringify({ source: { skill_code: skill.code, scope_type: 'platform', revision: revision.revision,
+      release_version: revision.release_version, package_sha256: revision.package_sha256 }, ...revision }, null, 2)], { type: 'application/json' }));
+    const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${revision.name}-r${revision.revision}.skill.json`; anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
   return <article className="flex h-[min(74dvh,960px)] min-h-[460px] min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
     <header className="shrink-0 space-y-3 border-b border-slate-200 bg-white p-4 sm:p-5">
+      {skill.scope_type === 'platform' && revision?.published_at && <button type="button" className="ui-button ui-button-secondary" onClick={download}>{t('下载技能包（JSON）')}</button>}
       <div className="flex flex-wrap items-center justify-between gap-3"><span className="rounded bg-cyan-50 px-2 py-1 text-xs font-medium text-cyan-700">{t(skill.scope_type === 'platform' ? '平台内置技能' : skill.scope_type === 'team' ? '团队技能' : '项目技能')}{revision?.release_version && ' · ' + revision.release_version}</span><div className="flex flex-wrap gap-2">{skill.can_edit && !skill.archived && <button type="button" className="ui-button ui-button-secondary" onClick={onEdit}>{t('修订技能包')}</button>}{skill.can_manage && !skill.archived && revision && !revision.published_at && <button type="button" className="ui-button ui-button-primary" disabled={busy} onClick={() => onAction('publish', revision.revision)}>{t('发布此版本')}</button>}{showInstall && <button type="button" className="ui-button ui-button-primary" onClick={onInstall}>{t(installation ? '更新项目采用版本' : '采用到当前项目')}</button>}<button type="button" aria-expanded={historyOpen} aria-controls={`skill-history-${skill.code}`} className="ui-button ui-button-secondary" onClick={() => setHistoryOpen(!historyOpen)}>{t('版本记录')}</button></div></div>
       <h2 className="break-words text-xl font-bold text-slate-950">{revision?.name ?? skill.name}</h2><p className="text-sm leading-6 text-slate-500">{revision?.description ?? skill.description}</p><div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500"><span>r{revision?.revision ?? skill.current_revision} · {t(revision?.published_at ? '已发布' : '草稿')}</span><time>{formatDateTime(revision?.created_at)}</time>{skill.archived && <span className="text-amber-700">{t('已归档')}</span>}<code>{skill.code}</code></div>
     </header>
@@ -58,8 +67,12 @@ export function SkillContentReader({ skill, initialRevision, onEdit, onAction, b
   </article>;
 }
 
-export function SkillsWorkbench({ project, team }: { project?: ProjectSummary; team?: TeamSummary }) {
-  const [tab, setTab] = useState<Tab>(project ? 'project' : team ? 'team' : 'shared');
+export function SkillsWorkbench({ project, team, projects = [], teams = [], projectIssue, onProjectChange, onTeamChange, initialTab = 'platform' }: {
+  project?: ProjectSummary; team?: TeamSummary; projects?: ProjectSummary[]; teams?: TeamSummary[]; projectIssue?: string;
+  onProjectChange?: (code: string, view: Tab) => void; onTeamChange?: (code: string, view: Tab) => void; initialTab?: Tab;
+}) {
+  const [tab, setTab] = useState<Tab>(initialTab);
+  const [targetOpen, setTargetOpen] = useState(false);
   const [sharedScope, setSharedScope] = useState<SkillScope>(project ? 'project' : 'team');
   const [search, setSearch] = useState(''); const query = useDeferredValue(search).trim().toLocaleLowerCase();
   const [showHistory, setShowHistory] = useState(false);
@@ -68,22 +81,25 @@ export function SkillsWorkbench({ project, team }: { project?: ProjectSummary; t
   const [editor, setEditor] = useState<'create' | 'revise' | 'share' | 'install' | null>(null);
   const [confirmation, setConfirmation] = useState<{ action: 'archive' | 'revoke'; value?: string } | null>(null);
   const queryClient = useQueryClient();
-  const scope: SkillScope = tab === 'team' ? 'team' : tab === 'shared' ? sharedScope : 'project';
+  const scope: SkillScope = tab === 'project' ? 'project' : sharedScope;
   const scopeCode = scope === 'team' ? team?.code : project?.code;
-  const library = useQuery({ queryKey: ['skills', 'catalog', scope, scopeCode, tab], queryFn: async () => {
-    if (tab !== 'project') return listSkills(scope, scopeCode ?? '', tab === 'shared' ? 'shared' : 'owned');
-    const available = await listSkills(scope, scopeCode ?? '', 'available');
-    return available.filter(skill => skill.scope_type === 'platform' || (skill.scope_type === 'project' && skill.scope_code === scopeCode));
-  }, enabled: Boolean(scopeCode) });
+  const library = useQuery({ queryKey: tab === 'platform' ? ['skills', 'catalog', 'platform'] : ['skills', 'catalog', scope, scopeCode, tab],
+    queryFn: () => tab === 'platform' ? listPlatformSkills() : listSkills(scope, scopeCode ?? '', tab === 'shared' ? 'shared' : 'owned'),
+    enabled: tab === 'platform' || (tab !== 'project' && Boolean(scopeCode)) });
   const installed = useQuery({ queryKey: ['skills', 'installed', project?.code], queryFn: () => getProjectSkills(project?.code ?? ''), enabled: Boolean(project) });
-  const projectContext = scope === 'project' ? project?.code : undefined;
-  const entries: Entry[] = [...(library.data ?? []).map(skill => ({ ...skill, skill, installation: installed.data?.installations.find(item => item.skill_code === skill.code) }))];
-  if (tab === 'project') for (const installation of installed.data?.installations ?? []) if (!entries.some(item => item.code === installation.skill_code)) entries.push({ code: installation.skill_code, name: installation.name, description: installation.description, scope_type: installation.scope_type, scope_code: installation.scope_code, installation });
+  const projectContext = tab !== 'platform' && scope === 'project' ? project?.code : undefined;
+  const entries: Entry[] = tab === 'project' ? (installed.data?.installations ?? []).map(installation => ({
+    code: installation.skill_code, name: installation.name, description: installation.description,
+    scope_type: installation.scope_type, scope_code: installation.scope_code, installation,
+  })) : (library.data ?? []).map(skill => ({ ...skill, skill }));
   const matching = filterSkillEntries(entries, query, true);
   const filtered = showHistory ? matching : filterSkillEntries(matching, '', false);
   const current = matching.find(item => item.code === selected) ?? filtered[0];
-  const detail = useQuery({ queryKey: ['skills', 'detail', scope, scopeCode, current?.code], queryFn: () => getSkill(current?.code ?? '', projectContext), enabled: Boolean(current && !current.installation?.blocked) });
-  const canCreate = Boolean(scopeCode && (scope === 'team' ? team?.capabilities?.write ?? Boolean(team && !team.ownership_pending) : project?.capabilities?.write) && (scope !== 'project' || project?.status === 'active') && tab !== 'shared');
+  const detail = useQuery({ queryKey: ['skills', 'detail', tab === 'platform' ? 'platform' : scope, tab === 'platform' ? '' : scopeCode, current?.code],
+    queryFn: () => tab === 'platform' ? getPlatformSkill(current?.code ?? '') : getSkill(current?.code ?? '', projectContext),
+    enabled: Boolean(current && !current.installation?.blocked) });
+  const currentInstallation = installed.data?.installations.find(item => item.skill_code === current?.code);
+  const canCreate = Boolean(tab === 'owned' && scopeCode && (scope === 'team' ? team?.capabilities?.write ?? Boolean(team && !team.ownership_pending) : project?.capabilities?.write) && (scope !== 'project' || project?.status === 'active'));
   async function refresh() { setEditor(null); setConfirmation(null); await queryClient.invalidateQueries({ queryKey: ['skills'] }); }
   async function saved(skill: SkillDetail) { setSelected(skill.code); setShowDetail(true); await refresh(); }
   const action = useMutation({ mutationFn: async (input: { action: 'publish' | 'archive' | 'revoke'; code: string; value?: number | string; archived?: boolean }) => input.action === 'publish' ? publishSkill(input.code, Number(input.value)) : input.action === 'revoke' ? revokeSkillShare(input.code, String(input.value)) : archiveSkill(input.code, !input.archived), onSuccess: refresh });
@@ -91,22 +107,42 @@ export function SkillsWorkbench({ project, team }: { project?: ProjectSummary; t
   function chooseTab(value: Tab) { setTab(value); setSelected(null); setShowDetail(false); setEditor(null); setConfirmation(null); action.reset(); disable.reset(); }
   const displayed = detail.data;
   return <>
-    <div className="mb-5 flex flex-wrap items-center justify-between gap-3"><nav aria-label={t('技能库范围')} className="flex max-w-full gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1">{(['project', 'team', 'shared'] as const).map(value => <button type="button" key={value} disabled={value === 'project' ? !project : value === 'team' ? !team : !project && !team} aria-pressed={tab === value} className={`shrink-0 rounded-lg px-3 py-2 text-sm font-medium disabled:opacity-40 ${tab === value ? 'bg-white text-cyan-800 shadow-sm' : 'text-slate-500 hover:text-slate-900'}`} onClick={() => chooseTab(value)}>{t(value === 'project' ? '项目技能目录' : value === 'team' ? '团队技能' : '共享给我')}</button>)}</nav><div className="flex items-center gap-2">{tab === 'shared' && project && team && <select aria-label={t('共享目标范围')} className="form-control form-control-compact" value={sharedScope} onChange={event => { setSharedScope(event.target.value as SkillScope); setSelected(null); setShowDetail(false); }}><option value="project">{project.name}</option><option value="team">{team.name}</option></select>}{canCreate && <button type="button" className="ui-button ui-button-primary" onClick={() => setEditor('create')}>{t('新建技能包')}</button>}</div></div>
-    <p className="mb-4 text-xs leading-6 text-slate-500">{tab === 'project' ? t('项目负责人或管理员可采用平台内置技能；成员同步项目已启用的固定版本。') : tab === 'team' ? t('仅展示当前团队拥有的技能。团队管理权限不会自动获得私有项目管理权。') : t('仅展示授权给所选范围的技能版本，不显示来源团队的其他私有内容。')}</p>
+    <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+      <nav aria-label={t('技能库范围')} className="flex max-w-full gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1">
+        {(['platform', 'owned', 'shared', 'project'] as const).map(value => <button type="button" key={value} aria-pressed={tab === value}
+          className={`shrink-0 rounded-lg px-3 py-2 text-sm font-medium ${tab === value ? 'bg-white text-cyan-800 shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}
+          onClick={() => chooseTab(value)}>{t(value === 'platform' ? '平台内置' : value === 'owned' ? '团队与项目自建' : value === 'shared' ? '共享给我' : '项目采用')}</button>)}
+      </nav>
+      {canCreate && <button type="button" className="ui-button ui-button-primary" onClick={() => setEditor('create')}>{t('新建技能包')}</button>}
+    </div>
+    {(tab === 'owned' || tab === 'shared') && <div className="mb-4 flex flex-wrap items-center gap-3">
+      <label className="text-xs text-slate-600">{t(tab === 'shared' ? '授权接收范围' : '自建归属范围')}<select className="form-control ml-2" value={scope} onChange={event => { setSharedScope(event.target.value as SkillScope); chooseTab(tab); }}>
+        <option value="team">{t('团队')}</option><option value="project">{t('项目')}</option>
+      </select></label>
+      {scope === 'team' && <label className="text-xs text-slate-600">{t('团队范围')}<select aria-label={t('团队范围')} className="form-control ml-2" value={team?.code ?? ''} onChange={event => { chooseTab(tab); onTeamChange?.(event.target.value, tab); }}>
+        <option value="">{t('选择团队')}</option>{teams.map(item => <option key={item.code} value={item.code}>{item.name}</option>)}
+      </select></label>}
+    </div>}
+    {(tab === 'project' || ((tab === 'owned' || tab === 'shared') && scope === 'project') || targetOpen) && <label className="mb-4 block text-xs text-slate-600">{t('项目范围')}<select aria-label={t('项目范围')} className="form-control ml-2 max-w-full" value={project?.code ?? ''} onChange={event => { chooseTab(tab); onProjectChange?.(event.target.value, tab); }}>
+      <option value="">{t('选择项目')}</option>{projects.map(item => <option key={item.code} value={item.code}>{item.name}</option>)}
+    </select></label>}
+    {tab === 'platform' && !project && !targetOpen && <button type="button" className="ui-button ui-button-secondary mb-4" onClick={() => setTargetOpen(true)}>{t('选择项目以采用')}</button>}
+    {projectIssue && <p role="status" className="mb-4 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">{projectIssue}</p>}
+    <p className="mb-4 text-xs leading-6 text-slate-500">{t(tab === 'platform' ? '平台维护的已发布技能可直接阅读和下载，无需项目绑定。项目采用会另行固定版本。' : tab === 'project' ? '仅展示所选项目采用的固定版本；升级和停用需要项目管理权限。' : tab === 'owned' ? '归属范围决定维护权限；采用到其他项目不会改变技能归属。' : '共享授权授予所选团队或项目读取指定版本，不授予来源维护权。')}</p>
     <SkillError error={action.error || disable.error} />
-    {!scopeCode ? <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">{t('选择一个有权限的项目或团队后管理技能。')}</div> : <div className="grid items-start gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
-      <aside aria-label={t('技能列表')} className={`document-library-sidebar ${showDetail ? 'hidden xl:flex' : ''}`}><header className="shrink-0 border-b border-slate-100 p-4"><h2 className="mb-3 text-sm font-semibold">{scope === 'project' ? project?.name : team?.name}<span className="ml-2 text-xs font-normal text-slate-400">{filtered.length}</span></h2><input type="search" aria-label={t('搜索技能')} className="form-control form-control-compact w-full" value={search} onChange={event => setSearch(event.target.value)} placeholder={t('搜索名称、描述或编码')} /><label className="mt-3 flex cursor-pointer items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={showHistory} onChange={event => setShowHistory(event.target.checked)} />{t('显示已停用/归档')}</label></header><div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2"><SkillError error={library.error || (tab === 'project' && installed.error)} />{library.isPending ? <p role="status" className="p-4 text-sm text-slate-500">{t('正在加载…')}</p> : filtered.length ? filtered.map(item => <button type="button" key={item.code} onClick={() => { setSelected(item.code); setShowDetail(true); setEditor(null); }} aria-pressed={current?.code === item.code} className={`mb-2 block w-full rounded-xl border p-3 text-left ${current?.code === item.code ? 'border-cyan-200 bg-cyan-50' : 'border-transparent hover:bg-slate-50'}`}><div className="flex justify-between gap-2 text-xs text-slate-500"><span>{t(skillEntryStatus(item))}</span><span>r{item.installation?.revision ?? item.skill?.current_revision}</span></div><h3 className="mt-2 break-words text-sm font-semibold">{item.installation?.alias ?? item.name}{item.scope_type === 'platform' && <span className="ml-2 text-xs font-normal text-cyan-700">{t('平台内置技能')}</span>}</h3><p className="mt-1 line-clamp-2 break-words text-xs leading-5 text-slate-500">{item.description}</p>{item.installation && item.installation.available_revisions.some(value => value > (item.installation?.revision ?? Infinity)) && <span className="mt-2 block text-xs text-cyan-700">{t('有可用新版本')}</span>}</button>) : <p className="p-6 text-center text-sm text-slate-500">{t('暂无匹配技能')}</p>}</div></aside>
+    {tab !== 'platform' && !scopeCode ? <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">{t('选择一个有权限的项目或团队后管理技能。')}</div> : <div className="grid items-start gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
+      <aside aria-label={t('技能列表')} className={`document-library-sidebar ${showDetail ? 'hidden xl:flex' : ''}`}><header className="shrink-0 border-b border-slate-100 p-4"><h2 className="mb-3 text-sm font-semibold">{tab === 'platform' ? t('平台内置') : scope === 'project' ? project?.name : team?.name}<span className="ml-2 text-xs font-normal text-slate-400">{filtered.length}</span></h2><input type="search" aria-label={t('搜索技能')} className="form-control form-control-compact w-full" value={search} onChange={event => setSearch(event.target.value)} placeholder={t('搜索名称、描述或编码')} /><label className="mt-3 flex cursor-pointer items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={showHistory} onChange={event => setShowHistory(event.target.checked)} />{t('显示已停用/归档')}</label></header><div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2"><SkillError error={library.error || (tab === 'project' && installed.error)} />{(tab === 'project' ? installed.isPending : library.isPending) ? <p role="status" className="p-4 text-sm text-slate-500">{t('正在加载…')}</p> : filtered.length ? filtered.map(item => <button type="button" key={item.code} onClick={() => { setSelected(item.code); setShowDetail(true); setEditor(null); }} aria-pressed={current?.code === item.code} className={`mb-2 block w-full rounded-xl border p-3 text-left ${current?.code === item.code ? 'border-cyan-200 bg-cyan-50' : 'border-transparent hover:bg-slate-50'}`}><div className="flex justify-between gap-2 text-xs text-slate-500"><span>{t(skillEntryStatus(item))}</span><span>r{item.installation?.revision ?? item.skill?.current_revision}</span></div><h3 className="mt-2 break-words text-sm font-semibold">{item.installation?.alias ?? item.name}{item.scope_type === 'platform' && <span className="ml-2 text-xs font-normal text-cyan-700">{t('平台内置技能')}</span>}</h3><p className="mt-1 line-clamp-2 break-words text-xs leading-5 text-slate-500">{item.description}</p>{item.installation && item.installation.available_revisions.some(value => value > (item.installation?.revision ?? Infinity)) && <span className="mt-2 block text-xs text-cyan-700">{t('有可用新版本')}</span>}</button>) : <p className="p-6 text-center text-sm text-slate-500">{t('暂无匹配技能')}</p>}</div></aside>
       <div className={`min-w-0 space-y-4 ${!showDetail ? 'hidden xl:block' : ''}`}><button type="button" className="ui-button ui-button-secondary xl:hidden" onClick={() => setShowDetail(false)}>← {t('返回技能列表')}</button>
         {current && !filtered.includes(current) && <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">{t('当前查看历史技能，列表已隐藏停用或归档项。')}</p>}
         {current?.installation && <section className="rounded-xl border border-slate-200 bg-white p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div className="min-w-0"><h3 className="break-words text-sm font-semibold">{t('项目采用')} · {current.installation.alias} · r{current.installation.revision}</h3><p className={`mt-1 text-xs ${current.installation.blocked ? 'text-amber-700' : 'text-slate-500'}`}>{t(current.installation.blocked ? '来源授权已失效或范围不再满足要求，无法下载或用于新执行。' : current.installation.enabled ? '已启用；通过 tsp 同步到本机。' : '已停用；不会包含在下一次同步清单中。')}</p></div>{installed.data?.can_manage && current.installation.enabled && <button type="button" className="ui-button ui-button-secondary" disabled={disable.isPending} onClick={() => { if (current.installation) disable.mutate(current.installation); }}>{t('停用')}</button>}</div></section>}
-        {current?.installation?.blocked ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-900">{t('此引用保留版本和摘要供追溯，内容不再交付。请联系源管理员恢复授权，或由项目管理员停用。')}</div> : detail.error ? <div className="rounded-xl border border-slate-200 bg-white p-5"><SkillError error={detail.error} /><button type="button" className="ui-button ui-button-secondary mt-3" onClick={() => void detail.refetch()}>{t('重试')}</button></div> : current && detail.isPending ? <p role="status" className="rounded-xl border border-slate-200 bg-white p-8 text-sm text-slate-500">{t('正在加载…')}</p> : displayed ? <SkillContentReader key={`${displayed.code}:${displayed.current_revision}:${projectContext ?? ''}`} skill={displayed} initialRevision={current?.installation?.revision} projectSkills={installed.data} installation={current?.installation} busy={action.isPending} onEdit={() => setEditor('revise')} onInstall={() => setEditor('install')} onAction={(kind, value) => { if (kind === 'share') setEditor('share'); else if (kind === 'publish') action.mutate({ action: kind, code: displayed.code, value }); else setConfirmation({ action: kind, value: typeof value === 'string' ? value : undefined }); }} /> : <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">{t('从列表选择技能，或创建第一个技能包。')}</div>}
-        {project && <details className="rounded-xl border border-slate-200 bg-white p-4"><summary className="cursor-pointer text-sm font-semibold">{t('本机同步命令')}</summary><div className="mt-3"><CopyCommand command={`tsp skill sync --project ${project.code} --check\ntsp skill sync --project ${project.code}`} /></div></details>}
+        {current?.installation?.blocked ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-900">{t('此引用保留版本和摘要供追溯，内容不再交付。请联系源管理员恢复授权，或由项目管理员停用。')}</div> : detail.error ? <div className="rounded-xl border border-slate-200 bg-white p-5"><SkillError error={detail.error} /><button type="button" className="ui-button ui-button-secondary mt-3" onClick={() => void detail.refetch()}>{t('重试')}</button></div> : current && detail.isPending ? <p role="status" className="rounded-xl border border-slate-200 bg-white p-8 text-sm text-slate-500">{t('正在加载…')}</p> : displayed ? <SkillContentReader key={`${displayed.code}:${displayed.current_revision}:${projectContext ?? ''}`} skill={displayed} initialRevision={current?.installation?.revision} projectSkills={installed.data} installation={currentInstallation} busy={action.isPending} onEdit={() => setEditor('revise')} onInstall={() => setEditor('install')} onAction={(kind, value) => { if (kind === 'share') setEditor('share'); else if (kind === 'publish') action.mutate({ action: kind, code: displayed.code, value }); else setConfirmation({ action: kind, value: typeof value === 'string' ? value : undefined }); }} /> : <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">{t('从列表选择技能，或创建第一个技能包。')}</div>}
+        {tab === 'project' && project && <details className="rounded-xl border border-slate-200 bg-white p-4"><summary className="cursor-pointer text-sm font-semibold">{t('本机同步命令')}</summary><div className="mt-3"><CopyCommand command={`tsp skill sync --project ${project.code} --check\ntsp skill sync --project ${project.code}`} /></div></details>}
       </div>
     </div>}
     {editor === 'create' && canCreate && scopeCode && <SkillEditor scope={scope} scopeCode={scopeCode} onClose={() => setEditor(null)} onSaved={saved} />}
     {editor === 'revise' && displayed?.can_edit && displayed.scope_type !== 'platform' && <SkillEditor scope={displayed.scope_type} scopeCode={displayed.scope_code} initial={displayed} onClose={() => setEditor(null)} onSaved={saved} />}
     {editor === 'share' && displayed?.can_manage && <SkillShareEditor skill={displayed} onClose={() => setEditor(null)} onSaved={refresh} />}
-    {editor === 'install' && displayed && installed.data?.can_manage && <SkillInstallEditor skill={displayed} current={current?.installation} projectSkills={installed.data} onClose={() => setEditor(null)} onSaved={refresh} />}
+    {editor === 'install' && displayed && installed.data?.can_manage && <SkillInstallEditor skill={displayed} current={currentInstallation} projectSkills={installed.data} onClose={() => setEditor(null)} onSaved={refresh} />}
     {confirmation && displayed?.can_manage && <WorkspaceDialog id="skill-action" title={t(confirmation.action === 'revoke' ? '撤销共享' : displayed.archived ? '恢复技能' : '归档技能')} description={t(confirmation.action === 'revoke' || !displayed.archived ? '新同步和新执行会重新检查授权；已有本机副本无法远程收回，历史版本和审计仍然保留。' : '恢复后仍按原有授权范围和固定版本交付。')} onClose={() => setConfirmation(null)}><SkillError error={action.error} /><div className="mt-4 flex justify-end gap-2"><button type="button" className="ui-button ui-button-secondary" onClick={() => setConfirmation(null)}>{t('取消')}</button><button type="button" className="ui-button ui-button-danger" disabled={action.isPending} onClick={() => action.mutate({ ...confirmation, code: displayed.code, archived: displayed.archived })}>{t('确认')}</button></div></WorkspaceDialog>}
   </>;
 }

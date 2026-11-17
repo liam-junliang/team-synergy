@@ -17,10 +17,11 @@
 
 路由 `/agent/connect` 和 `/agent/skills`，通过明确的团队/项目选择保存上下文。提供「返回项目」操作并恢复原页面。无团队身份但有项目权限的外部协作者也能进入，不强迫先加入团队。
 
-技能库按当前工作范围展示：
+技能库将技能源和项目采用分开，默认进入平台内置：
 
-- **项目已启用**：该项目自己的技能，以及从团队或其他范围选用的固定版本。显示来源、已用版本、可用新版、启用状态和本机同步说明。
-- **团队技能**：该团队拥有的技能；不混入成员能看到的其他团队私有资料。
+- **平台内置**：登录账号无需团队、项目或本机绑定即可发现、阅读已发布版本，下载包含来源、修订及哈希的完整 JSON 包。项目参数过期、无权或非法时，仍可浏览内置目录。
+- **团队与项目自建**：按明确的团队或项目归属展示自有技能；不混入成员能看到的其他范围私有资料。
+- **项目采用**：仅列所选项目主动采用的固定版本。显示来源、已用版本、可用新版、启用状态和本机同步说明；采用不转移所有权，也不会自动升级。
 - **共享给我**：明确授权给当前团队或项目的技能。这里表示当前范围可使用的共享资源，不新建个人技能库。
 
 来源信息与可用新版只显示已授权内容，不能通过技能详情枚举其他团队的私有项目或未共享版本。第一版不提供全局使用项目清单。
@@ -33,7 +34,7 @@ CLI 接入页复用现有认证和项目绑定能力，不建立第二套账号�
 
 四件事需要各自清楚：
 
-1. **归属**：谁维护这个技能。第一版支持团队或项目二选一的归属范围。
+1. **归属**：谁维护这个技能。自建包支持团队或项目二选一的归属范围；平台内置包由仓库发布流程维护，普通账号只读。
 2. **共享**：哪些其他团队或项目有权读取和采用它。
 3. **项目采用**：某项目选中了哪个已发布版本，是否启用。
 4. **本机同步**：CLI 把项目选定版本放到当前工作区，供本机 Agent 读取。
@@ -98,6 +99,15 @@ flowchart LR
 已实现命令（编码使用平台公开编码）：
 
 ```sh
+# 平台内置：账号认证，无需项目绑定；导出只写入指定的新目录
+tsp skill catalog --platform
+tsp skill search "reverse-project-docs" --platform
+tsp skill show SKILL_CODE --platform --revision 1
+tsp skill export SKILL_CODE --revision 1 --directory ./released-skill
+# CLI 与 MCP 共用分页契约；不选项目，不执行脚本
+tsp tools call list_platform_skills --input '{}'
+tsp tools call read_platform_skill --input '{"skill":"SKILL_CODE","revision":1}'
+
 tsp skill list --project PROJECT_CODE
 tsp skill catalog --team TEAM_CODE
 tsp skill search "review" --project PROJECT_CODE
@@ -176,3 +186,11 @@ skills.sh Packs 的链接持有人无需认证即可查看/安装，官方明确
 6. 路径穿越/解压边界、脚本不自动运行、凭据不进包、普通技能声明不能扩大实际权限。
 
 迁移 `0036_skills.sql` 仅增加技能相关表，保留已有项目资料和历史版本。技能管理员继续使用团队/项目既有角色，不迁移现有成员角色。
+
+## 平台内置发布与无项目读取（2026-11-17）
+
+`skills/reverse-project-docs/` 是平台发布源，构建产物进入已有不可变 release/revision 注册；同版本内容改变仍须拒绝。TencentDB Agent Memory 只是相关项目知识的检索投影，不决定技能版本或归属，也不是读取内置包的前提。
+
+账号级 API 使用 `GET /skills/platform`、`GET /skills/platform/:code` 和 `GET /skills/platform/reader`；仅返回已发布平台来源，不能用团队私包编码绕过权限。CLI `--platform` 不能与 `--team/--project` 混用；MCP 的 `list_platform_skills/read_platform_skill` 不接受项目上下文。未登录 MCP 仍可初始化和列工具，实际读取返回登录指引；登录账号变化要求重建会话。
+
+JSON 下载保留完整文件、发布版本、修订、来源及哈希，供阅读与归档；导出目录保留原始包文件。导出不是项目采用或宿主全局安装，不写项目锁、AGENTS.md 或宿主配置，不执行包内脚本。项目 `skill list/sync`、固定 Run 与授权撤销继续沿用原接口。

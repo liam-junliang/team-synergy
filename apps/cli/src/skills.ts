@@ -1,11 +1,11 @@
 import type { Command } from 'commander';
 import { DomainError } from '@team-synergy/domain';
 import type { ProjectSkillManifest, ProjectSkills, SkillDetail } from '@team-synergy/contracts';
-import { lstatSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, mkdirSync, mkdtempSync, writeFileSync, renameSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import type { ApiResult, createApiClient } from './api-client.js';
 import { identifyBoundProject } from './project-binding.js';
-import { assertSkillPathAncestors, readSkillDirectory, syncSkillManifest, validateSkillFiles } from './skill-sync.js';
+import { assertSkillPathAncestors, readSkillDirectory, syncSkillManifest, validateSkillFiles, skillPackageHash } from './skill-sync.js';
 
 interface Context {
   requireApiClient: () => ReturnType<typeof createApiClient>;
@@ -65,29 +65,64 @@ export function registerSkillCommands(program: Command, context: Context): void 
     skill.command(action === 'search' ? 'search <query>' : 'catalog')
       .description('读取当前范围自有或获授权的技能目录；不会列出其他团队私有技能')
       .option('--team <team_code>', '团队范围').option('--project <project_code>', '项目范围；默认当前目录绑定')
+      .option('--platform', '平台内置目录；仅需账号登录，不解析项目绑定')
       .option('--view <view>', 'owned / available / shared', 'available').option('--query <query>', '名称和说明关键词')
       .action((...args: unknown[]) => run(async () => {
         const opts = args[action === 'search' ? 1 : 0] as Options;
-        const selected = await scope(opts);
+        if (opts.platform && (text(opts, 'team') || text(opts, 'project'))) throw new DomainError('skill_scope_invalid', '--platform 不能同时指定团队或项目');
+        const selected = opts.platform ? undefined : await scope(opts);
         const view = text(opts, 'view') ?? 'available';
         if (!['owned', 'available', 'shared'].includes(view)) throw new DomainError('skill_argument_invalid', '--view 必须是 owned / available / shared');
-        const query = new URLSearchParams({ [`${selected.scope_type}_code`]: selected.scope_code, view });
+        const query = new URLSearchParams(selected ? { [`${selected.scope_type}_code`]: selected.scope_code, view } : {});
         const term = action === 'search' ? args[0] as string : text(opts, 'query');
         if (term !== undefined) query.set('q', term);
-        return call('GET', `/skills?${query}`);
+        return call('GET', `${opts.platform ? '/skills/platform' : '/skills'}?${query}`);
       }));
   }
   skill.command('show <skill_code>').description('读取已授权技能及文件；项目外部成员只读项目交付版本')
+    .option('--platform', '直接读取平台发布版本，不解析项目绑定')
     .option('--revision <revision>', '仅返回指定版本').option('--project <project_code>', '通过项目交付授权读取')
     .action((value: string, opts: Options) => run(async () => {
       const selected = text(opts, 'revision') === undefined ? undefined : integer(text(opts, 'revision'), 'revision');
-      const projectCode = text(opts, 'project') ?? identifyBoundProject(process.cwd())?.binding.project_code;
+      if (opts.platform && text(opts, 'project')) throw new DomainError('skill_scope_invalid', '--platform 不能同时指定项目');
+      const projectCode = opts.platform ? undefined : text(opts, 'project') ?? identifyBoundProject(process.cwd())?.binding.project_code;
       const query = projectCode ? `?project_code=${code(projectCode)}` : '';
-      const detail = unwrap(await call<SkillDetail>('GET', `/skills/${code(value)}${query}`));
+      const detail = unwrap(await call<SkillDetail>('GET', `/skills/${opts.platform ? 'platform/' : ''}${code(value)}${query}`));
       if (selected === undefined) return { ok: true, data: detail };
       const revision = detail.revisions.find(item => item.revision === selected);
       if (!revision) throw new DomainError('skill_revision_not_found', '此版本不存在或当前身份没有读取授权');
       return { ok: true, data: { ...detail, selected_revision: selected, revisions: [revision] } };
+    }));
+  skill.command('export <skill_code>').description('导出确切的已发布平台版本到新目录；不绑定项目、不执行脚本')
+    .requiredOption('--revision <revision>', '固定修订号').requiredOption('--directory <directory>', '不存在的新目录；父目录须存在')
+    .action((value: string, opts: Options) => run(async () => {
+      const selected = integer(text(opts, 'revision'), 'revision');
+      const detail = unwrap(await call<SkillDetail>('GET', `/skills/platform/${code(value)}`));
+      const revision = detail.revisions.find(row => row.revision === selected);
+      if (detail.code !== value || detail.scope_type !== 'platform' || !revision?.published_at) throw new DomainError('skill_revision_not_found', '此平台修订不存在或尚未发布');
+      const files = validateSkillFiles(revision.files);
+      if (skillPackageHash(files) !== revision.package_sha256) throw new DomainError('skill_package_invalid', '技能包摘要校验失败');
+      const destination = path.resolve(text(opts, 'directory') ?? '');
+      assertSkillPathAncestors(destination);
+      if (existsSync(destination)) throw new DomainError('skill_export_conflict', '导出目录已存在，已保留原内容');
+      const parent = path.dirname(destination);
+      if (!lstatSync(parent).isDirectory()) throw new DomainError('skill_directory_invalid', '导出父目录必须是普通目录');
+      const stage = mkdtempSync(path.join(parent, '.skill-export-'));
+      try {
+        for (const file of files) {
+          const target = path.join(stage, ...file.path.split('/'));
+          mkdirSync(path.dirname(target), { recursive: true });
+          writeFileSync(target, Buffer.from(file.content_base64, 'base64'), { flag: 'wx', mode: 0o600 });
+        }
+        assertSkillPathAncestors(destination);
+        if (existsSync(destination)) throw new DomainError('skill_export_conflict', '导出目录已存在，已保留原内容');
+        renameSync(stage, destination);
+      } finally {
+        assertSkillPathAncestors(stage);
+        if (path.dirname(stage) === parent && existsSync(stage)) rmSync(stage, { recursive: true });
+      }
+      return { ok: true, data: { skill_code: detail.code, revision: selected, release_version: revision.release_version,
+        scope_type: 'platform', package_sha256: revision.package_sha256, directory: destination, files: files.length } };
     }));
   for (const action of ['create', 'revise'] as const) {
     const command = skill.command(action === 'create' ? action : 'revise <skill_code>')

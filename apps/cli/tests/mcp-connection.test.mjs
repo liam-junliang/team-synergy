@@ -55,6 +55,10 @@ async function fixture(t, { auth = true, bound } = {}) {
     if (!['Bearer device-token-1', 'Bearer device-token-2'].includes(req.headers.authorization)) {
       res.statusCode = 401; res.end(JSON.stringify({ ok: false, error: { code: 'login_required', message: 'Login required' } })); return;
     }
+    if (url.pathname === '/skills/platform/reader') {
+      answer(url.searchParams.has('skill') ? { skill_code: sourceA, revision: 1, scope_type: 'platform', content: 'Platform-only guide' }
+        : { items: [{ skill_code: sourceA, revision: 1, scope_type: 'platform' }], total: 1, nextOffset: null }); return;
+    }
     if (url.pathname === '/auth/whoami') { answer({ user_code: 'member', account: 'member', display_name: 'Member', status: 'active' }); return; }
     if (url.pathname === '/memory/personal') {
       const origin = url.searchParams.get('projectCode'), status = url.searchParams.get('status') ?? 'active';
@@ -154,6 +158,7 @@ test('unbound and unauthenticated MCP initializes, discovers tools and provides 
   const tools = (await client.rpc('tools/list')).result.tools;
   for (const name of ['get_connection_context', 'list_projects', 'read_code_catalog']) assert.ok(tools.some(tool => tool.name === name), name);
   assert.equal(tools.find(tool => tool.name === 'get_connection_context').annotations.readOnlyHint, true);
+  toolError(await client.call('list_platform_skills', {}), /login_required/u);
   const context = parseContent(await client.call('get_connection_context', {}));
   assert.match(JSON.stringify(context), /login|登录/iu);
   assert.equal(f.requests.length, 0);
@@ -291,4 +296,19 @@ test('selected project personal lists include cross-origin account preferences a
   assert.deepEqual(sourceRequests[0].body.sources, [personalAccount.revisionSource, personalProject.revisionSource]);
   assert.deepEqual(f.requests.filter(request => request.path === '/memory/personal').map(request => request.query), [{ status: 'active' }]);
   f.assertUnbound();
+});
+
+test('global built-in tools use account authentication without resolving even a malformed startup project', async t => {
+  const f = await fixture(t), client = await f.mcp(['--project', 'invalid-project']);
+  const tools = (await client.rpc('tools/list')).result.tools;
+  assert.equal('projectCode' in tools.find(tool => tool.name === 'list_platform_skills').inputSchema.properties, false);
+  const [catalog] = parseContent(await client.call('list_platform_skills', {}));
+  assert.equal(catalog.items[0].scope_type, 'platform');
+  const input = { skill: sourceA, revision: 1 };
+  const cliRead = (await f.command(['tools', 'call', 'read_platform_skill', '--input', JSON.stringify(input)])).json();
+  assert.deepEqual(parseContent(await client.call('read_platform_skill', input)), [JSON.parse(cliRead.data.content[0].text)]);
+  assert.ok(f.requests.every(request => request.path === '/skills/platform/reader'));
+  f.assertUnbound();
+  f.writeAuth('device-token-2');
+  toolError(await client.call('list_platform_skills', {}), /memory_binding_changed/u);
 });

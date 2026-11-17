@@ -6,7 +6,7 @@ import { t } from './i18n';
 import { useLocale } from './useLocale';
 import { DeviceAuthorization } from './DeviceAuthorization';
 import { CliInstaller } from './CliInstaller';
-import { SkillsWorkbench } from './SkillsWorkbench';
+import { SkillsWorkbench, type SkillLibraryTab } from './SkillsWorkbench';
 import { CopyCommand, SkillError } from './SkillShared';
 import { clientConnectionUrls, cliLoginCommand, getPlatformClientConfig, PLATFORM_CLIENT_CONFIG_QUERY_KEY } from './platformClientConfig';
 
@@ -98,11 +98,27 @@ export function AgentWorkspace({ route, user }: { route: WorkspaceRoute; user: A
   return <AgentLibraryWorkspace route={route} user={user} />;
 }
 
+export function skillLibraryContextPath(route: WorkspaceRoute, view: SkillLibraryTab) {
+  const path = agentWorkspacePath('skills', route);
+  return path + (path.includes('?') ? '&' : '?') + 'skill_view=' + view;
+}
+
 function AgentLibraryWorkspace({ route, user }: { route: WorkspaceRoute; user: AuthUser }) {
+  const requestedView = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('skill_view');
+  const initialTab: SkillLibraryTab = requestedView === 'owned' || requestedView === 'shared' || requestedView === 'project' ? requestedView : 'platform';
+
   const projects = useQuery({ queryKey: ['projects', 'agent', user.code], queryFn: () => listProjects() });
   const teams = useQuery({ queryKey: ['teams'], queryFn: listTeams });
   const project = projects.data?.find(item => item.code === route.projectCode);
   // Only explicit team membership provides a team-library context. External project membership does not.
-  const team = teams.data?.find(item => item.code === route.teamCode) ?? teams.data?.find(item => item.code === project?.team_code) ?? (!route.projectCode && !route.teamCode ? teams.data?.[0] : undefined);
-  return <main className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-slate-50"><section className="mx-auto max-w-[1440px] p-4 sm:p-6"><header className="mb-6 flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-bold tracking-[0.16em] text-cyan-700">AGENT WORKSPACE</p><h1 className="mt-1 text-2xl font-bold text-slate-950">{t(route.agentTab === 'skills' ? '技能库' : 'Agent 接入')}</h1><p className="mt-2 text-sm text-slate-500">{t(route.agentTab === 'skills' ? '管理可用技能、项目固定版本和本机同步。' : '安装并授权 CLI，通过终端或 MCP 让 Agent 访问项目资料、代码背景与记忆。')}</p></div>{route.agentTab === 'skills' && <label className="text-xs font-medium text-slate-600">{t('团队范围')}<select aria-label={t('团队范围')} className="form-control ml-2 max-w-56" value={team?.code ?? ''} onChange={event => navigateWorkspace(agentWorkspacePath('skills', { ...route, teamCode: event.target.value || undefined }))}><option value="">{t('无团队范围')}</option>{teams.data?.map(item => <option key={item.code} value={item.code}>{item.name}</option>)}</select></label>}</header><SkillError error={projects.error || teams.error} />{route.projectCode && projects.isSuccess && !project ? <SkillError error={t('无法访问所选项目，请切换到有权限的项目。')} /> : projects.isPending || teams.isPending ? <p role="status" className="p-6 text-sm text-slate-500">{t('正在加载…')}</p> : route.agentTab === 'skills' ? <SkillsWorkbench key={`${project?.code ?? ''}:${team?.code ?? ''}`} project={project} team={team} /> : <CliConnectionGuide user={user} project={project} />}</section></main>;
+  const team = teams.data?.find(item => item.code === route.teamCode) ?? (!route.teamCode ? teams.data?.find(item => item.code === project?.team_code) : undefined);
+  const projectIssue = route.projectCode && projects.isSuccess && !project ? t('无法访问所选项目，请切换到有权限的项目。') : undefined;
+  return <main className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-slate-50"><section className="mx-auto max-w-[1440px] p-4 sm:p-6">
+    <header className="mb-6"><p className="text-xs font-bold tracking-[0.16em] text-cyan-700">AGENT WORKSPACE</p><h1 className="mt-1 text-2xl font-bold text-slate-950">{t(route.agentTab === 'skills' ? '技能库' : 'Agent 接入')}</h1><p className="mt-2 text-sm text-slate-500">{t(route.agentTab === 'skills' ? '管理可用技能、项目固定版本和本机同步。' : '安装并授权 CLI，通过终端或 MCP 让 Agent 访问项目资料、代码背景与记忆。')}</p></header>
+    <SkillError error={projects.error || teams.error} />
+    {route.agentTab === 'skills' ? <SkillsWorkbench key={user.code} initialTab={initialTab} project={project} team={team} projects={projects.data} teams={teams.data} projectIssue={projectIssue}
+      onProjectChange={(code, view) => navigateWorkspace(skillLibraryContextPath({ ...route, projectCode: code || undefined }, view))}
+      onTeamChange={(code, view) => navigateWorkspace(skillLibraryContextPath({ ...route, teamCode: code || undefined }, view))} /> : projectIssue ? <SkillError error={projectIssue} /> : <CliConnectionGuide user={user} project={project} />}
+  </section></main>;
+
 }

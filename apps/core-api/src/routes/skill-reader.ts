@@ -7,7 +7,7 @@ interface ReaderQuery { run?: string; skill?: string; revision?: number; path?: 
 const code = { type: 'string', pattern: '^[0-9A-HJKMNP-TV-Z]{20}$' };
 const rejected = (code: string, message: string) => ({ ok: false, error: { code, message } });
 
-function readPage(manifest: ProjectSkillManifest, query: ReaderQuery) {
+function readPage(manifest: Pick<ProjectSkillManifest, 'skills'> & Partial<Pick<ProjectSkillManifest, 'project_code' | 'generation'>>, query: ReaderQuery) {
   const { project_code, generation, skills } = manifest;
   const offset = query.offset ?? 0;
   if (!query.skill) {
@@ -32,7 +32,8 @@ function readPage(manifest: ProjectSkillManifest, query: ReaderQuery) {
     if (bytes.includes(0)) throw new Error('binary');
     content = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   } catch {
-    const download = query.run ? 'tsp skill sync --run ' + query.run : 'tsp skill sync --project ' + project_code;
+    const download = query.run ? 'tsp skill sync --run ' + query.run : project_code ? 'tsp skill sync --project ' + project_code
+      : `tsp skill export ${entry.skill_code} --revision ${entry.revision} --directory ./skill-package`;
     return { ok: true, data: { ...info, encoding: 'binary', download, nextOffset: null } };
   }
   const points = Array.from(content);
@@ -43,6 +44,32 @@ function readPage(manifest: ProjectSkillManifest, query: ReaderQuery) {
 
 /** Keep complete package bytes inside the API when the caller only needs a listing or one text page. */
 export function registerSkillReader(app: FastifyInstance, uc: ReturnType<typeof createSkillsUseCases>) {
+  app.get<{ Querystring: ReaderQuery }>('/skills/platform/reader', {
+    schema: { querystring: { type: 'object', additionalProperties: false, properties: {
+      skill: code, revision: { type: 'integer', minimum: 1 }, path: { type: 'string', minLength: 1, maxLength: 240 },
+      offset: { type: 'integer', minimum: 0, maximum: 6291456 }, limit: { type: 'integer', minimum: 1, maximum: 8000 },
+    } } },
+  }, async (request, reply) => {
+    if (!request.principal) return unauthorized(reply);
+    const principalCode = request.principal, query = request.query;
+    if (!query.skill) {
+      if (query.revision || query.path) return rejected('skill_invalid', '读取文件需要指定技能与修订');
+      const result = await uc.listPlatformSkills({ principalCode });
+      if (!result.ok) return result;
+      const offset = query.offset ?? 0, limit = Math.min(query.limit ?? 30, 50);
+      return { ok: true, data: { total: result.data.length, items: result.data.slice(offset, offset + limit).map(skill => ({
+        skill_code: skill.code, revision: skill.current_revision, name: skill.name, description: skill.description,
+        scope_type: skill.scope_type, scope_code: skill.scope_code, release_version: skill.release_version,
+      })), nextOffset: offset + limit < result.data.length ? offset + limit : null } };
+    }
+    const result = await uc.getSkill({ principalCode, code: query.skill, source: 'platform' });
+    if (!result.ok) return result;
+    const revision = result.data.revisions.find(row => row.revision === query.revision);
+    if (!revision) return rejected('skill_revision_not_found', '此平台修订不存在或尚未发布');
+    return readPage({ skills: [{ skill_code: result.data.code, revision: revision.revision, alias: revision.name,
+      name: revision.name, description: revision.description, scope_type: 'platform', scope_code: 'platform',
+      package_sha256: revision.package_sha256, release_version: revision.release_version, files: revision.files }] }, query);
+  });
   app.get<{ Params: { project_code: string }; Querystring: ReaderQuery }>('/projects/:project_code/skills/reader', {
     schema: { querystring: { type: 'object', additionalProperties: false, properties: {
       run: code, skill: code, revision: { type: 'integer', minimum: 1 }, path: { type: 'string', minLength: 1, maxLength: 240 },

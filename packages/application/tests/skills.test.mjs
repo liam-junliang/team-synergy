@@ -47,6 +47,9 @@ test('a platform release survives concurrent restarts, user name collisions, pro
   const actor = { principalCode: c.targetOwner.code, projectCode: c.targetProject.code };
   const catalog = data(await c.uc.listSkills({ ...actor, view: 'available' }));
   assert.equal(catalog.find(skill => skill.code === released.skill_code).scope_type, 'platform');
+  assert.deepEqual(data(await c.uc.listPlatformSkills({ principalCode: c.outsider.code })).map(skill => skill.code), [released.skill_code]);
+  assert.equal(data(await c.uc.getSkill({ principalCode: c.outsider.code, code: released.skill_code, source: 'platform' })).can_edit, false);
+
   const builtin = data(await c.uc.getSkill({ ...actor, code: released.skill_code }));
   assert.equal(builtin.owner_user_code, null);
   assert.equal(builtin.revisions[0].created_by_user_code, null);
@@ -56,6 +59,7 @@ test('a platform release survives concurrent restarts, user name collisions, pro
   rejected(await c.uc.publishSkill({ ...actor, code: builtin.code, revision: 1 }), 'skill_forbidden');
   const custom = data(await c.uc.createSkill({ ...actor, input: { scope_type: 'project', scope_code: actor.projectCode, files: files('custom', first.name) } }));
   assert.notEqual(custom.code, builtin.code);
+  rejected(await c.uc.getSkill({ principalCode: c.targetOwner.code, code: custom.code, source: 'platform' }), 'skill_not_found');
   data(await c.uc.publishSkill({ ...actor, code: custom.code, revision: 1 }));
   data(await c.install(custom, { alias: first.name }));
   rejected(await c.install(builtin, { alias: first.name, base_generation: 1 }), 'skill_alias_conflict');

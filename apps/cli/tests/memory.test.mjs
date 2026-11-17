@@ -326,7 +326,29 @@ test('MCP resolves callers from the device and keeps personal queries scoped', a
   assert.equal(r.code, 0);
   const replies = r.out.trim().split('\n').map(line => JSON.parse(line));
   assert.deepEqual(replies.map(r => r.id), [1, 2, 3, 4]);
-  assert.deepEqual(replies[1].result.tools.slice(0, 8).map(t => t.name), ['get_connection_context', 'list_projects', 'search_memory', 'read_memory_brief', 'read_memory_source', 'read_memory_document', 'list_personal_memories', 'read_personal_memory']);
+  const tools = replies[1].result.tools;
+  const contracts = {
+    get_connection_context: [[], []],
+    list_projects: [['query', 'limit'], []],
+    search_memory: [['query', 'scope', 'context_receipt', 'projectCode'], ['query']],
+    read_memory_brief: [['scope', 'context_receipt', 'projectCode'], ['scope']],
+    read_memory_source: [['source', 'context_receipt', 'projectCode'], ['source']],
+    read_memory_document: [['source', 'offset', 'limit', 'query', 'occurrence', 'projectCode'], ['source']],
+    list_personal_memories: [['status', 'projectCode'], []],
+    read_personal_memory: [['source', 'projectCode'], ['source']],
+    list_platform_skills: [['offset', 'limit'], []],
+    read_platform_skill: [['skill', 'revision', 'path', 'offset', 'limit'], ['skill', 'revision']],
+  };
+  for (const [name, [properties, required]] of Object.entries(contracts)) {
+    const matching = tools.filter(tool => tool.name === name);
+    assert.equal(matching.length, 1, name);
+    const tool = matching[0];
+    assert.equal(tool.inputSchema.type, 'object', name);
+    assert.equal(tool.inputSchema.additionalProperties, false, name);
+    assert.deepEqual(Object.keys(tool.inputSchema.properties).sort(), properties.toSorted(), name);
+    assert.deepEqual((tool.inputSchema.required ?? []).toSorted(), required.toSorted(), name);
+    assert.equal(tool.annotations.readOnlyHint, true, name);
+  }
   assert.deepEqual(JSON.parse(replies[2].result.content[0].text), [{ state: 'discussion' }]);
   assert.equal(replies[3].error.code, -32602);
   assert.deepEqual(f.queries, [{ query: '中文', scope: 'personal' }]);

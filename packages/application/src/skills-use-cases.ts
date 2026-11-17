@@ -63,15 +63,30 @@ export function createSkillsUseCases(db: Db) {
     for (const row of shares) grants.push(await shareDto(tx, row));
     return { ...meta, revisions, shares: grants };
   }
-  function getSkill(cmd: Actor & { code: string; projectCode?: string }) {
+  function getSkill(cmd: Actor & { code: string; projectCode?: string; source?: 'platform' }) {
     return result(async () => { const principal = await skillPrincipal(db, cmd.principalCode); return db.transaction(async tx => {
       const [user] = await tx.select().from(schema.users).where(eq(schema.users.id, principal.id)).for('share');
       if (!user || user.status !== 'active' || user.deleted_at) throw new DomainError('skill_forbidden', '当前身份不能访问技能库');
       const initial = await skillByCode(tx, cmd.code);
+      if (cmd.source === 'platform' && initial.scope_type !== 'platform') throw new DomainError('skill_not_found', '平台内置技能不存在');
       await lockSkillReadScopes(tx, initial, principal.id, cmd.projectCode);
       await tx.select({ id: schema.skills.id }).from(schema.skills).where(eq(schema.skills.code, cmd.code)).for('share');
       return detail(tx, cmd.code, principal.id, cmd.projectCode);
     }); });
+  }
+  function listPlatformSkills(cmd: Actor & { query?: string }) {
+    return result(async () => {
+      const principal = await skillPrincipal(db, cmd.principalCode);
+      const rows = await db.select().from(schema.skills).where(eq(schema.skills.scope_type, 'platform')).orderBy(desc(schema.skills.updated_at));
+      const output: SkillSummary[] = [];
+      for (const skill of rows) {
+        const visible = await skillVisibleRevisions(db, skill, principal.id);
+        if (!visible.length) continue;
+        const item = await summary(db, skill, principal.id, visible);
+        if (!cmd.query || `${item.code} ${item.name} ${item.description}`.toLowerCase().includes(cmd.query.trim().toLowerCase())) output.push(item);
+      }
+      return output;
+    });
   }
   function listSkills(cmd: Catalog) {
     return result(async () => {
@@ -282,5 +297,5 @@ export function createSkillsUseCases(db: Db) {
       return resolveRunSkillManifest(tx, { runId: run.id, principalId: principal.id });
     }); });
   }
-  return { listSkills, getSkill, createSkill, reviseSkill, publishSkill, archiveSkill, shareSkill, revokeShare, listProjectSkills, installSkill, getProjectManifest, getRunManifest };
+  return { listPlatformSkills, listSkills, getSkill, createSkill, reviseSkill, publishSkill, archiveSkill, shareSkill, revokeShare, listProjectSkills, installSkill, getProjectManifest, getRunManifest };
 }
