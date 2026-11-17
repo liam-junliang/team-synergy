@@ -1,0 +1,96 @@
+# Linux-only host networking. Every service listens on loopback, not the public NIC.
+name: team-synergy
+services:
+  db:
+    image: ${TSP_POSTGRES_IMAGE:?Set an immutable PostgreSQL 16 image reference}
+    pull_policy: ${TSP_PULL_POLICY:-missing}
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tsp_admin
+      POSTGRES_DB: team_synergy
+      POSTGRES_PASSWORD_FILE: /run/secrets/db-admin-password
+      POSTGRES_INITDB_ARGS: --auth=scram-sha-256
+      PGPORT: ${TSP_DB_PORT:-15432}
+    command: [postgres, -p, '${TSP_DB_PORT:-15432}', -c, listen_addresses=127.0.0.1, -c, max_connections=40, -c, shared_buffers=64MB]
+    secrets: [db-password, db-admin-password]
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./init-db.sh:/docker-entrypoint-initdb.d/10-team-synergy.sh:ro
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -h 127.0.0.1 -p "$${PGPORT}" -U tsp -d team_synergy']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: &logging
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+  migrate:
+    image: ${TSP_API_IMAGE:?Set an immutable API image reference}
+    pull_policy: ${TSP_PULL_POLICY:-missing}
+    network_mode: host
+    command: [migrate]
+    environment: &api-environment
+      NODE_ENV: production
+      HOST: 127.0.0.1
+      PORT: ${TSP_API_PORT:-8080}
+      TSP_DB_PORT: ${TSP_DB_PORT:-15432}
+      TSP_AUTO_MIGRATE: 'false'
+      ACP_ALLOW_LEGACY_IDENTITY: '0'
+      TSP_WEB_ORIGIN: ${TSP_WEB_ORIGIN:?Set the exact browser origin}
+      TSP_MEMORY_ENABLED: ${TSP_MEMORY_ENABLED:-0}
+      TSP_CODE_ANALYSIS_ENABLED: ${TSP_CODE_ANALYSIS_ENABLED:-0}
+      TSP_SYSTEM_AGENT_ENABLED: ${TSP_SYSTEM_AGENT_ENABLED:-0}
+      TSP_SYSTEM_AGENT_WORKSPACE_ROOT: /var/lib/team-synergy/system-agent
+      TSP_CODE_ANALYSIS_ROOT: /var/lib/team-synergy/code-analysis
+      ACP_CLI_DIST_DIR: /opt/team-synergy/cli-distribution
+    secrets: [db-password]
+    depends_on:
+      db: {condition: service_healthy}
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging: *logging
+  api:
+    image: ${TSP_API_IMAGE:?Set an immutable API image reference}
+    pull_policy: ${TSP_PULL_POLICY:-missing}
+    network_mode: host
+    restart: unless-stopped
+    env_file: ['${TSP_CONFIG_DIR:?Set an absolute private config directory}/api.env']
+    environment: *api-environment
+    secrets: [db-password]
+    volumes:
+      - runtime-data:/var/lib/team-synergy
+      - ${TSP_CONFIG_DIR}/runtime:/run/team-synergy:ro
+      - ${TSP_CLI_DIST_DIR:?Set an absolute CLI release directory}:/opt/team-synergy/cli-distribution:ro
+    depends_on:
+      db: {condition: service_healthy}
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging: *logging
+  web:
+    image: ${TSP_WEB_IMAGE:?Set an immutable Web image reference}
+    pull_policy: ${TSP_PULL_POLICY:-missing}
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      TSP_API_PORT: ${TSP_API_PORT:-8080}
+      TSP_WEB_PORT: ${TSP_WEB_PORT:-8088}
+    depends_on:
+      api: {condition: service_healthy}
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging: *logging
+secrets:
+  db-password:
+    file: ${TSP_CONFIG_DIR}/db-password
+  db-admin-password:
+    file: ${TSP_CONFIG_DIR}/db-admin-password
+volumes:
+  pg-data:
+  runtime-data:

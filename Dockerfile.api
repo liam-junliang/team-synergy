@@ -1,0 +1,28 @@
+# syntax=docker/dockerfile:1
+ARG NODE_IMAGE=node:22.23.5-bookworm-slim
+FROM ${NODE_IMAGE} AS build
+WORKDIR /source
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+COPY . .
+RUN --mount=type=cache,id=tsp-pnpm,target=/pnpm/store \
+    pnpm install --frozen-lockfile --store-dir=/pnpm/store
+RUN pnpm --filter @team-synergy/core-api... build \
+    && pnpm --filter @team-synergy/core-api deploy --prod --legacy /release
+
+FROM ${NODE_IMAGE} AS runtime
+ARG SOURCE_REVISION=unknown
+LABEL org.opencontainers.image.source="https://github.com/liam-junliang/team-synergy" \
+      org.opencontainers.image.revision="${SOURCE_REVISION}"
+ENV NODE_ENV=production HOST=127.0.0.1 PORT=8080 TSP_AUTO_MIGRATE=false
+WORKDIR /app
+COPY --from=build --chown=node:node /release/package.json ./package.json
+COPY --from=build --chown=node:node /release/node_modules ./node_modules
+COPY --from=build --chown=node:node /release/dist ./dist
+COPY --chown=node:node deploy/containers/api-entrypoint.mjs ./container-entrypoint.mjs
+RUN mkdir -p /var/lib/team-synergy/system-agent /var/lib/team-synergy/code-analysis /opt/team-synergy/cli-distribution \
+    && chown -R node:node /var/lib/team-synergy
+USER node
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=6 \
+  CMD node --input-type=module -e "try { const r=await fetch('http://127.0.0.1:'+process.env.PORT+'/ready'); process.exit(r.ok?0:1); } catch { process.exit(1); }"
+ENTRYPOINT ["node", "/app/container-entrypoint.mjs"]
+CMD ["serve"]

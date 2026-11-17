@@ -1,0 +1,199 @@
+name: Platform containers
+
+on:
+  pull_request:
+    paths: ['Dockerfile.*', '.dockerignore', 'deploy/containers/**', 'scripts/deploy-linux.sh', 'scripts/tests/deployment.test.mjs', '.github/workflows/deploy.yml']
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: platform-containers-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'main' }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.gate.outputs.build }}
+      publish: ${{ steps.gate.outputs.publish }}
+      sha: ${{ steps.gate.outputs.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - id: gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node deploy/containers/workflow-gate.mjs
+
+  build:
+    needs: gate
+    if: needs.gate.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          persist-credentials: false
+      - name: Deployment guard tests
+        run: node --test scripts/tests/deployment.test.mjs
+      - name: Build exact source and PostgreSQL 16 bundle
+        env:
+          SOURCE_SHA: ${{ needs.gate.outputs.sha }}
+        run: |
+          docker build --build-arg SOURCE_REVISION="$SOURCE_SHA" -f Dockerfile.api -t "tsp-api:$SOURCE_SHA" .
+          docker build --build-arg SOURCE_REVISION="$SOURCE_SHA" -f Dockerfile.web -t "tsp-web:$SOURCE_SHA" .
+          docker pull postgres:16-bookworm
+          docker tag postgres:16-bookworm "tsp-postgres:$SOURCE_SHA"
+      - name: Export verifiable offline bundle
+        env:
+          SOURCE_SHA: ${{ needs.gate.outputs.sha }}
+        run: |
+          mkdir -p bundle/deployment
+          node deploy/containers/bundle-images.mjs "$SOURCE_SHA" bundle
+          docker save "tsp-api:$SOURCE_SHA" "tsp-web:$SOURCE_SHA" "tsp-postgres:$SOURCE_SHA" | gzip > bundle/images.tar.gz
+          cp deploy/containers/compose.yaml deploy/containers/init-db.sh deploy/containers/*.example deploy/containers/verify-loaded-images.mjs scripts/deploy-linux.sh bundle/deployment/
+          cp docs/83-server-deployment-and-migration.md bundle/deployment/
+          (cd bundle && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: platform-images-${{ needs.gate.outputs.sha }}
+          path: bundle/
+          compression-level: 0
+          retention-days: 14
+
+  import-smoke:
+    needs: [gate, build]
+    runs-on: ubuntu-latest
+    if: needs.gate.outputs.build == 'true'
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: platform-images-${{ needs.gate.outputs.sha }}
+          path: bundle
+      - name: Verify and import archive on a fresh runner
+        env:
+          SOURCE_SHA: ${{ needs.gate.outputs.sha }}
+        run: |
+          (cd bundle && sha256sum --check SHA256SUMS)
+          docker load --input bundle/images.tar.gz
+          node deploy/containers/verify-loaded-images.mjs bundle/release.json "$SOURCE_SHA"
+      - name: Smoke actual loaded immutable image IDs
+        env:
+          SOURCE_SHA: ${{ needs.gate.outputs.sha }}
+        run: bash deploy/containers/smoke.sh "$SOURCE_SHA"
+
+  publish:
+    needs: [gate, build, import-smoke]
+    if: github.event_name != 'pull_request' && needs.gate.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+    outputs:
+      api: ${{ steps.publish.outputs.api }}
+      web: ${{ steps.publish.outputs.web }}
+      postgres: ${{ steps.publish.outputs.postgres }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          persist-credentials: false
+      - name: Recheck candidate is current verified main
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          GITHUB_OUTPUT="$RUNNER_TEMP/recheck" node deploy/containers/workflow-gate.mjs
+          grep -qx 'publish=true' "$RUNNER_TEMP/recheck"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: platform-images-${{ needs.gate.outputs.sha }}
+          path: bundle
+      - name: Verify and load build output
+        run: |
+          (cd bundle && sha256sum --check SHA256SUMS)
+          docker load --input bundle/images.tar.gz
+      - id: publish
+        env:
+          SOURCE_SHA: ${{ needs.gate.outputs.sha }}
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: |
+          prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          for role in api web postgres; do
+            remote="$prefix-$role:$SOURCE_SHA"
+            docker tag "tsp-$role:$SOURCE_SHA" "$remote"
+            docker push "$remote"
+            ref=$(docker image inspect "$remote" --format '{{json .RepoDigests}}' | node -e 'let s="";process.stdin.on("data",x=>s+=x);process.stdin.on("end",()=>{const r=JSON.parse(s).find(x=>x.startsWith(process.argv[1]+"@sha256:"));if(!r)process.exit(1);process.stdout.write(r)})' "$prefix-$role")
+            echo "$role=$ref" >> "$GITHUB_OUTPUT"
+          done
+          docker logout ghcr.io
+
+  deploy:
+    needs: [gate, publish]
+    if: github.event_name != 'pull_request' && needs.gate.outputs.publish == 'true' && vars.TSP_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          persist-credentials: false
+      - name: Verify current main again before SSH
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          GITHUB_OUTPUT="$RUNNER_TEMP/recheck" node deploy/containers/workflow-gate.mjs
+          grep -qx 'publish=true' "$RUNNER_TEMP/recheck"
+      - name: Deploy immutable images with dedicated SSH identity
+        env:
+          SOURCE_SHA: ${{ needs.gate.outputs.sha }}
+          API_IMAGE: ${{ needs.publish.outputs.api }}
+          WEB_IMAGE: ${{ needs.publish.outputs.web }}
+          POSTGRES_IMAGE: ${{ needs.publish.outputs.postgres }}
+          DEPLOY_HOST: ${{ secrets.TSP_DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.TSP_DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.TSP_DEPLOY_USER }}
+          DEPLOY_KEY: ${{ secrets.TSP_DEPLOY_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.TSP_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+$ && "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ && "$DEPLOY_USER" != root ]]
+          port="${DEPLOY_PORT:-22}"
+          [[ "$port" =~ ^[0-9]{1,5}$ ]] && ((10#$port >= 1 && 10#$port <= 65535))
+          [[ -n "$DEPLOY_KEY" && -n "$DEPLOY_KNOWN_HOSTS" ]]
+          umask 077
+          printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/deploy-key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/known-hosts"
+          ssh-keygen -l -f "$RUNNER_TEMP/known-hosts" >/dev/null
+          ssh -T -i "$RUNNER_TEMP/deploy-key" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/known-hosts" "$DEPLOY_USER@$DEPLOY_HOST" "deploy $SOURCE_SHA $API_IMAGE $WEB_IMAGE $POSTGRES_IMAGE"
+      - name: Remove ephemeral SSH material
+        if: always()
+        run: rm -f -- "$RUNNER_TEMP/deploy-key" "$RUNNER_TEMP/known-hosts"
+
+  delivery-note:
+    needs: [gate, publish]
+    if: github.event_name != 'pull_request' && needs.gate.outputs.publish == 'true' && vars.TSP_DEPLOY_ENABLED != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Verified images published. Remote deployment is not enabled; no server or user data was migrated.' >> "$GITHUB_STEP_SUMMARY"
