@@ -50,7 +50,7 @@ export function DefectsWorkbench({ projectCode, projectId }: { projectCode?: str
   const activeProjectCode = projectCode ?? projectId ?? '';
   const { canWrite, canManage } = useProjectAccess(activeProjectCode);
   const queryClient = useQueryClient();
-  const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]['value']>('active');
+  const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]['value']>('all');
   const [severityFilter, setSeverityFilter] = useState('');
   const [search, setSearch] = useState('');
   const [selectedCode, setSelectedCode] = useState<string | null>(null);

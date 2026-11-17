@@ -105,7 +105,7 @@ export function PersonalMemoryDetails({ value, onEdit, onWithdraw }: {
 export function PersonalMemoryWorkbench({ ownerCode, initialProject }: { ownerCode: string; initialProject?: string }) {
   useLocale();
   const client = useQueryClient();
-  const [status, setStatus] = useState<PersonalMemoryFilter>('active');
+  const [status, setStatus] = useState<PersonalMemoryFilter>('all');
   const [selected, setSelected] = useState<string | null>(null);
   const [operation, setOperation] = useState<{ kind: 'edit' | 'withdraw'; source: string } | null>(null);
   const [message, setMessage] = useState('');
