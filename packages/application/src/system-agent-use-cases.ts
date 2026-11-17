@@ -9,6 +9,7 @@ import {
 import { assertProjectAccess, isProjectManager, type AccessDb } from './project-access.js';
 import { createPublicCode } from './public-code.js';
 import { insertAudit, now, type TaskResult } from './task-service.js';
+import { enqueueProjectDocumentMemory } from './project-document-memory.js';
 
 type Job = typeof schema.systemAgentJobs.$inferSelect;
 type Document = typeof schema.projectDocuments.$inferSelect;
@@ -203,8 +204,10 @@ export function createSystemAgentUseCases(db: Db) {
         const timestamp = now();
         const changeSummary = `采用系统 Agent 修改稿 ${job.code}：${job.instruction.slice(0, 500)}`;
         await tx.update(schema.projectDocuments).set({ title: proposal.title, summary: proposal.summary, content: proposal.content, revision, updated_by: job.requester_id, updated_at: timestamp }).where(eq(schema.projectDocuments.id, document.id));
-        await tx.insert(schema.projectDocumentRevisions).values({ code: createPublicCode(), document_id: document.id, revision, title: proposal.title, summary: proposal.summary,
-          content: proposal.content, change_summary: changeSummary, created_by: job.requester_id, created_at: timestamp });
+        const [storedRevision] = await tx.insert(schema.projectDocumentRevisions).values({ code: createPublicCode(), document_id: document.id, revision, title: proposal.title, summary: proposal.summary,
+          content: proposal.content, change_summary: changeSummary, created_by: job.requester_id, created_at: timestamp }).returning({ id: schema.projectDocumentRevisions.id });
+        if (!storedRevision) throw error('internal_error', '文档修订创建失败');
+        await enqueueProjectDocumentMemory(tx, storedRevision.id);
         const [updated] = await tx.update(schema.systemAgentJobs).set({ status: 'applied', applied_revision: revision, applied_by: job.requester_id, updated_at: timestamp }).where(eq(schema.systemAgentJobs.id, job.id)).returning();
         if (!updated) throw error('system_agent_job_not_found', '任务不存在');
         await insertAudit(tx, toAuditEvent({ entity_type: 'project_document', entity_id: document.id, principal_id: job.requester_id, base_snapshot: job.base_revision,

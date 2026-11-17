@@ -1,0 +1,3 @@
+interface:
+  display_name: "源码逆向与企业项目资料"
+  short_description: "从固定源码推导分模块需求、交互原型、系统设计和可核验的验收资料"

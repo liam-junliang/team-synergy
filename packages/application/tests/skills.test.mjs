@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { and, eq } from 'drizzle-orm';
 import { schema } from '@team-synergy/persistence';
-import { createSkillsUseCases, normalizeSkillPackage, captureRunSkills, resolveRunSkillManifest, copyRunSkills } from '../dist/index.js';
+import { createSkillsUseCases, ensurePlatformSkillRelease, normalizeSkillPackage, captureRunSkills, resolveRunSkillManifest, copyRunSkills } from '../dist/index.js';
 import { addProjectMember, addTeamMember, insertFeature, insertProject, insertTeam, insertUser, seedWorkspaceProject, useTestDb } from './test-db.mjs';
 
 const fixture = useTestDb(import.meta.url);
@@ -34,6 +34,51 @@ async function setup() {
   async function install(skill, extra = {}) { return uc.installSkill({ code: skill.code, projectCode: targetProject.code, principalCode: targetOwner.code, input: { revision: 1, alias: 'api-review', enabled: true, base_generation: 0, ...extra } }); }
   return { db, ...seeded, outsider, targetOwner, targetTeam, targetProject, uc, base, published, grant, install };
 }
+
+test('a platform release survives concurrent restarts, user name collisions, project upgrades and old Run pins', async () => {
+  const pack = (version, reference) => normalizeSkillPackage([
+    file('SKILL.md', `---\nname: reverse-project-docs\ndescription: Reconstruct project documents\nmetadata:\n  version: ${version}\n---\nSee references/contracts.md`),
+    file('references/contracts.md', reference), file('scripts/check.py', 'print("check")'),
+  ]);
+  const first = pack('1.0.0', 'first reference');
+  const [released, restart] = await Promise.all([ensurePlatformSkillRelease(fixture.db, first), ensurePlatformSkillRelease(fixture.db, first)]);
+  assert.deepEqual(restart, released);
+  const c = await setup();
+  const actor = { principalCode: c.targetOwner.code, projectCode: c.targetProject.code };
+  const catalog = data(await c.uc.listSkills({ ...actor, view: 'available' }));
+  assert.equal(catalog.find(skill => skill.code === released.skill_code).scope_type, 'platform');
+  const builtin = data(await c.uc.getSkill({ ...actor, code: released.skill_code }));
+  assert.equal(builtin.owner_user_code, null);
+  assert.equal(builtin.revisions[0].created_by_user_code, null);
+  assert.equal(builtin.revisions[0].release_version, '1.0.0');
+  assert.equal(builtin.can_manage, false);
+  rejected(await c.uc.reviseSkill({ ...actor, code: builtin.code, input: { base_revision: 1, change_summary: 'alter', files: first.files } }), 'skill_forbidden');
+  rejected(await c.uc.publishSkill({ ...actor, code: builtin.code, revision: 1 }), 'skill_forbidden');
+  const custom = data(await c.uc.createSkill({ ...actor, input: { scope_type: 'project', scope_code: actor.projectCode, files: files('custom', first.name) } }));
+  assert.notEqual(custom.code, builtin.code);
+  data(await c.uc.publishSkill({ ...actor, code: custom.code, revision: 1 }));
+  data(await c.install(custom, { alias: first.name }));
+  rejected(await c.install(builtin, { alias: first.name, base_generation: 1 }), 'skill_alias_conflict');
+  data(await c.install(builtin, { alias: 'platform-reverse-docs', base_generation: 1 }));
+  const feature = await insertFeature(c.db, { projectId: c.targetProject.id, title: 'Reverse docs' });
+  const [task] = await c.db.insert(schema.tasks).values({ feature_id: feature.id, title: 'Capture', profile: 'builder', source: 'ad-hoc', status: 'draft', acceptance: '[]', base_snapshot: 0, created_at: '2026-11-12T00:00:00Z' }).returning();
+  const [run] = await c.db.insert(schema.runs).values({ task_id: task.id, principal_id: c.targetOwner.id, profile: 'builder', status: 'suspended', workspace_id: 1n, base_snapshot: 0, started_at: '2026-11-12T00:00:00Z' }).returning();
+  await c.db.transaction(tx => captureRunSkills(tx, { projectId: c.targetProject.id, principalId: c.targetOwner.id, runId: run.id }));
+  const newer = pack('1.1.0', 'new reference');
+  const upgraded = await ensurePlatformSkillRelease(c.db, newer);
+  assert.equal(upgraded.revision, 2);
+  assert.deepEqual(await ensurePlatformSkillRelease(c.db, first), released);
+  assert.deepEqual(await ensurePlatformSkillRelease(c.db, pack('0.9.0', 'older binary')), upgraded);
+  await assert.rejects(ensurePlatformSkillRelease(c.db, pack('1.1.0', 'different content')), /版本的内容已改变/);
+  const pinned = data(await c.uc.getProjectManifest(actor)).skills.find(skill => skill.skill_code === builtin.code);
+  assert.equal(pinned.package_sha256, first.package_sha256);
+  data(await c.install(builtin, { alias: 'platform-reverse-docs', revision: 2, base_generation: 2 }));
+  assert.equal(data(await c.uc.getProjectManifest(actor)).skills.find(skill => skill.skill_code === builtin.code).package_sha256, newer.package_sha256);
+  const oldRun = await c.db.transaction(tx => resolveRunSkillManifest(tx, { principalId: c.targetOwner.id, runId: run.id }));
+  const oldSkill = oldRun.skills.find(skill => skill.skill_code === builtin.code);
+  assert.equal(oldSkill.release_version, '1.0.0');
+  assert.deepEqual(oldSkill.files, first.files);
+});
 
 test('package validation fixes hashes and rejects traversal, case collisions, malformed metadata and oversize', () => {
   const pack = normalizeSkillPackage(files()); assert.equal(pack.files.length, 2); assert.equal(pack.name, 'api-review');

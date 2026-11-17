@@ -57,12 +57,17 @@ const skillScope = `FROM public.skills s
  LEFT JOIN public.teams st ON s.scope_type='team' AND st.id=s.scope_id
  LEFT JOIN public.projects sp ON s.scope_type='project' AND sp.id=s.scope_id
  LEFT JOIN public.teams spt ON spt.id=sp.team_id`;
-const sourceTeam = 'coalesce(st.code,spt.code)';
+const skillSourceColumns = 's.code AS skill_code,s.scope_type,coalesce(st.code,spt.code) AS source_team_code,sp.code AS source_project_code';
 const sourceScope = (row: Record<string, unknown>) => ({
   skill_code: code(row.skill_code), source_team_code: code(row.source_team_code),
   source_project_code: code(row.source_project_code),
+  ...(row.scope_type === 'platform' ? { source_scope_type: 'platform' as const } : {}),
 });
-const relation = (source: string | null, target: string | null) => !source || !target ? 'unresolved_scope' : source === target ? 'same_team' : 'different_teams_customer_unknown';
+function relation(scope: ReturnType<typeof sourceScope>, target: string | null) {
+  if (target && scope.source_scope_type === 'platform') return 'platform_release';
+  if (!scope.source_team_code || !target) return 'unresolved_scope';
+  return scope.source_team_code === target ? 'same_team' : 'different_teams_customer_unknown';
+}
 function versions(value: unknown): number[] | null {
   if (typeof value !== 'string') return null;
   try {
@@ -96,10 +101,10 @@ export async function planTenantMapping(db: Pick<Db, '$client'>) {
       project_code: code(row.project_code), team_code: code(row.team_code), external_members: count(row.external_members), external_owner: row.external_owner === true,
       tenant_key: null, mapping_status: 'pending',
     }));
-    const skills = (await bounded(client, `SELECT s.code AS skill_code,${sourceTeam} AS source_team_code,sp.code AS source_project_code ${skillScope} ORDER BY s.code`)).map(sourceScope);
+    const skills = (await bounded(client, `SELECT ${skillSourceColumns} ${skillScope} ORDER BY s.code`)).map(sourceScope);
     const revisionRows = await bounded(client, 'SELECT s.code AS skill_code,r.revision,r.published_at IS NOT NULL AS published FROM public.skill_revisions r LEFT JOIN public.skills s ON s.id=r.skill_id ORDER BY s.code,r.revision');
     const published = new Set(revisionRows.filter(row => row.skill_code !== null && row.published === true).map(row => `${code(row.skill_code)}:${row.revision}`));
-    const shares = (await bounded(client, `SELECT sh.code AS share_code,s.code AS skill_code,${sourceTeam} AS source_team_code,sp.code AS source_project_code,
+    const shares = (await bounded(client, `SELECT sh.code AS share_code,${skillSourceColumns},
       coalesce(tt.code,tpt.code) AS target_team_code,tp.code AS target_project_code,
       CASE WHEN octet_length(sh.revisions_json)<=65536 THEN sh.revisions_json ELSE NULL END AS revisions_json,
       sh.revoked_at IS NOT NULL AS revoked,sh.allow_external,sh.allow_projects
@@ -110,16 +115,16 @@ export async function planTenantMapping(db: Pick<Db, '$client'>) {
       return { share_code: code(row.share_code), ...scope, target_team_code: target, target_project_code: code(row.target_project_code),
         revisions: selected, versions_valid_and_published: scope.skill_code !== null && selected !== null && selected.every(revision => published.has(`${scope.skill_code}:${revision}`)),
         revoked: row.revoked === true, allow_external: row.allow_external === true, allow_projects: row.allow_projects === true,
-        team_relation: relation(scope.source_team_code, target), customer_mapping: 'pending', recipient_acceptance: 'not_recorded_in_legacy_model' };
+        team_relation: relation(scope, target), customer_mapping: 'pending', recipient_acceptance: 'not_recorded_in_legacy_model' };
     });
     const revisions = new Set(revisionRows.filter(row => row.skill_code !== null).map(row => `${code(row.skill_code)}:${row.revision}`));
-    const installations = (await bounded(client, `SELECT p.code AS project_code,t.code AS target_team_code,s.code AS skill_code,${sourceTeam} AS source_team_code,sp.code AS source_project_code,i.revision,i.enabled
+    const installations = (await bounded(client, `SELECT p.code AS project_code,t.code AS target_team_code,${skillSourceColumns},i.revision,i.enabled
       FROM public.project_skill_installations i LEFT JOIN public.projects p ON p.id=i.project_id LEFT JOIN public.teams t ON t.id=p.team_id
       LEFT JOIN public.skills s ON s.id=i.skill_id LEFT JOIN public.teams st ON s.scope_type='team' AND st.id=s.scope_id LEFT JOIN public.projects sp ON s.scope_type='project' AND sp.id=s.scope_id LEFT JOIN public.teams spt ON spt.id=sp.team_id
       ORDER BY p.code,s.code`)).map(row => {
       const scope = sourceScope(row), target = code(row.target_team_code);
       return { project_code: code(row.project_code), ...scope, target_team_code: target, revision: count(row.revision), enabled: row.enabled === true,
-        revision_exists: scope.skill_code !== null && revisions.has(`${scope.skill_code}:${row.revision}`), team_relation: relation(scope.source_team_code, target), customer_mapping: 'pending', recipient_acceptance: 'not_inferred_from_installation' };
+        revision_exists: scope.skill_code !== null && revisions.has(`${scope.skill_code}:${row.revision}`), team_relation: relation(scope, target), customer_mapping: 'pending', recipient_acceptance: 'not_inferred_from_installation' };
     });
     // Deliberately never read/parse payload, result_json or historical manifest contents.
     const audit = (await client.query<{ family: string; rows: string }>(`SELECT CASE
@@ -137,7 +142,7 @@ export async function planTenantMapping(db: Pick<Db, '$client'>) {
       fact_digest: createHash('sha256').update(JSON.stringify(facts)).digest('hex'), ...facts,
       issues: {
         unresolved_project_teams: projects.filter(row => !row.team_code).length,
-        unresolved_skill_scopes: skills.filter(row => !row.source_team_code).length,
+        unresolved_skill_scopes: skills.filter(row => !row.source_team_code && row.source_scope_type !== 'platform').length,
         orphaned_skill_revisions: revisionRows.filter(row => row.skill_code === null).length,
         unresolved_share_scopes: shares.filter(row => row.team_relation === 'unresolved_scope').length,
         invalid_or_unpublished_share_versions: shares.filter(row => !row.versions_valid_and_published).length,

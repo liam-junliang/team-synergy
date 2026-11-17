@@ -3,6 +3,7 @@ import type { Db } from '@team-synergy/persistence';
 import { createSkillsUseCases } from '@team-synergy/application';
 import type { SkillCreateInput, SkillInstallInput, SkillReviseInput, SkillShareInput } from '@team-synergy/contracts';
 import { unauthorized } from '../auth.js';
+import { registerSkillReader } from './skill-reader.js';
 
 const text = { type: 'string' }; const version = { type: 'integer', minimum: 1 }; const scope = { enum: ['team', 'project'] };
 const files = { type: 'array', minItems: 1, maxItems: 200, items: { type: 'object', additionalProperties: false, required: ['path', 'content_base64'], properties: {
@@ -13,6 +14,7 @@ type Code = { code: string };
 type Project = { project_code: string };
 export function registerSkillRoutes(app: FastifyInstance, db: Db) {
   const uc = createSkillsUseCases(db);
+  registerSkillReader(app, uc);
   app.get<{ Querystring: { team_code?: string; project_code?: string; view?: 'owned' | 'available' | 'shared'; q?: string } }>('/skills', async (request, reply) => {
     if (!request.principal) return unauthorized(reply);
     return uc.listSkills({ principalCode: request.principal, teamCode: request.query.team_code, projectCode: request.query.project_code, view: request.query.view, query: request.query.q });

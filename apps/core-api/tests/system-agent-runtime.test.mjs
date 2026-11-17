@@ -9,6 +9,7 @@ import {
   createSystemAgentRuntime, parseSystemAgentProposal, runSystemAgentProtocol,
   systemAgentChildEnvironment, systemAgentProfilePatch, SYSTEM_AGENT_TOOL_GUARD_MODULE,
 } from '../dist/system-agent-runtime.js';
+import { SYSTEM_AGENT_GUIDANCE_MAX_CHARACTERS, SYSTEM_AGENT_GUIDANCE_MAX_SERIALIZED_BYTES } from '../dist/system-agent-guidance.js';
 
 const input = { jobCode: 'JOB1', document: { code: 'DOC1', revision: 3, title: 'Original', summary: '', content: '# Original' }, instruction: 'Clarify acceptance criteria.' };
 const proposal = { title: 'Revised', summary: 'Summary', content: '# Revised\n\nAcceptance.', rationale: 'Clarified acceptance.', evidence: ['document:DOC1@3'], warnings: ['Business owner review required.'] };
@@ -123,7 +124,8 @@ test('configured runtime rejects oversized input before creating a child', async
     await writeFile(join(install, 'lib', 'bin.js'), 'process.exit(99)');
     const runtime = createSystemAgentRuntime({ TSP_SYSTEM_AGENT_ENABLED: 'true', TSP_SYSTEM_AGENT_DSH_BIN: join(install, 'lib', 'bin.js'), TSP_SYSTEM_AGENT_WORKSPACE_ROOT: join(root, 'work'), TSP_SYSTEM_AGENT_API_KEY: 'test-only-key' });
     assert.equal(runtime.status().configured, true);
-    await assert.rejects(runtime.generate({ ...input, guidance: 'x'.repeat(40001) }), error => error.code === 'invalid_input');
+    await assert.rejects(runtime.generate({ ...input, guidance: 'x'.repeat(SYSTEM_AGENT_GUIDANCE_MAX_CHARACTERS + 1) }), error => error.code === 'invalid_input');
+    await assert.rejects(runtime.generate({ ...input, guidance: '中'.repeat(Math.floor(SYSTEM_AGENT_GUIDANCE_MAX_SERIALIZED_BYTES / 3) + 1) }), error => error.code === 'invalid_input');
   } finally { await removeTestDirectory(root); }
 });
 

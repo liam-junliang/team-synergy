@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createSystemAgentWorker } from '../dist/system-agent-worker.js';
 import { loadSystemAgentGuidance } from '../dist/system-agent-guidance.js';
+import { INTAKE_SKILL_VERSION } from '@team-synergy/contracts';
 
 const metadata = { engine: 'dsh', engine_version: 'fixture', model: 'fixture', skill_version: '2.1.0', skill_sha256: 'snapshot-hash' };
 const job = { job_code: 'job', execution_token: 'lease', document_code: 'doc', base_revision: 3, base_title: 'Title', base_summary: 'Summary', base_content: 'Document', instruction: 'Change', quote: 'Document' };
@@ -67,7 +68,7 @@ test('shutdown aborts active work and waits for settlement before releasing the 
 
 test('packaged Skill is present, bounded and hash validated for every server instance', () => {
   const guidance = loadSystemAgentGuidance();
-  assert.equal(guidance.version, '2.1.0');
+  assert.equal(guidance.version, INTAKE_SKILL_VERSION);
   assert.match(guidance.sha256, /^[a-f0-9]{64}$/);
   assert.ok(guidance.guidance.includes('Specification production'));
   assert.ok(guidance.guidance.includes('--- references/specification.md ---'));

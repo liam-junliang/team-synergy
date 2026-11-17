@@ -37,7 +37,7 @@ test('bundled instructions and references exactly match the canonical skill for 
   assert.equal(intakeSkillText('enterprise'), `${source}\n\nThis pack uses the enterprise profile: resolve capability and dossier blockers before publication.\n`);
   const expected = Object.fromEntries(readdirSync(path.join(canonical, 'references')).map(name => [name, read(path.join(canonical, 'references', name))]));
   assert.deepEqual(intakeSkillReferences(), expected);
-  for (const name of ['scope.md', 'increments.md', 'method-sources.md', 'evaluation.schema.json']) assert.ok(expected[name], `Missing workflow resource ${name}`);
+  for (const name of ['scope.md', 'increments.md', 'business-rules.md', 'method-sources.md', 'evaluation.schema.json']) assert.ok(expected[name], `Missing workflow resource ${name}`);
 });
 
 test('relocated distribution reads its own resources and fails clearly for missing or incompatible bundles', async t => {
@@ -54,6 +54,10 @@ test('relocated distribution reads its own resources and fails clearly for missi
   delete missingReference.references['inventory.md'];
   writeFileSync(bundlePath, JSON.stringify(missingReference));
   assert.throws(() => relocatedSkill.intakeSkillReferences(), /Missing reference inventory\.md/);
+  const missingRules = structuredClone(original);
+  delete missingRules.references['business-rules.md'];
+  writeFileSync(bundlePath, JSON.stringify(missingRules));
+  assert.throws(() => relocatedSkill.intakeSkillReferences(), /Missing reference business-rules\.md/);
   rmSync(bundlePath);
   assert.throws(() => relocatedSkill.intakeSkillText(), /Bundled specification skill is unavailable or invalid; rebuild or reinstall the CLI/);
 });

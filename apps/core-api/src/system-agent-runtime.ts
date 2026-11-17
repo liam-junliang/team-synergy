@@ -5,6 +5,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { createRunDirectoryStore } from './system-agent-directories.js';
+import { SYSTEM_AGENT_GUIDANCE_MAX_CHARACTERS, SYSTEM_AGENT_GUIDANCE_MAX_SERIALIZED_BYTES } from './system-agent-guidance.js';
 
 /** Pinned against the official SDK wire protocol and sdk-minimal composition. */
 export const SYSTEM_AGENT_DSH_VERSION = '0.2.1-rc.2';
@@ -116,7 +117,7 @@ export function apply(ctx) {
 
 function promptFor(input: SystemAgentGenerationInput): string {
   const docs = [input.document, ...(input.sources ?? [])];
-  if (!input.jobCode || input.jobCode.length > 128 || !input.instruction?.trim() || input.instruction.length > 8000 || (input.guidance?.length ?? 0) > 40000 || docs.length > 9) fail('invalid_input', '批注、指导资料或参考文档超过本版处理范围。');
+  if (!input.jobCode || input.jobCode.length > 128 || !input.instruction?.trim() || input.instruction.length > 8000 || (input.guidance?.length ?? 0) > SYSTEM_AGENT_GUIDANCE_MAX_CHARACTERS || Buffer.byteLength(JSON.stringify(input.guidance ?? ''), 'utf8') > SYSTEM_AGENT_GUIDANCE_MAX_SERIALIZED_BYTES || docs.length > 9) fail('invalid_input', '批注、指导资料或参考文档超过本版处理范围。');
   for (const doc of docs) {
     if (!doc.code || !Number.isSafeInteger(doc.revision) || doc.revision < 1 || typeof doc.content !== 'string') fail('invalid_input', '文档快照无效。');
   }

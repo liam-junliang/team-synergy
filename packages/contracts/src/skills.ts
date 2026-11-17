@@ -1,13 +1,14 @@
 export type SkillScope = 'team' | 'project';
+export type SkillSourceScope = SkillScope | 'platform';
 export interface SkillFile { path: string; content_base64: string; size_bytes: number; sha256: string }
 export interface SkillFileInput { path: string; content_base64: string; size_bytes?: number; sha256?: string }
 /** Hash is SHA-256 of JSON.stringify(sorted files.map(f => [f.path, f.sha256, f.size_bytes])). */
 export interface SkillPackage { name: string; description: string; files: SkillFile[]; package_sha256: string; size_bytes: number }
-export interface SkillRevision extends SkillPackage { revision: number; change_summary: string; created_at: string; created_by_user_code: string; published_at: string | null }
+export interface SkillRevision extends SkillPackage { revision: number; change_summary: string; created_at: string; created_by_user_code: string | null; published_at: string | null; release_version?: string | null }
 export interface SkillSummary {
-  code: string; scope_type: SkillScope; scope_code: string; name: string; description: string;
+  code: string; scope_type: SkillSourceScope; scope_code: string; name: string; description: string;
   current_revision: number; published_revision: number | null; archived: boolean; updated_at: string;
-  owner_user_code: string; can_edit: boolean; can_manage: boolean; available_revisions: number[];
+  owner_user_code: string | null; can_edit: boolean; can_manage: boolean; available_revisions: number[]; release_version?: string | null;
 }
 export interface SkillShare {
   code: string; target_type: SkillScope; target_code: string; revisions: number[]; allow_projects: boolean;
@@ -20,11 +21,11 @@ export interface SkillShareInput { target_type: SkillScope; target_code: string;
 export interface SkillInstallInput { revision: number; alias: string; enabled: boolean; base_generation: number }
 export interface ProjectSkillInstallation {
   skill_code: string; revision: number; alias: string; enabled: boolean; name: string; description: string;
-  scope_type: SkillScope; scope_code: string; package_sha256: string; available_revisions: number[];
+  scope_type: SkillSourceScope; scope_code: string; package_sha256: string; available_revisions: number[]; release_version?: string | null;
   blocked: boolean; blocked_reason: string | null;
 }
 export interface ProjectSkills { project_code: string; generation: number; can_manage: boolean; installations: ProjectSkillInstallation[] }
-export interface SkillManifestEntry { skill_code: string; revision: number; alias: string; name: string; description: string; scope_type: SkillScope; scope_code: string; package_sha256: string }
+export interface SkillManifestEntry { skill_code: string; revision: number; alias: string; name: string; description: string; scope_type: SkillSourceScope; scope_code: string; package_sha256: string; release_version?: string | null }
 /** Metadata only: safe to retain in Run history. Download must check current grants again. */
 export interface RunSkillManifest { project_code: string; generation: number; skills: SkillManifestEntry[] }
 export interface ProjectSkillManifest extends RunSkillManifest { skills: Array<SkillManifestEntry & { files: SkillFile[] }> }

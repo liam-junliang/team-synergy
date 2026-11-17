@@ -57,7 +57,10 @@ export function registerCliDistributionRoutes(app: FastifyInstance, options: { d
     } catch { return reply.code(503).send({ error: { code: 'cli_distribution_unavailable', message: 'CLI releases have not been published by this platform.' } }); }
   });
   for (const script of ['install.ps1', 'install.sh']) app.get(`/cli/${script}`, async (_request, reply) => {
-    try { return reply.header('Cache-Control', 'no-store').header('X-Content-Type-Options', 'nosniff').type('text/plain; charset=utf-8').send(await readFile(await safeFile(directory, script), 'utf8')); }
+    try {
+      const content = await readFile(await safeFile(directory, script), 'utf8');
+      return reply.header('Cache-Control', 'no-store').header('X-Content-Type-Options', 'nosniff').type('text/plain; charset=utf-8').send(content);
+    }
     catch { return reply.code(503).send({ error: { code: 'cli_distribution_unavailable', message: 'CLI installation scripts have not been published.' } }); }
   });
   app.get<{ Params: { file: string } }>('/cli/releases/:file', async (request, reply) => {

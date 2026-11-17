@@ -3,7 +3,7 @@ import { PublicCodeSchema } from './schemas.js';
 import type { IntakeQualityReport } from './intake-quality.js';
 
 export const INTAKE_MAX_BYTES = 10 * 1024 * 1024;
-export const INTAKE_SKILL_VERSION = '2.1.0';
+export const INTAKE_SKILL_VERSION = '2.2.0';
 export const IntakeKindSchema = z.enum(['module', 'feature', 'requirement_document', 'requirement', 'architecture']);
 export type IntakeKind = z.infer<typeof IntakeKindSchema>;
 export const IntakeProfileSchema = z.enum(['pilot', 'enterprise']);
