@@ -12,12 +12,25 @@ const parents = {
   audit_events: 'principal_id:users run_id:runs',
   auth_security_events: 'principal_id:users',
   command_receipts: 'principal_id:users device_id:devices',
+  code_understanding_runs: 'project_id:projects repository_id:project_repositories created_by:users',
+  code_hosted_analysis_jobs: 'project_id:projects repository_id:project_repositories requester_id:users',
+  code_understanding_views: 'project_id:projects created_by:users',
+  code_understanding_selections: 'project_id:projects selected_by:users',
+  code_understanding_excerpt_budgets: 'project_id:projects',
+  memory_capture_jobs: 'project_id:projects principal_id:users',
+  memory_capture_receipts: 'project_id:projects principal_id:users topic_id:requirement_topics requirement_id:requirements',
+  memory_fragments: 'receipt_id:memory_capture_receipts entry_id:requirement_topic_entries adopted_from_id:memory_fragments root_id:memory_fragments supersedes_id:memory_fragments withdrawn_by:users',
+  memory_projection_jobs: 'fragment_id:memory_fragments project_document_revision_id:project_document_revisions material_index_id:project_material_index_versions',
+  project_memory_bindings: 'project_id:projects updated_by:users',
+  project_material_index_events: 'project_id:projects',
+  project_material_index_versions: 'project_id:projects',
   context_edges: 'snapshot_id:context_graph_snapshots from_node_id:context_nodes to_node_id:context_nodes',
   context_graph_snapshots: 'graph_id:context_graphs',
   context_graphs: 'project_id:projects',
   context_nodes: 'snapshot_id:context_graph_snapshots',
   context_snapshots: 'project_id:projects task_id:tasks source_run_id:runs created_by:users',
   defects: 'feature_id:features reported_by:users related_requirement:requirements',
+  defect_evidence_files: 'defect_id:defects',
   design_prototype_requirements: 'prototype_id:design_prototypes requirement_id:requirements',
   design_prototype_revisions: 'prototype_id:design_prototypes created_by:users',
   design_prototypes: 'project_id:projects owner_principal_id:users',
@@ -108,6 +121,11 @@ for (const [table, column, discriminator] of [['skills', 'scope_id', 'scope_type
 const sameScope = (table: string, column: string, target: string, scope = 'project_id', targetScope = scope) => rule(`${table}.${column}.same_${scope}`,
   `SELECT count(*)::text AS count FROM ${identifier(table)} s JOIN ${identifier(target)} p ON p.id=s.${identifier(column)} WHERE s.${identifier(scope)} IS DISTINCT FROM p.${identifier(targetScope)}`, `${table}.${column}`);
 const scopeRules = [
+  sameScope('code_understanding_runs','repository_id','project_repositories'),
+  sameScope('code_hosted_analysis_jobs','repository_id','project_repositories'),
+  rule('code_hosted_analysis_jobs.run_code', 'SELECT count(*)::text AS count FROM code_hosted_analysis_jobs j WHERE j.run_code IS NOT NULL AND NOT EXISTS (SELECT 1 FROM code_understanding_runs r WHERE r.code=j.run_code)', 'code_hosted_analysis_jobs.run_code'),
+  rule('code_hosted_analysis_jobs.run_code.same_project', 'SELECT count(*)::text AS count FROM code_hosted_analysis_jobs j JOIN code_understanding_runs r ON r.code=j.run_code WHERE j.project_id<>r.project_id OR j.repository_id<>r.repository_id OR j.requester_id<>r.created_by', 'code_hosted_analysis_jobs.run_code'),
+  rule('code_understanding_selections.view_code.same_project', 'SELECT count(*)::text AS count FROM code_understanding_selections s JOIN code_understanding_views v ON v.code=s.view_code WHERE s.project_id<>v.project_id OR s.kind<>v.kind', 'code_understanding_selections.view_code'),
   ...['overview_document_id','guide_document_id','standards_document_id'].map(column => rule(`projects.${column}.same_project`, `SELECT count(*)::text AS count FROM projects s JOIN project_documents p ON p.id=s.${column} WHERE s.id<>p.project_id`, `projects.${column}`)),
   sameScope('project_document_folders','parent_id','project_document_folders'),
   sameScope('project_documents','folder_id','project_document_folders'),
@@ -156,11 +174,12 @@ const runProject = `SELECT r.id,t.project_id FROM runs r JOIN (${taskProject}) t
 const projectScopes: Record<string,string> = {
   projects: 'SELECT id,id AS project_id FROM projects', requirements: requirementProject, tasks: taskProject, runs: runProject,
 };
-for (const table of ['project_repositories','project_workspaces','project_document_folders','project_documents','system_agent_jobs',
+for (const table of ['project_repositories','project_workspaces','project_document_folders','project_documents','system_agent_jobs','code_hosted_analysis_jobs',
   'project_modules','project_phases','project_milestones','requirement_documents','requirement_ideas','requirement_topics','design_prototypes',
   'architecture_documents','features','requirement_baselines','context_snapshots','artifacts','context_graphs','test_cases','test_assets',
-  'test_executions','intake_batches','intake_bindings','project_skill_installations']) projectScopes[table] = `SELECT id,project_id FROM ${table}`;
+  'test_executions','intake_batches','intake_bindings','project_skill_installations','memory_capture_jobs','memory_capture_receipts','project_memory_bindings']) projectScopes[table] = `SELECT id,project_id FROM ${table}`;
 for (const [table,column,target] of [
+  ['memory_fragments','receipt_id','memory_capture_receipts'],['memory_projection_jobs','fragment_id','memory_fragments'],
   ['project_document_revisions','document_id','project_documents'],['requirement_document_revisions','document_id','requirement_documents'],
   ['architecture_document_revisions','document_id','architecture_documents'],['design_prototype_revisions','prototype_id','design_prototypes'],
   ['requirement_topic_entries','topic_id','requirement_topics'],['requirement_topic_ideas','topic_id','requirement_topics'],
@@ -177,6 +196,10 @@ for (const [table,column,target] of [
 ] as const) {
   projectScopes[table] = `SELECT DISTINCT s.${['requirement_topic_ideas','requirement_topic_documents','design_prototype_requirements','requirement_baseline_items','task_dependencies','requirement_document_review_votes'].includes(table) ? column : 'id'} AS id,p.project_id FROM ${table} s JOIN (${projectScopes[target]}) p ON p.id=s.${column}`;
 }
+// The single memory outbox owns exactly one of the two native source kinds.
+projectScopes.memory_projection_jobs = `SELECT j.id,coalesce(f.project_id,d.project_id) AS project_id FROM memory_projection_jobs j
+  LEFT JOIN (${projectScopes.memory_fragments}) f ON f.id=j.fragment_id
+  LEFT JOIN (${projectScopes.project_document_revisions}) d ON d.id=j.project_document_revision_id`;
 for (const [table,fields] of Object.entries(parents)) for (const field of fields.split(' ').filter(Boolean)) {
   const [column='',target=''] = field.split(':');
   if (!projectScopes[table] || !projectScopes[target]) continue;
