@@ -29,9 +29,9 @@ const memory = (changes = {}) => ({
 function renderWorkbench(owner, value, options = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
   if (value) {
-    client.setQueryData(api.personalMemoryListKey(owner, 'active', options.project), { items: [value], truncated: false });
+    client.setQueryData(api.personalMemoryListKey(owner, 'all', options.project), { items: [value], truncated: false });
     client.setQueryData(api.personalMemoryDetailKey(owner, value.source), value);
-  } else if (options.empty) client.setQueryData(api.personalMemoryListKey(owner, 'active'), { items: [], truncated: false });
+  } else if (options.empty) client.setQueryData(api.personalMemoryListKey(owner, 'all'), { items: [], truncated: false });
   try { return renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(ui.PersonalMemoryWorkbench, { ownerCode: options.renderOwner ?? owner, initialProject: options.project }))); }
   finally { client.clear(); }
 }
@@ -67,13 +67,43 @@ test('details keep ownership and applicability distinct and expose source, revis
 test('private caches are owner-scoped and empty/loading states remain usable', () => {
   assert.doesNotMatch(renderWorkbench('ALICE', memory(), { renderOwner: 'BOB' }), /我偏好先说明原因/);
   assert.match(renderWorkbench('ALICE', null), /正在读取个人记忆/);
-  assert.match(renderWorkbench('ALICE', null, { empty: true }), /这里还没有记忆/);
+  const empty = renderWorkbench('ALICE', null, { empty: true });
+  assert.match(empty, /这里还没有记忆/);
+  assert.match(empty, /<option value="all" selected="">全部记忆<\/option>/);
   const html = renderToStaticMarkup(createElement(ui.PersonalMemoryDetails, {
     value: memory({ status: 'withdrawn', projection: { status: 'synced', operation: 'delete', generation: 3, cleanupPending: false } }), onEdit() {}, onWithdraw() {},
   }));
   assert.match(html, /这条记忆已停用/);
   assert.match(html, /编辑并恢复/);
   assert.doesNotMatch(html, />撤回<|共享检索可用/);
+});
+
+test('fresh personal memory defaults to all and switches active and withdrawn records without crossing owners', () => {
+  const owner = 'FILTER-OWNER', active = memory(), withdrawn = memory({ source: 'MEMORY-WITHDRAWN', status: 'withdrawn', text: '已撤回的个人偏好' });
+  const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
+  for (const [status, items] of [['all', [active, withdrawn]], ['active', [active]], ['withdrawn', [withdrawn]]]) {
+    client.setQueryData(api.personalMemoryListKey(owner, status), { items, truncated: false });
+  }
+  for (const item of [active, withdrawn]) client.setQueryData(api.personalMemoryDetailKey(owner, item.source), item);
+  const statuses = ['all', 'active', 'withdrawn', 'all'];
+  const rows = [[active, withdrawn], [active], [withdrawn], [active, withdrawn]];
+  let stage = 0;
+  function FilterProbe() {
+    const tree = ui.PersonalMemoryWorkbench({ ownerCode: owner });
+    const nodes = elements(tree);
+    const select = nodes.find(node => node.type === 'select' && node.props['aria-label'] === '记忆状态');
+    assert.equal(select.props.value, statuses[stage]);
+    const listed = nodes.filter(node => node.type === 'button' && typeof node.props['aria-pressed'] === 'boolean');
+    assert.deepEqual(listed.map(node => elements(node).find(child => child.type === 'p').props.children), rows[stage].map(item => item.text));
+    if (stage < statuses.length - 1) select.props.onChange({ target: { value: statuses[++stage] } });
+    return tree;
+  }
+  try {
+    renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(FilterProbe)));
+    assert.equal(stage, 3);
+    const other = renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(ui.PersonalMemoryWorkbench, { ownerCode: 'OTHER-OWNER' })));
+    assert.doesNotMatch(other, /我偏好先说明原因|已撤回的个人偏好/);
+  } finally { client.clear(); }
 });
 
 test('editor preserves its draft across a newer revision and only adopts the new witness after explicit review', () => {
@@ -159,7 +189,7 @@ for (const kind of ['edit','withdraw']) {
   test(`${kind} pins the original memory when background list refresh changes the first row`, () => {
     const owner='PINNED-'+kind, a=memory({source:'MEMORY-A'}), b=memory({source:'MEMORY-B',text:'另一条记忆'});
     const client=new QueryClient({defaultOptions:{queries:{staleTime:Infinity,retry:false}}});
-    client.setQueryData(api.personalMemoryListKey(owner,'active'),{items:[a,b],truncated:false});
+    client.setQueryData(api.personalMemoryListKey(owner,'all'),{items:[a,b],truncated:false});
     for(const item of [a,b])client.setQueryData(api.personalMemoryDetailKey(owner,item.source),item);
     let stage=0;
     function Probe(){
@@ -167,7 +197,7 @@ for (const kind of ['edit','withdraw']) {
       const tree=ui.PersonalMemoryWorkbench({ownerCode:owner});
       const nodes=elements(tree);
       if(stage===0){stage++;const details=nodes.find(node=>node.type===ui.PersonalMemoryDetails);details.props[kind==='edit'?'onEdit':'onWithdraw']();}
-      else if(stage===1){stage++;client.setQueryData(api.personalMemoryListKey(owner,'active'),{items:[b,a],truncated:false});rerender(1);}
+      else if(stage===1){stage++;client.setQueryData(api.personalMemoryListKey(owner,'all'),{items:[b,a],truncated:false});rerender(1);}
       else {const editor=nodes.find(node=>node.type===(kind==='edit'?ui.PersonalMemoryEditor:ui.PersonalMemoryWithdrawal));assert.equal(editor.props.value.source,'MEMORY-A');}
       return tree;
     }
