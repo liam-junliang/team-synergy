@@ -23,7 +23,7 @@ async function bounded(promise, milliseconds, message) {
 // The Node 22 WebSocket client speaks directly to the existing browser. The
 // fixture never disables the browser sandbox or uses a downloaded driver.
 async function connectCdp(endpoint, remaining, observe) {
-  const socket = new WebSocket(endpoint), pending = new Map(), listeners = new Map();
+  const socket = new WebSocket(endpoint), pending = new Map(), listeners = new Map(), events = [];
   let sequence = 0;
   const fail = error => { for (const entry of pending.values()) entry.reject(error); pending.clear(); };
   socket.addEventListener('message', event => {
@@ -33,8 +33,10 @@ async function connectCdp(endpoint, remaining, observe) {
       if (message.error) entry?.reject(new Error('CDP ' + message.error.message)); else entry?.resolve(message.result);
     } else {
       observe(message);
+      events.push(message); if (events.length > 32) events.shift();
       const key = message.sessionId + ':' + message.method;
-      listeners.get(key)?.(message.params); listeners.delete(key);
+      const listener = listeners.get(key);
+      if (listener?.accept(message.params)) { listener.resolve(message.params); listeners.delete(key); }
     }
   });
   socket.addEventListener('close', () => fail(new Error('Browser CDP connection closed')));
@@ -50,7 +52,11 @@ async function connectCdp(endpoint, remaining, observe) {
       socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
       return bounded(response, remaining(), 'Browser CDP command timed out: ' + method);
     },
-    event(method, sessionId) { return new Promise(resolve => listeners.set(sessionId + ':' + method, resolve)); },
+    event(method, sessionId, accept) {
+      const previous = events.find(message => message.method === method && message.sessionId === sessionId && accept(message.params));
+      if (previous) return Promise.resolve(previous.params);
+      return new Promise(resolve => listeners.set(sessionId + ':' + method, { accept, resolve }));
+    },
     closeBrowser() { if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: ++sequence, method: 'Browser.close' })); },
     dispose() { fail(new Error('Browser fixture disposed')); socket.close(); },
   };
@@ -134,11 +140,13 @@ async function isolationFixture({ postResult = true, resultTimeout } = {}) {
       const { targetId } = await cdp.command('Target.createTarget', { url: 'about:blank' });
       const { sessionId } = await cdp.command('Target.attachToTarget', { targetId, flatten: true });
       await cdp.command('Page.enable', {}, sessionId);
+      await cdp.command('Page.setLifecycleEventsEnabled', { enabled: true }, sessionId);
       await cdp.command('Runtime.enable', {}, sessionId);
       diagnostics.phase = 'page-load';
-      const loaded = cdp.event('Page.loadEventFired', sessionId);
       const navigation = await cdp.command('Page.navigate', { url: `http://127.0.0.1:${parent.address().port}/` }, sessionId);
       assert.ok(!navigation.errorText, navigation.errorText);
+      // Match this navigation's loader, not an initial about:blank load event.
+      const loaded = cdp.event('Page.lifecycleEvent', sessionId, event => event.name === 'load' && event.loaderId === navigation.loaderId);
       await bounded(loaded, remaining(), 'Browser fixture page did not load');
       diagnostics.phase = 'isolation-result';
       // Wait for the real parent postMessage handler to update its result.
