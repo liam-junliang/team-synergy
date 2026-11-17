@@ -1,0 +1,4 @@
+# Install with visudo -cf verification, owned root and mode 0440.
+# The dedicated SSH user is not a member of the docker group.
+Defaults!/usr/local/sbin/tsp-deploy env_keep += "SSH_ORIGINAL_COMMAND"
+tsp-deploy ALL=(root) NOPASSWD: /usr/local/sbin/tsp-deploy ""

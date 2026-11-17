@@ -1,0 +1,33 @@
+worker_processes auto;
+pid /tmp/nginx.pid;
+error_log /dev/stderr warn;
+events { worker_connections 256; }
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    access_log /dev/stdout;
+    client_body_temp_path /tmp/client_temp;
+    proxy_temp_path /tmp/proxy_temp;
+    fastcgi_temp_path /tmp/fastcgi_temp;
+    uwsgi_temp_path /tmp/uwsgi_temp;
+    scgi_temp_path /tmp/scgi_temp;
+    server {
+        listen 127.0.0.1:${TSP_WEB_PORT};
+        server_name _;
+        root /usr/share/nginx/html;
+        index index.html;
+        add_header X-Content-Type-Options nosniff always;
+        add_header X-Frame-Options DENY always;
+        add_header Referrer-Policy no-referrer always;
+        add_header Content-Security-Policy "frame-ancestors 'none'; object-src 'none'; base-uri 'none'" always;
+        add_header Content-Security-Policy-Report-Only "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self'; frame-src 'self' https:; report-uri /api/security/csp-report" always;
+        location /api/ {
+            proxy_pass http://127.0.0.1:${TSP_API_PORT}/;
+            proxy_set_header Host $http_host;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            client_max_body_size 32m;
+        }
+        location /assets/ { try_files $uri =404; }
+        location / { try_files $uri $uri/ /index.html; }
+    }
+}
