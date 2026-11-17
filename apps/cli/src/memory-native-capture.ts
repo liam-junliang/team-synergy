@@ -52,20 +52,34 @@ async function outbox<T>(scope: NativeCaptureScope, work: (db: DatabaseSync, con
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   // Imported only inside the fixed Node CLI, never by a Bun-hosted plugin.
   const { DatabaseSync } = await import('node:sqlite');
-  const db = new DatabaseSync(path.join(directory, hash(JSON.stringify([scope.owner, scope.harness, scope.hostSessionId, scope.memorySession])) + '.sqlite'));
-  try {
-    db.exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
+  const file = path.join(directory, hash(JSON.stringify([scope.owner, scope.harness, scope.hostSessionId, scope.memorySession])) + '.sqlite');
+  const deadline = Date.now() + 5000;
+  let db: DatabaseSync | undefined, attempts = 0;
+  do {
+    scopeContext(scope);
+    try {
+      db = new DatabaseSync(file);
+      // WAL conversion can return SQLITE_BUSY without invoking busy_timeout.
+      db.exec(`PRAGMA busy_timeout=${Math.max(0, deadline - Date.now())}; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
       CREATE TABLE IF NOT EXISTS scope (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events (event_id TEXT PRIMARY KEY, native_message_id TEXT NOT NULL,
         native_seq INTEGER, source_text TEXT NOT NULL, digest TEXT NOT NULL,
         state TEXT NOT NULL CHECK(state IN ('staged','ready','sending','accepted')),
         claim TEXT, lease_until INTEGER, capture_code TEXT, last_error TEXT, attempts INTEGER NOT NULL DEFAULT 0);`);
-    const identity = JSON.stringify({ harness:scope.harness,hostSessionId:scope.hostSessionId,memorySession:scope.memorySession,
-      owner:scope.owner,projectCode:context.projectCode,root:context.root });
-    db.prepare('INSERT OR IGNORE INTO scope(id,value) VALUES(1,?)').run(identity);
-    if (db.prepare('SELECT value FROM scope WHERE id=1').get()?.value !== identity) throw invalid();
-    return await work(db, context);
-  } finally { db.close(); }
+      const identity = JSON.stringify({ harness:scope.harness,hostSessionId:scope.hostSessionId,memorySession:scope.memorySession,
+        owner:scope.owner,projectCode:context.projectCode,root:context.root });
+      db.prepare('INSERT OR IGNORE INTO scope(id,value) VALUES(1,?)').run(identity);
+      if (db.prepare('SELECT value FROM scope WHERE id=1').get()?.value !== identity) throw invalid();
+      db.exec('PRAGMA busy_timeout=5000');
+    } catch (error) {
+      db?.close(); db = undefined;
+      if (!(error instanceof Error) || !('errcode' in error) || typeof error.errcode !== 'number' ||
+        (error.errcode & 255) !== 5 || Date.now() >= deadline) throw error;
+      await delay(Math.min(100, 20 * ++attempts, deadline - Date.now()));
+    }
+  } while (!db);
+  // Retry only idempotent initialization, never a caller's transaction or HTTP delivery.
+  try { return await work(db, context); } finally { db.close(); }
 }
 
 function eventInput(scope: NativeCaptureScope, event: NativeCaptureEvent) {
