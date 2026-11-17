@@ -53,6 +53,7 @@ export { createCodeUnderstandingUseCases } from './code-understanding-use-cases.
 export { createHostedCodeAnalysisUseCases, type HostedCodeAnalysisExecution } from './code-hosted-analysis-use-cases.js';
 export { createMemorySliceUseCases } from './memory-slice-use-cases.js';
 export { createPersonalMemoryUseCases } from './personal-memory-use-cases.js';
+export { createMemoryCenterUseCases } from './memory-center-use-cases.js';
 export { reconcileProjectMaterialIndexes } from './project-material-index.js';
 export { createProjectMaterialQueryUseCases } from './project-material-query.js';
 export { loadProjectMaterialCatalog, listCurrentProjectMaterialCandidates, type ProjectMaterialCandidate, type ProjectMaterialBodyLocator } from './project-material-catalog.js';

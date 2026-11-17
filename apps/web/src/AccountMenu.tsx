@@ -63,7 +63,7 @@ export function AccountMenu({ user, currentView, onLogout }: {
         event.preventDefault(); items[next]?.focus();
       }}>
       <a role="menuitem" href="/account" aria-current={currentView === 'account' ? 'page' : undefined} className={itemStyle} onClick={close}>{t('个人设置')}</a>
-      <a role="menuitem" href={personalMemoryWorkspacePath()} aria-current={currentView === 'personal-memory' ? 'page' : undefined} className={itemStyle} onClick={close}>{t('我的记忆')}</a>
+      <a role="menuitem" href={personalMemoryWorkspacePath()} aria-current={currentView === 'personal-memory' ? 'page' : undefined} className={itemStyle} onClick={close}>{t('记忆中心')}</a>
       <div role="separator" className="my-1 border-t border-slate-200" />
       <button role="menuitem" type="button" className={itemStyle} onClick={() => { close(); onLogout(); }}>{t('退出')}</button>
     </div>}

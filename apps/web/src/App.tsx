@@ -34,7 +34,7 @@ const ProjectHandoversWorkbench = lazy(() => import('./ProjectHandoversWorkbench
 const ProjectWorkspace = lazy(() => import('./ProjectWorkspace').then((module) => ({ default: module.ProjectWorkspace })));
 const AgentWorkspace = lazy(() => import('./AgentWorkspace').then((module) => ({ default: module.AgentWorkspace })));
 const CodeUnderstandingWorkbench = lazy(() => import('./CodeUnderstandingWorkbench').then((module) => ({ default: module.CodeUnderstandingWorkbench })));
-const PersonalMemoryWorkbench = lazy(() => import('./PersonalMemoryWorkbench').then((module) => ({ default: module.PersonalMemoryWorkbench })));
+const MemoryCenterWorkbench = lazy(() => import('./MemoryCenterWorkbench').then((module) => ({ default: module.MemoryCenterWorkbench })));
 
 const TASK_CARD_BRIEF_STYLE: CSSProperties = {
   display: '-webkit-box',
@@ -356,7 +356,7 @@ export default function App() {
         {view === 'admin' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t('正在加载…')}</div>}><AdminWorkspace tab={route.adminTab} isSystemAdmin={session.is_system_admin} /></Suspense>}
         {view === 'agent' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t('正在加载…')}</div>}><AgentWorkspace key={`${projectCode ?? ''}:${route.teamCode ?? ''}:${route.agentTab}`} route={route} user={session} /></Suspense>}
         {view === 'teams' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载团队…")}</div>}><TeamsWorkspace /></Suspense>}
-        {view === 'personal-memory' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t('正在读取个人记忆…')}</div>}><PersonalMemoryWorkbench key={`${session.code}:${route.personalMemoryProject ?? ''}`} ownerCode={session.code} initialProject={route.personalMemoryProject} /></Suspense>}
+        {view === 'personal-memory' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t('正在读取记忆中心…')}</div>}><MemoryCenterWorkbench key={`${session.code}:${route.personalMemoryProject ?? ''}`} ownerCode={session.code} initialProject={route.personalMemoryProject} /></Suspense>}
         {projectCode && view === 'overview' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载项目…")}</div>}><ProjectWorkspace key={projectCode} projectCode={projectCode} tab={route.projectTab} documentCode={route.documentCode} /></Suspense>}
         {projectCode && view === 'board' && <TeamBoard key={projectCode} projectCode={projectCode} />}
         {projectCode && view === 'understanding' && <Suspense fallback={<div className="p-8 text-sm text-slate-500">{t('正在加载代码理解…')}</div>}><CodeUnderstandingWorkbench key={projectCode} projectCode={projectCode} route={route} /></Suspense>}

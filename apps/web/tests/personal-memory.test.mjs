@@ -44,7 +44,7 @@ test('personal memory has its own signed-in route and is not restricted to proje
   assert.equal(personalMemoryWorkspacePath('项目/A'), '/account/memory?project=%E9%A1%B9%E7%9B%AE%2FA');
   for (const admin of [false, true]) assert.equal(workspacePathAfterLogin('http://localhost/account/memory', admin), '/account/memory');
   const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
-  assert.match(app, /view === 'personal-memory'[\s\S]*?<PersonalMemoryWorkbench key=\{`\$\{session.code\}/);
+  assert.match(app, /view === 'personal-memory'[\s\S]*?<MemoryCenterWorkbench key=\{`\$\{session.code\}/);
   assert.match(app, /ownerCode=\{session.code\}/);
 });
 
