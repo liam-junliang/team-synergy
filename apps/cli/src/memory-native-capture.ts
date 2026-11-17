@@ -10,7 +10,7 @@ import { PublicCodeSchema } from '@team-synergy/contracts';
 import { authDirectory } from './auth-store.js';
 import { memoryContext, valueOf } from './memory.js';
 
-export type NativeHarness = 'dsh' | 'opencode';
+export type NativeHarness = 'dsh' | 'opencode' | 'codex';
 export type NativeCaptureEvent = { eventId: string; sourceText: string; nativeMessageId: string; nativeSeq?: number };
 export type NativePendingQuery = { nativeMessageId?: string; after?: number };
 export type NativePendingCapture = NativeCaptureEvent & { cursor: number };
@@ -34,19 +34,19 @@ const id = (value: unknown): value is string => typeof value === 'string' && /^[
 const invalid = () => new DomainError('memory_native_invalid', '原生采集配置或事件无效');
 
 export function nativeCaptureEventId(harness: NativeHarness, hostSessionId: string, nativeMessageId: string) {
-  if (!['dsh', 'opencode'].includes(harness) || !id(hostSessionId) || !id(nativeMessageId)) throw invalid();
+  if (!['dsh', 'opencode', 'codex'].includes(harness) || !id(hostSessionId) || !id(nativeMessageId)) throw invalid();
   return `native.${harness}.${hash(JSON.stringify([hostSessionId, nativeMessageId]))}`;
 }
 
 function scopeContext(scope: NativeCaptureScope) {
-  if (!scope || !['dsh', 'opencode'].includes(scope.harness) || !id(scope.hostSessionId) || !id(scope.memorySession)
+  if (!scope || !['dsh', 'opencode', 'codex'].includes(scope.harness) || !id(scope.hostSessionId) || !id(scope.memorySession)
     || typeof scope.owner !== 'string' || !/^[a-f0-9]{64}$/u.test(scope.owner)) throw invalid();
   const context = memoryContext(5000);
   if (scope.owner !== context.owner) throw new DomainError('memory_binding_changed', '账号、设备或项目已切换，请重新确认原生采集配置');
   return context;
 }
 
-async function outbox<T>(scope: NativeCaptureScope, work: (db: DatabaseSync, context: ReturnType<typeof memoryContext>) => T | Promise<T>) {
+export async function withNativeCaptureOutbox<T>(scope: NativeCaptureScope, work: (db: DatabaseSync, context: ReturnType<typeof memoryContext>) => T | Promise<T>) {
   const context = scopeContext(scope);
   const directory = path.join(authDirectory(), 'memory-native-outbox');
   mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -91,7 +91,7 @@ function eventInput(scope: NativeCaptureScope, event: NativeCaptureEvent) {
 /** Local durable ACK only. No HTTP, model call or business-object binding. */
 export async function enqueueNativeCapture(scope: NativeCaptureScope, event: NativeCaptureEvent, ready = true) {
   eventInput(scope, event);
-  return outbox(scope, db => {
+  return withNativeCaptureOutbox(scope, db => {
     const digest = hash(event.sourceText);
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -110,7 +110,7 @@ export async function enqueueNativeCapture(scope: NativeCaptureScope, event: Nat
 export async function pendingNativeCapture(scope: NativeCaptureScope, query: NativePendingQuery = {}): Promise<NativePendingCapture[]> {
   const after=query.after??0;
   if(!Number.isSafeInteger(after)||after<0||(query.nativeMessageId!==undefined&&!id(query.nativeMessageId)))throw invalid();
-  return outbox(scope, db => (db.prepare("SELECT rowid AS cursor,* FROM events WHERE state='staged' AND rowid>?"+
+  return withNativeCaptureOutbox(scope, db => (db.prepare("SELECT rowid AS cursor,* FROM events WHERE state='staged' AND rowid>?"+
     (query.nativeMessageId===undefined?'':' AND native_message_id=?')+' ORDER BY rowid LIMIT 100')
     .all(after,...(query.nativeMessageId===undefined?[]:[query.nativeMessageId])) as OutboxRow[])
     .map(row => ({ eventId: row.event_id, sourceText: row.source_text, nativeMessageId: row.native_message_id,
@@ -118,7 +118,7 @@ export async function pendingNativeCapture(scope: NativeCaptureScope, query: Nat
 }
 
 export async function confirmNativeCapture(scope: NativeCaptureScope, event: { eventId: string; sourceText: string }) {
-  return outbox(scope, db => {
+  return withNativeCaptureOutbox(scope, db => {
     const row = db.prepare('SELECT digest,state FROM events WHERE event_id=?').get(event.eventId);
     if (!row || typeof event.sourceText !== 'string' || row.digest !== hash(event.sourceText)) {
       throw new DomainError('memory_source_changed', '宿主持久化原文与采集候选不一致');
@@ -129,7 +129,7 @@ export async function confirmNativeCapture(scope: NativeCaptureScope, event: { e
 }
 
 export async function inspectNativeCapture(scope: NativeCaptureScope) {
-  return outbox(scope, db => ({
+  return withNativeCaptureOutbox(scope, db => ({
     counts: db.prepare('SELECT state,count(*) AS count FROM events GROUP BY state').all(),
     events: db.prepare(`SELECT event_id AS eventId,native_message_id AS nativeMessageId,state,
       capture_code AS captureCode,last_error AS errorCode,attempts FROM events ORDER BY rowid LIMIT 100`).all(),
@@ -139,7 +139,7 @@ export async function inspectNativeCapture(scope: NativeCaptureScope) {
 /** Sending is asynchronous to the host hook. A timeout retries the same event
  * and immutable body; the server owns receipt idempotency and classification. */
 export async function drainNativeCapture(scope: NativeCaptureScope) {
-  return outbox(scope, async (db, context) => {
+  return withNativeCaptureOutbox(scope, async (db, context) => {
     let accepted = 0;
     let retryAfterMs = 0;
     for (let index = 0; index < 10; index++) {
@@ -196,7 +196,7 @@ export async function pumpNativeCapture(scope: NativeCaptureScope) {
 }
 
 function bridgeConfig(config: NativeCaptureBridgeConfig) {
-  if (!config || !['dsh','opencode'].includes(config.harness) || !id(config.hostSessionId) || !id(config.memorySession)
+  if (!config || !['dsh','opencode','codex'].includes(config.harness) || !id(config.hostSessionId) || !id(config.memorySession)
     || !/^[a-f0-9]{64}$/u.test(config.owner) ||
     ![config.cwd,config.memberHome,config.cliPath,config.nodePath,...(config.auditFile ? [config.auditFile] : [])]
       .every(value => typeof value === 'string' && path.isAbsolute(value) && !/\p{Cc}/u.test(value))) throw invalid();
