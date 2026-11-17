@@ -54,7 +54,8 @@ test('缺陷工作台默认展示可按键打开的表格，旧记录和修复�
   assert.match(html, /证据 0/);
   assert.match(html, /证据 3/);
   assert.ok(html.indexOf('紧急问题且有三项证据') < html.indexOf('登录后项目看板空白'));
-  assert.ok(!html.includes('已关闭的旧问题'));
+  assert.match(html, /<option value="all" selected="">全部<\/option>/);
+  assert.match(html, /已关闭的旧问题/);
   assert.match(html, /aria-sort="descending"/);
   assert.doesNotMatch(html, /role="dialog"|原始问题描述|进入回归验证/);
   assert.match(html, /搜索标题、描述或版本/);
@@ -68,6 +69,21 @@ test('缺陷工作台默认展示可按键打开的表格，旧记录和修复�
   const viewer = renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(DefectsWorkbench, { projectCode })));
   assert.doesNotMatch(viewer, />报告缺陷<|>进入回归验证<|>创建修复任务</);
   assert.match(viewer, /登录后项目看板空白/);
+  const elements = node => Array.isArray(node) ? node.flatMap(elements) : node?.props ? [node, ...elements(node.props.children)] : [];
+  const filters = ['all', 'active', 'closed', 'all'];
+  const expected = [3, 2, 1, 3];
+  let stage = 0;
+  function FilterProbe() {
+    const tree = DefectsWorkbench({ projectCode });
+    const nodes = elements(tree);
+    const select = nodes.find(node => node.type === 'select' && node.props['aria-label'] === '状态筛选');
+    assert.equal(select.props.value, filters[stage]);
+    assert.equal(nodes.filter(node => node.type === 'button' && node.props['aria-haspopup'] === 'dialog').length, expected[stage]);
+    if (stage < filters.length - 1) select.props.onChange({ target: { value: filters[++stage] } });
+    return tree;
+  }
+  renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(FilterProbe)));
+  assert.equal(stage, 3);
   client.clear();
 });
 
