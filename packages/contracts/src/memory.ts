@@ -94,3 +94,34 @@ export interface ProjectMemoryManagementView {
   lastError?: string;
   legacyCleanupPending?: number;
 }
+
+export const MemoryCenterQuery = z.object({ projectCode: PublicCodeSchema.optional() }).strict();
+export const memoryCaptureStates = ['pending', 'processing', 'completed', 'skipped', 'needs_clarification', 'failed'] as const;
+export type MemoryCaptureState = typeof memoryCaptureStates[number];
+export interface MemoryCenterCapture {
+  code: string; projectCode: string; projectName: string; sessionId: string; eventId: string;
+  status: MemoryCaptureState; attempts: number; receivedAt: string; updatedAt: string;
+  receiptCode?: string; errorCode?: string;
+}
+export interface MemoryModelObservation {
+  scope: 'service_process'; startedAt: string; attempts: number; successes: number; errors: number;
+  lastAttemptAt?: string; lastSuccessAt?: string; lastErrorAt?: string;
+}
+export interface MemoryModelStatus {
+  provider: string; model: string; providerSource: 'explicit' | 'default'; modelSource: 'explicit' | 'default';
+  observationScope: 'system_admin_only'; observation?: MemoryModelObservation;
+}
+export interface MemoryCenterView {
+  ownerCode: string;
+  projects: Array<{ code: string; name: string; status: string; indexes: number; syncedIndexes: number }>;
+  personal: { active: number; withdrawn: number; total: number };
+  captures: { counts: Record<MemoryCaptureState, number>; total: number; lastReceivedAt?: string; lastProcessedAt?: string;
+    recent: MemoryCenterCapture[]; truncated: boolean; installation: 'unknown'; localQueue: 'unknown' };
+  selectedProject?: { materials: ProjectMemoryManagementView; shared: Array<{
+    source: string; state: 'discussed' | 'confirmed'; text: string; topicCode?: string; requirementCode?: string;
+    sourceRevision?: number;
+  }>; sharedTruncated: boolean };
+  model: MemoryModelStatus;
+  serviceEnabled: boolean;
+  observedAt: string;
+}

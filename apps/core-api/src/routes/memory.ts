@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { createMemorySliceUseCases } from '@team-synergy/application';
+import { createMemoryCenterUseCases, createMemorySliceUseCases } from '@team-synergy/application';
 import { MemoryBindingQuery, MemoryBriefInput, MemoryCaptureInput, MemoryDocumentReadInput, MemorySearchQuery, MemorySourcesInput, PublicCodeSchema } from '@team-synergy/contracts';
 import { DomainError } from '@team-synergy/domain';
 import type { Db } from '@team-synergy/persistence';
@@ -10,9 +10,31 @@ import { rankedMemoryRefs, searchMemoryEngineDetailed, type EngineConfig, type M
 import { resolveProjectMemoryEngines } from '../memory-project-runtime.js';
 import { enqueueMemoryCapture, readMemoryCapture, retryMemoryCapture } from '../memory-capture-queue.js';
 import { ensurePersonalMemoryResource } from '../memory-personal-runtime.js';
+import { MemoryCenterQuery } from '@team-synergy/contracts';
+import { memoryModelStatus } from '../memory-observability.js';
 
 type Request = FastifyRequest<{ Params: { projectCode: string } }>;
 type Actor = { principalCode: string; projectCode: string };
+
+/** Read-only account entry remains available when capture/projection is disabled. */
+export function registerMemoryCenterRoutes(app: FastifyInstance, db: Db, engines?: EngineConfig) {
+  const center = createMemoryCenterUseCases(db);
+  app.get('/account/memory-center', { logLevel: 'silent' }, async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    if (!hasAuthenticatedSession(request) || !request.principal) return unauthorized(reply);
+    try {
+      const query = MemoryCenterQuery.safeParse(request.query);
+      if (!query.success) throw new DomainError('invalid_request', '记忆中心筛选条件无效。');
+      const { canViewServiceObservations, ...data } = await center.read({ ...query.data, principalCode: request.principal },
+        projectCode => ({ serviceConfigured: Boolean(engines), legacyConfigured: Boolean(engines?.projects[projectCode]) }));
+      return { ok: true, data: { ...data, model: memoryModelStatus(canViewServiceObservations), serviceEnabled: process.env.TSP_MEMORY_ENABLED === '1' } };
+    } catch (error) {
+      if (error instanceof DomainError) return reply.code(httpStatusForError(error.code)).send({ ok: false, error: error.toJSON() });
+      request.log.error('Memory center request failed');
+      return reply.code(500).send({ ok: false, error: { code: 'internal_error', message: '记忆中心暂不可用。' } });
+    }
+  });
+}
 
 export function registerMemoryRoutes(app: FastifyInstance, db: Db, engines?: EngineConfig) {
   const memory = createMemorySliceUseCases(db);
