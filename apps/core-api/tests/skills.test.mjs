@@ -2,7 +2,7 @@ import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { schema } from '@team-synergy/persistence';
-import { createPublicCode, createTaskService } from '@team-synergy/application';
+import { createPublicCode, createTaskService, ensurePlatformSkillRelease, normalizeSkillPackage } from '@team-synergy/application';
 import { buildServer } from '../dist/server.js';
 import { closeTestDb, insertProject, insertProjectMember, insertTeam, insertUser, openTestDb } from './test-db.mjs';
 
@@ -204,4 +204,32 @@ test('skill HTTP cross-team grants deliver only selected revision and revoked sh
   }
   status(await request(c, targetActor, 'GET', `/projects/${target.code}/skills/manifest`), 403, 'skill_delivery_blocked');
   status(await request(c, targetActor, 'GET', `/skills/${skill.code}?project_code=${target.code}`), 403, 'skill_forbidden');
+});
+
+test('account-only platform catalog and reader stay independent of projects and exclude private packages', async () => {
+  const c = await fixture(), actor = c.users.outside;
+  const pack = normalizeSkillPackage([
+    { path: 'SKILL.md', content_base64: Buffer.from('---\nname: reverse-project-docs\ndescription: Reverse docs\nmetadata:\n  version: 1.0.0\n---\nRead references').toString('base64') },
+    { path: 'references/guide.md', content_base64: Buffer.from('中🙂文').toString('base64') },
+  ]);
+  const released = await ensurePlatformSkillRelease(c.db, pack);
+  const privateSkill = data(await request(c, c.users.owner, 'POST', '/skills', { scope_type: 'project', scope_code: c.project.code, files: packageFiles }));
+  status(await request(c, null, 'GET', '/skills/platform'), 401);
+  status(await request(c, null, 'GET', '/skills/platform/reader'), 401);
+  for (const suffix of ['', '?project_code=invalid!', '?project_code=' + c.project.code]) {
+    const catalog = data(await request(c, actor, 'GET', '/skills/platform' + suffix));
+    assert.deepEqual(catalog.map(row => row.code), [released.skill_code]);
+  }
+  status(await request(c, c.users.owner, 'GET', '/skills/platform/' + privateSkill.code), 404, 'skill_not_found');
+  const detail = data(await request(c, actor, 'GET', '/skills/platform/' + released.skill_code));
+  assert.equal(detail.can_edit, false); assert.equal(detail.can_manage, false);
+  const index = data(await request(c, actor, 'GET', '/skills/platform/reader'));
+  assert.equal(index.items[0].skill_code, released.skill_code); assert.equal('project_code' in index, false);
+  assert.doesNotMatch(JSON.stringify(index), /content_base64|references\/guide/);
+  const query = new URLSearchParams({ skill: released.skill_code, revision: '1', path: 'references/guide.md', limit: '2' });
+  const page = data(await request(c, actor, 'GET', '/skills/platform/reader?' + query));
+  assert.equal(page.content, '中🙂'); assert.equal(page.nextOffset, 2); assert.equal(page.package_sha256, pack.package_sha256);
+  query.set('offset', '2');
+  assert.equal(data(await request(c, actor, 'GET', '/skills/platform/reader?' + query)).content, '文');
+  status(await request(c, actor, 'PATCH', '/skills/' + released.skill_code, { base_revision: 1, change_summary: 'denied', files: packageFiles }), 403, 'skill_forbidden');
 });

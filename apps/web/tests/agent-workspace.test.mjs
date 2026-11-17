@@ -68,19 +68,19 @@ test('skill reader uses selected immutable revision, safe Markdown and manager-g
 test('external project readers see installed skills without team membership or manager actions', () => {
   const readonly = { ...project, role: 'viewer', is_external: true, capabilities: { read: true, write: false, manage: false } };
   const pinned = { skill_code: 'S', revision: 1, alias: 'shared-review', enabled: true, name: 'review', description: 'Review changes', scope_type: 'team', scope_code: 'T', package_sha256: 'b'.repeat(64), available_revisions: [1], blocked: false, blocked_reason: null };
-  const html = render(workbench.SkillsWorkbench, { project: readonly }, [
+  const html = render(workbench.SkillsWorkbench, { project: readonly, initialTab: 'project' }, [
     [['skills', 'catalog', 'project', 'P', 'project'], []],
     [['skills', 'installed', 'P'], { ...installations, can_manage: false, installations: [pinned] }],
     [['skills', 'detail', 'project', 'P', 'S'], { ...detail, current_revision: 1, can_edit: false, can_manage: false, revisions: [detail.revisions[1]] }],
   ]);
   assert.match(html, /shared-review/); assert.match(html, /Published content/);
   assert.doesNotMatch(html, /新建技能包|修订技能包|共享版本|采用到当前项目|>停用</);
-  assert.match(html, /disabled=""[^>]*>团队技能/);
+  assert.match(html, /团队与项目自建/);
 });
 
 test('revoked skill installation stays visible but never renders cached package content', () => {
   const blocked = { skill_code: 'S', revision: 1, alias: 'old-review', enabled: true, name: 'review', description: 'Old summary', scope_type: 'team', scope_code: 'T', package_sha256: 'b'.repeat(64), available_revisions: [], blocked: true, blocked_reason: 'revoked' };
-  const html = render(workbench.SkillsWorkbench, { project }, [
+  const html = render(workbench.SkillsWorkbench, { project, initialTab: 'project' }, [
     [['skills', 'catalog', 'project', 'P', 'project'], []], [['skills', 'installed', 'P'], { ...installations, installations: [blocked] }],
     [['skills', 'detail', 'project', 'P', 'S'], detail],
   ]);
@@ -92,8 +92,8 @@ test('skill catalog defaults to usable entries while history remains explicitly 
   const active = { ...skill, code: 'ACTIVE', name: 'Current package', description: 'Ready' };
   const archived = { ...skill, code: 'ARCHIVED', name: 'Obsolete package', archived: true };
   const disabled = { skill_code: 'DISABLED', revision: 1, alias: 'Stopped package', enabled: false, name: 'Stopped', description: 'Old summary', scope_type: 'project', scope_code: 'P', package_sha256: 'b'.repeat(64), available_revisions: [], blocked: true, blocked_reason: 'source unavailable' };
-  const html = render(workbench.SkillsWorkbench, { project }, [
-    [['skills', 'catalog', 'project', 'P', 'project'], [active, archived]],
+  const html = render(workbench.SkillsWorkbench, { project, initialTab: 'owned' }, [
+    [['skills', 'catalog', 'project', 'P', 'owned'], [active, archived]],
     [['skills', 'installed', 'P'], { ...installations, installations: [disabled] }],
   ]);
   assert.match(html, /Current package/);
@@ -109,7 +109,7 @@ test('skill catalog defaults to usable entries while history remains explicitly 
 });
 
 test('project scope changes do not use a cached detail from another project', () => {
-  const html = render(workbench.SkillsWorkbench, { project: { ...project, code: 'Q' } }, [
+  const html = render(workbench.SkillsWorkbench, { project: { ...project, code: 'Q' }, initialTab: 'project' }, [
     [['skills', 'catalog', 'project', 'Q', 'project'], []], [['skills', 'installed', 'Q'], { ...installations, project_code: 'Q' }],
     [['skills', 'detail', 'project', 'P', 'S'], detail],
   ]);
@@ -211,4 +211,41 @@ test('API mutations retain exact revision and optimistic installation generation
     assert.deepEqual(calls[4].body, { revision: 1, alias: 'review', enabled: true, base_generation: 3 });
     assert.equal(calls[5].method, 'DELETE'); assert.equal(calls[5].url, '/api/skills/S/shares/SHARE');
   } finally { globalThis.fetch = previousFetch; }
+});
+
+test('platform library defaults to global published packages even with a blocked installation or unusable project target', () => {
+  const builtin = { ...skill, scope_type: 'platform', scope_code: 'platform', can_edit: false, can_manage: false, release_version: '1.4.0' };
+  const released = { ...builtin, revisions: [{ ...detail.revisions[1], name: 'reverse-project-docs', release_version: '1.4.0' }], shares: [] };
+  const entries = [[['skills', 'catalog', 'platform'], [builtin]], [['skills', 'detail', 'platform', '', 'S'], released]];
+  const html = render(workbench.SkillsWorkbench, {}, entries);
+  for (const text of ['平台内置', '团队与项目自建', '共享给我', '项目采用', 'Published content', '下载技能包（JSON）']) assert.ok(html.includes(text), text);
+  assert.doesNotMatch(html, /新建技能包|修订技能包|发布此版本|共享版本|选择一个有权限的项目或团队后管理技能/);
+  assert.doesNotMatch(html, /aria-label="团队范围"|aria-label="项目范围"/);
+  const blocked = render(workbench.SkillsWorkbench, { project }, [...entries,
+    [['skills', 'installed', 'P'], { ...installations, installations: [{ skill_code: 'S', enabled: false, blocked: true }] }],
+  ]);
+  assert.match(blocked, /Published content/);
+  for (const projectCode of ['invalid!', 'Z'.repeat(20)]) {
+    const page = render(agent.AgentWorkspace, { route: { view: 'agent', agentTab: 'skills', projectCode }, user: { code: 'U' } }, [
+      ...entries, [['projects', 'agent', 'U'], []], [['teams'], []],
+    ]);
+    assert.match(page, /Published content/); assert.match(page, /无法访问所选项目/);
+  }
+});
+
+test('global API calls carry no ambient project query', async () => {
+  const previous = globalThis.fetch, calls = [];
+  globalThis.fetch = async url => { calls.push(url); return new Response(JSON.stringify({ ok: true, data: [] })); };
+  try { await api.listPlatformSkills(); await api.getPlatformSkill('S'); assert.deepEqual(calls, ['/api/skills/platform', '/api/skills/platform/S']); }
+  finally { globalThis.fetch = previous; }
+});
+
+test('context selector links retain the chosen source or adoption view across the app route remount', () => {
+  for (const view of ['owned', 'shared', 'project']) {
+    const link = agent.skillLibraryContextPath({ view: 'agent', agentTab: 'skills', projectCode: 'Q', teamCode: 'T' }, view);
+    const url = new URL(link, 'https://workspace.example');
+    assert.equal(url.searchParams.get('skill_view'), view);
+    assert.equal(routing.parseWorkspacePath(link).projectCode, 'Q');
+    assert.equal(routing.parseWorkspacePath(link).teamCode, 'T');
+  }
 });

@@ -5,7 +5,7 @@ import { personalMemoryContext, projectRetrievalPolicy, readMemoryBrief, readMem
 import { listPersonalMemory, readPersonalMemory } from './memory-personal.js';
 import { MemoryContextReceipts } from './memory-context.js';
 import { createMemoryWorkingContextStore } from './memory-working-context.js';
-import { AgentToolInputError, agentCapabilityDefinitions, executeAgentCapability, hasAgentCapability, type AgentToolOptions } from './agent-capabilities.js';
+import { AgentToolInputError, agentCapabilityDefinitions, executeAgentCapability, hasAgentCapability, platformSkillDefinitions, hasPlatformSkillCapability, executePlatformSkillCapability, type AgentToolOptions } from './agent-capabilities.js';
 import { createAgentConnection } from './agent-connection.js';
 
 const versions = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -79,7 +79,7 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 
 export function listAgentTools(options: AgentToolOptions = {}) {
-  return [...connectionTools, ...[search, brief, sourceTool, documentTool, personalListTool, personalReadTool,
+  return [...connectionTools, ...platformSkillDefinitions, ...[search, brief, sourceTool, documentTool, personalListTool, personalReadTool,
     ...agentCapabilityDefinitions(options)].map(tool => ({ ...tool,
     description: tool.description + ([personalListTool.name, personalReadTool.name].includes(tool.name)
       ? ' 可选 projectCode 限定项目；无需为账号通用偏好查找或绑定项目。'
@@ -140,6 +140,12 @@ export function createAgentToolSession(options: AgentToolOptions = {}) {
           (args.limit !== undefined && (typeof args.limit !== 'number' || !Number.isInteger(args.limit) || args.limit < 1 || args.limit > 100)))
           throw new AgentToolInputError('Expected optional project query and limit 1..100');
         return content(await connection.listProjects(args as { query?: string; limit?: number }));
+      }
+      if (hasPlatformSkillCapability(name)) {
+        connection.assertAccount();
+        const data = await executePlatformSkillCapability(personalMemoryContext(), name, args);
+        connection.assertAccount();
+        return content(data);
       }
       let projectCode: string | undefined;
       if (record(args) && args.projectCode !== undefined) {

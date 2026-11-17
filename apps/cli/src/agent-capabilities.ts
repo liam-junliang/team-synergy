@@ -45,6 +45,24 @@ const material = (context: MemoryContext, verb: string, args: unknown) =>
 const codeBase = (context: MemoryContext) => '/projects/' + encodeURIComponent(context.projectCode) + '/code-understanding';
 const skillIndex = z.object({ run: PublicCodeSchema.optional(), offset: z.int().min(0).max(6291456).optional(), limit: z.int().min(1).max(50).optional() }).strict();
 const skillRead = skillIndex.extend({ skill: PublicCodeSchema, revision: z.int().positive(), path: z.string().min(1).max(240).optional(), limit: z.int().min(1).max(8000).optional() });
+const platformIndex = skillIndex.omit({ run: true });
+const platformRead = skillRead.omit({ run: true });
+const platformTools = [
+  { name: 'list_platform_skills', description: '列出平台内置已发布技能及固定修订。只需登录账号，不需要项目或工作区绑定。', schema: platformIndex },
+  { name: 'read_platform_skill', description: '按平台目录的 skill 和 revision 分页读取 SKILL.md 或 path 指定文件，返回发布来源和哈希。只需登录账号，不采用到项目。', schema: platformRead },
+];
+export const platformSkillDefinitions = platformTools.map(tool => ({ name: tool.name, description: tool.description,
+  inputSchema: z.toJSONSchema(tool.schema, { io: 'input' }), annotations: { readOnlyHint: true } }));
+export function hasPlatformSkillCapability(name: string) { return platformTools.some(tool => tool.name === name); }
+export async function executePlatformSkillCapability(context: Pick<MemoryContext, 'client'>, name: string, input: unknown) {
+  const tool = platformTools.find(tool => tool.name === name);
+  if (!tool) throw new AgentToolInputError('Unknown platform skill tool');
+  const parsed = tool.schema.safeParse(input);
+  if (!parsed.success) throw new AgentToolInputError('Invalid arguments for ' + name + ': ' + parsed.error.message);
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(parsed.data)) if (value !== undefined) params.set(key, String(value));
+  return context.client.request('GET', '/skills/platform/reader?' + params).then(valueOf);
+}
 function skillReader(context: MemoryContext, args: z.infer<typeof skillIndex> | z.infer<typeof skillRead>) {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(args)) if (value !== undefined) params.set(key, String(value));
