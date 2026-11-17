@@ -15,7 +15,7 @@ import { registerTaskRoutes } from './routes/tasks.js';
 import { registerDefectRoutes } from './routes/defects.js';
 import { registerUserRoutes } from './routes/users.js';
 import { registerRequirementRoutes } from './routes/requirements.js';
-import { registerMemoryRoutes } from './routes/memory.js';
+import { registerMemoryCenterRoutes, registerMemoryRoutes } from './routes/memory.js';
 import { registerPersonalMemoryRoutes } from './routes/personal-memory.js';
 import { processNextMemoryCapture } from './memory-capture-queue.js';
 import { registerMemoryManagementRoutes } from './routes/memory-management.js';
@@ -226,6 +226,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   // 需求录入与当前 Revision/关联任务事实投影
   registerRequirementRoutes(app, db);
   registerMemoryManagementRoutes(app, db, memoryEngines);
+  registerMemoryCenterRoutes(app, db, memoryEngines);
   // Native materials are automatically catalogued even without capture or an
   // engine configuration. Absence/pause/failures remain explicit status.
   if (ownsDb) {

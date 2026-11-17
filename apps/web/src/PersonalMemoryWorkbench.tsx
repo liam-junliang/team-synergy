@@ -1,10 +1,11 @@
-import { useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { t, formatDateTime } from './i18n.ts';
 import { useLocale } from './useLocale';
 import { navigateWorkspace } from './workspaceNavigation';
 import { personalMemoryWorkspacePath } from './workspaceRouting';
 import { listProjects } from './api';
+import { memoryCenterKey } from './memoryCenterApi';
 import {
   editPersonalMemory, getPersonalMemory, listPersonalMemory, personalMemoryConflict,
   personalMemoryDetailKey, personalMemoryListKey, personalMemoryQueryKey, withdrawPersonalMemory,
@@ -102,7 +103,7 @@ export function PersonalMemoryDetails({ value, onEdit, onWithdraw }: {
   </article>;
 }
 
-export function PersonalMemoryWorkbench({ ownerCode, initialProject }: { ownerCode: string; initialProject?: string }) {
+export function PersonalMemoryWorkbench({ ownerCode, initialProject, embedded = false, onBusyChange }: { ownerCode: string; initialProject?: string; embedded?: boolean; onBusyChange?: (busy: boolean) => void }) {
   useLocale();
   const client = useQueryClient();
   const [status, setStatus] = useState<PersonalMemoryFilter>('all');
@@ -119,6 +120,7 @@ export function PersonalMemoryWorkbench({ ownerCode, initialProject }: { ownerCo
   const edit = useMutation({ mutationFn: ({ code, input }: { code: string; input: PersonalMemoryEdit }) => editPersonalMemory(code, input) });
   const withdraw = useMutation({ mutationFn: ({ code, input }: { code: string; input: PersonalMemoryWithdraw }) => withdrawPersonalMemory(code, input) });
   const occupied = operation !== null;
+  useEffect(() => { onBusyChange?.(occupied); return () => onBusyChange?.(false); }, [occupied, onBusyChange]);
   const current = detail.data?.source === source ? detail.data : undefined;
   const projects = new Map(projectDirectory.data?.map(value => [value.code, value.name]));
   for (const value of list.data?.items ?? []) if (!projects.has(value.projectCode)) projects.set(value.projectCode, value.projectName ?? value.projectCode);
@@ -129,10 +131,12 @@ export function PersonalMemoryWorkbench({ ownerCode, initialProject }: { ownerCo
     setSelected(value.source);
     setOperation(null);
     setMessage(action === 'withdraw' ? '记忆已撤回。' : '新修订已保存。');
-    await client.invalidateQueries({ queryKey: personalMemoryQueryKey(ownerCode) });
+    await Promise.all([client.invalidateQueries({ queryKey: personalMemoryQueryKey(ownerCode) }),
+      client.invalidateQueries({ queryKey: memoryCenterKey(ownerCode).slice(0, 2) })]);
   }
-  return <main className="min-h-0 flex-1 overflow-y-auto bg-slate-50 p-4 sm:p-6 lg:p-8"><div className="mx-auto max-w-6xl space-y-5">
-    <header className="flex flex-wrap items-start justify-between gap-4"><div><div className="flex items-center gap-2"><span aria-hidden="true" className="h-2 w-2 rounded-full bg-cyan-500" /><p className="text-xs font-semibold tracking-wide text-cyan-700">{t('个人空间')}</p></div><h1 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">{t('我的记忆')}</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">{t('查看 Agent 为你积累的偏好，纠正或撤回不合适的内容。个人记忆仅本人可见，与项目共享共识分开。')}</p></div><a href="/account" className="ui-button ui-button-secondary text-sm">{t('个人设置')}</a></header>
+  const Container = embedded ? 'section' : 'main';
+  return <Container className={embedded ? '' : 'min-h-0 flex-1 overflow-y-auto bg-slate-50 p-4 sm:p-6 lg:p-8'}><div className="mx-auto max-w-6xl space-y-5">
+    {!embedded && <header className="flex flex-wrap items-start justify-between gap-4"><div><div className="flex items-center gap-2"><span aria-hidden="true" className="h-2 w-2 rounded-full bg-cyan-500" /><p className="text-xs font-semibold tracking-wide text-cyan-700">{t('个人空间')}</p></div><h1 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">{t('我的记忆')}</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">{t('查看 Agent 为你积累的偏好，纠正或撤回不合适的内容。个人记忆仅本人可见，与项目共享共识分开。')}</p></div><a href="/account" className="ui-button ui-button-secondary text-sm">{t('个人设置')}</a></header>}
     <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex flex-wrap gap-3"><label className="flex items-center gap-2 text-sm text-slate-600"><span>{t('记忆状态')}</span><select aria-label={t('记忆状态')} value={status} disabled={occupied} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" onChange={event => { setStatus(event.target.value as PersonalMemoryFilter); setSelected(null); setMessage(''); }}><option value="active">{t('使用中')}</option><option value="withdrawn">{t('已撤回')}</option><option value="all">{t('全部记忆')}</option></select></label>
       <label className="flex items-center gap-2 text-sm text-slate-600"><span>{t('来源项目')}</span><select aria-label={t('来源项目')} value={initialProject ?? ''} disabled={occupied} className="max-w-56 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" onChange={event => navigateWorkspace(personalMemoryWorkspacePath(event.target.value || undefined))}><option value="">{t('全部来源项目')}</option>{[...projects].map(([code, name]) => <option key={code} value={code}>{name}</option>)}</select></label></div>
       <button type="button" disabled={list.isFetching || detail.isFetching} className="ui-context-action" onClick={() => void refresh()}>{t('刷新记忆')}</button></div>
@@ -150,5 +154,5 @@ export function PersonalMemoryWorkbench({ ownerCode, initialProject }: { ownerCo
         </div> : null : <div className="py-12 text-center text-sm text-slate-400">{t('选择一条记忆查看内容、来源与修订。')}</div>}
       </section>
     </div>
-  </div></main>;
+  </div></Container>;
 }
