@@ -44,7 +44,7 @@ async function fixture() {
       return result([{ id: job.id }]);
     }
     if (text.includes('set external_ref=$5')) {
-      if (!job || !same(job, args) || job.status !== 'processing' || job.externalRef !== null && job.externalRef !== args[4]) return result([]);
+      if (!job || !same(job, args) || job.status !== 'processing' || job.externalRef !== args[5]) return result([]);
       job.externalRef = args[4]; return result([{ id: job.id }]);
     }
     if (text.includes('set status=$5')) {
@@ -89,15 +89,15 @@ async function fixture() {
     const key = body.wiki_id, pageKey = ref => key + '/' + ref;
     let data;
     if (operation === '/wiki/get') data = { wiki_id: key, team_id: 'team', name: 'tsp-memory-PROJECT', status: 'ready' };
-    else if (operation === '/wiki/page/read') data = { items: body.refs.map(ref => pages.has(pageKey(ref)) ? { ref, content: pages.get(pageKey(ref)) } : { ref, not_found: true }) };
+    else if (operation === '/wiki/page/read') { hooks.beforeRead?.(body); data = { items: body.refs.map(ref => pages.has(pageKey(ref)) ? { ref, content: pages.get(pageKey(ref)) } : { ref, not_found: true }) }; }
     else if (operation === '/wiki/page/write') {
       await hooks.beforeWrite?.(body);
       for (const page of body.pages) pages.set(pageKey(page.ref), page.content);
       await hooks.afterWrite?.(body); data = {};
     } else if (operation === '/wiki/page/rm') { for (const ref of body.refs) pages.delete(pageKey(ref)); data = {}; }
-    else if (operation === '/wiki/search') data = { results: [...pages.keys()].filter(ref => ref.startsWith(key + '/')).map(ref => ({ path: ref.slice(key.length + 1) })) };
-    else if (operation === '/conversation/query') { const rows = messages.get(body.session_id) ?? []; data = { messages: rows, total: rows.length }; }
-    else if (operation === '/conversation/add') { messages.set(body.session_id, body.messages.map((row, i) => ({ ...row, id: 'message-' + i }))); data = {}; }
+    else if (operation === '/wiki/search') data = { results: hooks.searchPending ? [] : [...pages.keys()].filter(ref => ref.startsWith(key + '/')).map(ref => ({ path: ref.slice(key.length + 1) })) };
+    else if (operation === '/conversation/query') { hooks.beforeCoreRead?.(body); const rows = messages.get(body.session_id) ?? []; data = { messages: rows, total: rows.length }; }
+    else if (operation === '/conversation/add') { messages.set(body.session_id, body.messages.map((row, i) => ({ ...row, id: 'message-' + i }))); hooks.afterCoreAdd?.(body); data = {}; }
     else if (operation === '/conversation/delete') { for (const [session, rows] of messages) messages.set(session, rows.filter(row => !body.message_ids.includes(row.id))); data = {}; }
     else throw Error('Unexpected fake endpoint: ' + operation);
     return { ok: true, status: 200, json: async () => ({ code: 0, data }) };
@@ -204,4 +204,65 @@ test('an uncertain old attempt qualifies a newer upsert receipt without replacin
   assert.match(fx.jobs[0].externalRef, /#uncertain-material-write$/u);
   fx.retire(); await fx.run();
   assert.equal(fx.pages.size, 0); assert.equal(fx.jobs[0].status, 'needs_reconcile');
+});
+
+test('an active synced index is reprojected after a valid binding replacement', async () => {
+  const fx = await fixture();
+  assert.equal((await fx.run()).status, 'synced');
+  const previousRef = fx.jobs[0].externalRef;
+  fx.rebind(); fx.jobs[0].status = 'pending'; // completeProvision retains the prior receipt.
+  assert.equal((await fx.run()).status, 'synced');
+  assert.notEqual(fx.jobs[0].externalRef, previousRef);
+  assert.match(fx.jobs[0].externalRef, /^wiki:new-wiki\//u);
+  assert.equal(fx.pages.size, 1); assert.equal(fx.copies(), 1);
+  assert.ok([...fx.pages.keys()].every(ref => ref.startsWith('new-wiki/')));
+});
+
+test('a successful write followed by temporary indexing lag can retry to synced', async () => {
+  const fx = await fixture(); fx.hooks.searchPending = true;
+  assert.equal((await fx.run()).code, 'wiki_index_pending');
+  assert.doesNotMatch(fx.jobs[0].externalRef, /#uncertain-material-write$/u);
+  fx.hooks.searchPending = false; fx.retry();
+  assert.equal((await fx.run()).status, 'synced');
+  assert.equal(fx.calls.filter(row => row.operation === '/wiki/page/write').length, 1);
+  assert.equal(fx.pages.size, 1); assert.equal(fx.copies(), 1);
+});
+
+test('temporary readback failure after a confirmed write leaves an ordinary retry', async () => {
+  const fx = await fixture(); let reads = 0;
+  fx.hooks.beforeRead = () => { if (++reads === 2) throw Error('Read service temporarily unavailable'); };
+  assert.equal((await fx.run()).status, 'needs_reconcile');
+  assert.doesNotMatch(fx.jobs[0].externalRef, /#uncertain-material-write$/u);
+  fx.retry(); assert.equal((await fx.run()).status, 'synced');
+  assert.equal(fx.calls.filter(row => row.operation === '/wiki/page/write').length, 1);
+});
+
+test('binding replacement retains an uncertain old target instead of authorizing a new-target cleanup', async () => {
+  const fx = await fixture();
+  fx.hooks.afterWrite = () => { throw Error('Mutation response was lost'); };
+  await fx.run(); const previousRef = fx.jobs[0].externalRef;
+  fx.rebind(); fx.jobs[0].status = 'pending'; fx.jobs[0].lastError = null;
+  assert.equal((await fx.run()).status, 'needs_reconcile');
+  assert.equal(fx.jobs[0].externalRef, previousRef);
+  assert.ok(fx.calls.filter(row => row.operation === '/wiki/page/rm').every(row => row.body.wiki_id === 'old-wiki'));
+  assert.equal(fx.calls.filter(row => row.operation === '/wiki/page/write' && row.body.wiki_id === 'new-wiki').length, 0);
+});
+
+test('temporary Core read failure after confirmed add retries without a permanent qualifier or duplicate', async () => {
+  const fx = await fixture(); let reads = 0;
+  fx.hooks.beforeCoreRead = () => { if (++reads === 2) throw Error('Core read temporarily unavailable'); };
+  assert.equal((await fx.run()).status, 'needs_reconcile');
+  assert.doesNotMatch(fx.jobs[0].externalRef, /#uncertain-material-write$/u);
+  fx.retry(); assert.equal((await fx.run()).status, 'synced');
+  assert.equal(fx.copies(), 1);
+  assert.equal(fx.calls.filter(row => row.operation === '/conversation/add').length, 1);
+});
+
+test('a genuinely ambiguous Core add retains its qualifier through deletion', async () => {
+  const fx = await fixture();
+  fx.hooks.afterCoreAdd = () => { throw Error('Core accepted add but its response was lost'); };
+  assert.equal((await fx.run()).status, 'needs_reconcile');
+  assert.match(fx.jobs[0].externalRef, /#uncertain-material-write$/u);
+  fx.retire(); assert.equal((await fx.run()).status, 'needs_reconcile');
+  assert.equal(fx.pages.size, 0); assert.equal(fx.copies(), 0);
 });

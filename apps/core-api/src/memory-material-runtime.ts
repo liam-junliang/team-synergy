@@ -28,6 +28,13 @@ const resourceRef = (ref: string) => ref.endsWith(uncertainReceipt) ? ref.slice(
 const isUncertain = (ref: string | null) => ref?.endsWith(uncertainReceipt) === true;
 type MaterialQuery = Pick<Db['$client'], 'query'>;
 
+function receiptMapping(job: IndexJob, mapping: Mapping, ref: string) {
+  const match = /^wiki:([^/]+)\/(.+)$/u.exec(resourceRef(ref)), wikiId = match?.[1];
+  const path = job.legacy ? legacyPage(job.project, job.code) : projectMaterialIndexPage(job.project, job.code);
+  if (!wikiId || !safeKey.test(wikiId) || match?.[2] !== path) throw Error('Wiki identity mismatch');
+  return { ...mapping, wikiId };
+}
+
 async function sameClaim(connection: MaterialQuery, job: IndexJob) {
   const result = await connection.query(`select id from memory_projection_jobs where id=$1 and attempts=$2
     and generation=$3 and operation=$4 and status='processing'`, [job.id, job.attempts, job.generation, job.operation]);
@@ -94,7 +101,7 @@ async function readPage(config: EngineConfig, p: Mapping, ref: string) {
   if (typeof row.content !== 'string') throw Error('Invalid engine envelope');
   return row.content;
 }
-async function coreCopy(config: EngineConfig, p: Mapping, session: string, content: string, remove = false, writing = () => {}) {
+async function coreCopy(config: EngineConfig, p: Mapping, session: string, content: string, remove = false, writing = (_inFlight: boolean) => {}) {
   const read = async () => {
     const result = await core(config, p, 'query', { session_id: session, limit: 100 });
     if (!Array.isArray(result.messages) || result.total !== result.messages.length) throw Error('Invalid semantic receipt');
@@ -110,11 +117,16 @@ async function coreCopy(config: EngineConfig, p: Mapping, session: string, conte
     }
     return;
   }
-  if (!rows.length) { writing(); await core(config, p, 'add', { session_id: session, messages: [{ role: 'assistant', content }] }); rows = await read(); }
+  if (!rows.length) {
+    writing(true);
+    await core(config, p, 'add', { session_id: session, messages: [{ role: 'assistant', content }] });
+    writing(false);
+    rows = await read();
+  }
   if (rows.length !== 1) throw Error('Engine readback mismatch');
 }
 
-async function transferIndex(config: EngineConfig, p: Mapping, job: IndexJob, writing = () => {}) {
+async function transferIndex(config: EngineConfig, p: Mapping, job: IndexJob, writing = (_inFlight: boolean) => {}) {
   const text = projectMaterialIndexText(job), path = projectMaterialIndexPage(job.project, job.code);
   const page = '---\ntype: source\nlocked: true\n---\n\n# 项目资料目录：' + job.title.replace(/[\r\n]+/gu, ' ') + '\n\n' + text + '\n';
   const previous = await readPage(config, p, path);
@@ -123,7 +135,11 @@ async function transferIndex(config: EngineConfig, p: Mapping, job: IndexJob, wr
     if (previous !== null) await wiki(config, p, 'page/rm', { refs: [path] });
     if (await readPage(config, p, path) !== null) throw Error('Engine readback mismatch');
   } else {
-    if (previous === null) { writing(); await wiki(config, p, 'page/write', { pages: [{ ref: path, content: page }] }); }
+    if (previous === null) {
+      writing(true);
+      await wiki(config, p, 'page/write', { pages: [{ ref: path, content: page }] });
+      writing(false);
+    }
     if (await readPage(config, p, path) !== page) throw Error('Engine readback mismatch');
     const indexed = await wiki(config, p, 'search', { query: job.code, limit: 16 });
     if (!indexed.results?.some(row => row.path.replace(/\\/gu, '/') === path)) throw Error('Wiki page not indexed');
@@ -246,25 +262,32 @@ export async function projectNextMaterialIndex(db: Db, config: EngineConfig) {
     // Deletes may still own a previous binding's external reference. Verify its
     // project Wiki identity, never reinterpret it as the new Wiki's resource.
     if (job.operation === 'delete' && ref) {
-      const match = /^wiki:([^/]+)\/(.+)$/u.exec(resourceRef(ref));
-      const wikiId = match?.[1];
-      const expectedPath = job.legacy ? legacyPage(job.project, job.code) : projectMaterialIndexPage(job.project, job.code);
-      if (!wikiId || !safeKey.test(wikiId) || match?.[2] !== expectedPath) throw Error('Wiki identity mismatch');
-      p = { ...p, wikiId };
+      p = receiptMapping(job, mapping, ref);
+    }
+    const destination = 'wiki:' + p.wikiId + '/' + (job.legacy ? legacyPage(job.project, job.code) : projectMaterialIndexPage(job.project, job.code));
+    if (job.operation === 'upsert' && ref !== null && resourceRef(ref) !== destination) {
+      // completeProvision requeues active indexes while retaining the old Wiki
+      // receipt. Verify and remove that copy before switching ownership. An
+      // ambiguous old write stays pinned there until its uncertainty is resolved.
+      const previous = receiptMapping(job, mapping, ref);
+      await owned(resolved.config, job.project, previous);
+      await transferIndex(resolved.config, previous, { ...job, operation: 'delete' });
+      if (isUncertain(ref)) {
+        await update('needs_reconcile', 'uncertain_material_write');
+        return { status: 'needs_reconcile', engine: 'tencent', code: 'uncertain_material_write' };
+      }
+      ref = destination;
     }
     await owned(resolved.config, job.project, p);
-    const destination = 'wiki:' + p.wikiId + '/' + (job.legacy ? legacyPage(job.project, job.code) : projectMaterialIndexPage(job.project, job.code));
-    if (ref !== null && resourceRef(ref) !== destination) throw Error('Wiki identity mismatch');
     ref ??= destination;
     // Record ownership before network I/O, so retirement can clean the old Wiki
     // even if the binding changes before a write returns or its ACK is lost.
     const recorded = await connection.query(`update memory_projection_jobs set external_ref=$5
       where id=$1 and attempts=$2 and generation=$3 and operation=$4 and status='processing'
-        and (external_ref is null or external_ref=$5) returning id`, [job.id, job.attempts, job.generation, job.operation, ref]);
+        and external_ref is not distinct from $6 returning id`, [job.id, job.attempts, job.generation, job.operation, ref, job.externalRef]);
     if (recorded.rowCount !== 1) return { status: 'lease_changed', engine: 'tencent' };
     if (job.legacy) await deleteLegacyCopy(resolved.config, p, job);
-    else await transferIndex(resolved.config, p, job, () => { writeAttempted = true; });
-    writeAttempted = false; // All writes returned and their readbacks completed.
+    else await transferIndex(resolved.config, p, job, inFlight => { writeAttempted = inFlight; });
     if (!job.legacy && job.operation === 'upsert' && !await stillCurrent(db, job)) {
       await connection.query(`update memory_projection_jobs set operation='delete',generation=generation+1,status='pending',lease_until=null,external_ref=$4
         where id=$1 and attempts=$2 and generation=$3 and operation='upsert'`, [job.id, job.attempts, job.generation, ref]);
