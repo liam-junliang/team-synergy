@@ -3,6 +3,7 @@ import path from 'node:path';
 import { DomainError } from '@team-synergy/domain';
 import { INTAKE_SKILL_VERSION, intakeManifestText, type IntakeBundle } from '@team-synergy/contracts';
 import { assertIntakeRegularPath, intakeRepository, isExcludedIntakePath, isIntakeTextPath, normalizeIntakeScopes, readIntakeSourceFile, scanIntakeSource, sha256, validateIntakeSource } from './intake-source.js';
+import { intakeSnapshotScopes, verifyIntakeCodeSnapshot, type IntakeCodeSnapshot } from './intake-code-knowledge.js';
 
 const LOCAL_SOURCES_FILE = 'intake.sources.local.json';
 const ordinal = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
@@ -10,6 +11,7 @@ export interface IntakeLocalInput { key: string; kind: 'document' | 'team_note';
 export interface IntakeLocalSources {
   version: 1; project_code: string; repository_code: string | null;
   code_scopes: string[]; include_untracked: boolean; materials: IntakeLocalInput[];
+  code_snapshot?: IntakeCodeSnapshot;
 }
 
 export function parseIntakeMaterials(materials: string[] = [], notes: string[] = []): IntakeLocalInput[] {
@@ -75,9 +77,21 @@ function scanMaterial(input: IntakeLocalInput) {
 /** Absolute local roots never enter the public bundle. */
 export function scanIntakeInputs(config: IntakeLocalSources, startDir: string): IntakeBundle['source'] {
   const capture = () => {
-    const code = config.repository_code ? scanIntakeSource(intakeRepository(startDir, config.project_code, config.repository_code), config.code_scopes, config.include_untracked) : null;
+    let code: Pick<IntakeBundle['source'], 'files' | 'commit' | 'dirty' | 'scope' | 'exclusions'> | null = null;
+    if (config.code_snapshot) {
+      if (!config.repository_code || config.include_untracked) throw new DomainError('intake_local_sources_invalid', '固定代码分析不能混入当前工作区扫描选项');
+      const root = verifyIntakeCodeSnapshot(config.code_snapshot, config.project_code, config.repository_code, startDir);
+      const snapshot = config.code_snapshot.snapshot;
+      const scope = intakeSnapshotScopes(snapshot, config.code_scopes);
+      const files = snapshot.files.filter(file => scope.some(selected => selected === '.' || file.path === selected || file.path.startsWith(`${selected}/`))).map(file => {
+        const bytes = readIntakeSourceFile(root, file.path);
+        if (!bytes || sha256(bytes) !== file.sha256) throw new DomainError('intake_source_changed', '固定代码证据已改变或不再符合安全文本范围');
+        return { path: file.path, sha256: file.sha256 };
+      });
+      code = { files, commit: snapshot.commit, dirty: snapshot.kind === 'draft', scope, exclusions: [...snapshot.exclusions.slice(0, 140), 'Original fixed analysis snapshot bytes; current working-tree changes are not included.', ...(snapshot.exclusions.length > 140 ? ['Additional snapshot exclusions are retained in the local run record.'] : [])] };
+    } else if (config.repository_code) code = scanIntakeSource(intakeRepository(startDir, config.project_code, config.repository_code), config.code_scopes, config.include_untracked);
     if (code?.files.some(file => file.path.startsWith('materials/'))) throw new DomainError('intake_material_collision', 'materials/ 保留给补充资料虚拟路径；请缩小仓库 --scope 或将该目录作为独立 --material 来源');
-    const inputs: NonNullable<IntakeBundle['source']['inputs']> = code ? [{ key: 'repository', kind: 'code', label: 'repository', prefix: '.', ...(code.commit ? { revision: code.commit } : {}) }] : [];
+    const inputs: NonNullable<IntakeBundle['source']['inputs']> = code ? [{ key: 'repository', kind: 'code', label: 'repository', prefix: '.', ...(config.code_snapshot ? { revision: `snapshot:${config.code_snapshot.snapshot.snapshot_id}` } : code.commit ? { revision: code.commit } : {}) }] : [];
     const files = [...(code?.files ?? [])];
     const exclusions = [...(code?.exclusions ?? [])];
     for (const material of config.materials) {
@@ -114,7 +128,7 @@ export function writeIntakeLocalSources(directory: string, config: IntakeLocalSo
 function readLocalSources(file: string, bundle: IntakeBundle): IntakeLocalSources {
   const local = path.join(path.dirname(path.resolve(file)), LOCAL_SOURCES_FILE);
   assertIntakeRegularPath(local);
-  if (!existsSync(local) || !lstatSync(local).isFile() || lstatSync(local).size > 100_000) throw new DomainError('intake_local_sources_required', '缺少 prepare 生成的 intake.sources.local.json 本机来源映射；请保留候选并重新 prepare');
+  if (!existsSync(local) || !lstatSync(local).isFile() || lstatSync(local).size > 32 * 1024 * 1024) throw new DomainError('intake_local_sources_required', '缺少有效的 intake.sources.local.json 本机来源映射；请保留候选并重新 prepare');
   let parsed: IntakeLocalSources;
   try { parsed = JSON.parse(readFileSync(local, 'utf8')); } catch { throw new DomainError('intake_local_sources_invalid', '本机来源映射不是有效 JSON'); }
   if (!parsed || parsed.version !== 1 || parsed.project_code !== bundle.project_code || parsed.repository_code !== bundle.repository_code || !Array.isArray(parsed.code_scopes) || !parsed.code_scopes.every(scope => typeof scope === 'string') || typeof parsed.include_untracked !== 'boolean' || !Array.isArray(parsed.materials) || parsed.materials.length > 50) throw new DomainError('intake_local_sources_invalid', '本机来源映射与候选不一致');
@@ -122,6 +136,9 @@ function readLocalSources(file: string, bundle: IntakeBundle): IntakeLocalSource
     if (!input || !/^[a-z][a-z0-9_-]{0,39}$/.test(input.key) || input.key === 'repository' || !['document', 'team_note'].includes(input.kind) || input.label !== input.key || input.prefix !== `materials/${input.key}` || typeof input.root !== 'string' || !path.isAbsolute(input.root)) throw new DomainError('intake_local_sources_invalid', '本机资料来源映射无效');
   }
   if (new Set(parsed.materials.map(input => input.key)).size !== parsed.materials.length || parsed.include_untracked !== (bundle.source.include_untracked ?? false)) throw new DomainError('intake_local_sources_invalid', '本机来源映射与候选扫描模式不一致');
+  if (Object.hasOwn(parsed, 'code_snapshot')) {
+    if (!parsed.code_snapshot || !parsed.repository_code || parsed.include_untracked) throw new DomainError('intake_local_sources_invalid', '固定代码分析映射不能混入工作区扫描模式');
+  }
   if (parsed.repository_code) normalizeIntakeScopes(parsed.code_scopes);
   else if (parsed.code_scopes.length || !parsed.materials.length || parsed.include_untracked) throw new DomainError('intake_local_sources_invalid', '纯资料接入不能包含代码范围或未跟踪文件选项');
   return parsed;
@@ -132,7 +149,7 @@ export function validateIntakeInputs(bundle: IntakeBundle, startDir: string, fil
   const config = readLocalSources(file, bundle);
   const current = scanIntakeInputs(config, startDir);
   if (current.manifest_sha256 !== bundle.source.manifest_sha256 || current.commit !== bundle.source.commit || current.dirty !== bundle.source.dirty || current.mode !== bundle.source.mode || JSON.stringify(current.scope) !== JSON.stringify([...bundle.source.scope].sort(ordinal)) || JSON.stringify(current.inputs) !== JSON.stringify([...bundle.source.inputs].sort((a, b) => a.kind === 'code' ? -1 : b.kind === 'code' ? 1 : ordinal(a.key, b.key)))) throw new DomainError('intake_source_changed', '本机输入资料、代码或来源配置已变化，请重新 prepare 并复核候选；未上传任何资料');
-  const codeRoot = config.repository_code ? intakeRepository(startDir, bundle.project_code, config.repository_code) : null;
+  const codeRoot = config.repository_code ? config.code_snapshot ? verifyIntakeCodeSnapshot(config.code_snapshot, bundle.project_code, config.repository_code, startDir) : intakeRepository(startDir, bundle.project_code, config.repository_code) : null;
   const anchors = [...bundle.items.flatMap(item => item.evidence), ...(bundle.source.production?.capabilities.flatMap(item => item.evidence) ?? []), ...(bundle.source.production?.conflicts.flatMap(item => item.evidence) ?? [])];
   const checkedFiles = new Map<string, { lines: number; hash: string }>();
   for (const evidence of anchors) {

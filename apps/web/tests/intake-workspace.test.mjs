@@ -347,6 +347,22 @@ test('material source snapshots omit Git state while repository and mixed source
   assert.doesNotMatch(english, /Commit:|No commit|Clean worktree|Uncommitted changes|[\u4e00-\u9fff]/);
 });
 
+test('pinned code analysis sources never claim the current checkout state', () => {
+  for (const dirty of [false, true]) {
+    const fixed = { ...source, dirty, mode: 'mixed', inputs: [{ key: 'repository', kind: 'code', label: 'repository', prefix: '.', revision: `snapshot:${'a'.repeat(64)}` }] };
+    i18n.setLocale('zh-CN', false);
+    const html = render(ui.IntakeSource, { source: fixed });
+    assert.match(html, /固定分析快照/);
+    assert.match(html, /不代表当前工作区或已部署版本/);
+    assert.doesNotMatch(html, /干净工作区|有未提交改动|来源是本次工作区快照/);
+    i18n.setLocale('en-US', false);
+    const english = render(ui.IntakeSource, { source: fixed });
+    assert.match(english, /Pinned analysis snapshot/);
+    assert.doesNotMatch(english, /Clean worktree|Uncommitted changes|[\u4e00-\u9fff]/);
+  }
+  i18n.setLocale('zh-CN', false);
+});
+
 test('legacy batches require explicit profile confirmation and cannot imply a prior quality pass', () => {
   const legacy = { ...batch, profile: null, quality_gate: { ...qualityGate, status: 'unknown', note: '' } };
   assert.match(api.intakeFreezeProblem(legacy), /明确本批次的交付档位/);
