@@ -9,7 +9,9 @@ import { ensureProjectSystemFolders, PROJECT_SYSTEM_FOLDER_NAMES } from './proje
 import { createRequirementDocumentUseCases, type RequirementDocumentSummary } from './requirement-document-use-cases.js';
 import { createArchitectureDocumentUseCases, type ArchitectureDocumentSummary } from './architecture-document-use-cases.js';
 import { createTestingUseCases } from './testing-use-cases.js';
+import { enqueueProjectDocumentMemory } from './project-document-memory.js';
 import type { TestAssetSummary } from '@team-synergy/contracts';
+import { isDocumentLibraryTestAsset } from '@team-synergy/contracts';
 import { projectDocumentKindView, type ProjectDocumentInputKind } from './project-document-kinds.js';
 export { PROJECT_DOCUMENT_KINDS, PROJECT_DOCUMENT_INPUT_KINDS, LEGACY_PROJECT_DOCUMENT_KINDS, projectDocumentKindView } from './project-document-kinds.js';
 export type { ProjectDocumentKind, ProjectDocumentInputKind } from './project-document-kinds.js';
@@ -227,7 +229,7 @@ export function createProjectDocumentUseCases(db: Db) {
         project.status === 'active' && document.state === 'active' && (member.role !== 'viewer' && (isProjectManager(member.role) || document.owner_principal_code === principal.code)),
       ));
       const architectureSummaries = architectureResult.data.map(document => architectureSummary(document, systemFolders.architecture));
-      const testingSummaries = testingResult.data.map(asset => testingSummary(asset, systemFolders.testing));
+      const testingSummaries = testingResult.data.filter(isDocumentLibraryTestAsset).map(asset => testingSummary(asset, systemFolders.testing));
       const compare = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0;
       return {
         ok: true,
@@ -358,6 +360,7 @@ export function createProjectDocumentUseCases(db: Db) {
       const summary = cmd.summary?.trim() || summaryOf(content, title);
       const createdAt = now();
       const created = await db.transaction(async (tx) => {
+        await lockAggregate(tx, 'project', project.id);
         await assertProjectAccess(tx, project.id, principal.id, 'write');
         const [document] = await tx.insert(schema.projectDocuments).values({
           code: createPublicCode(),
@@ -375,7 +378,7 @@ export function createProjectDocumentUseCases(db: Db) {
           updated_at: createdAt,
         }).returning();
         if (!document) throw new DomainError('internal_error', '交接文档创建失败');
-        await tx.insert(schema.projectDocumentRevisions).values({
+        const [revision] = await tx.insert(schema.projectDocumentRevisions).values({
           code: createPublicCode(),
           document_id: document.id,
           revision: 1,
@@ -385,7 +388,9 @@ export function createProjectDocumentUseCases(db: Db) {
           change_summary: '创建交接文档',
           created_by: principal.id,
           created_at: createdAt,
-        });
+        }).returning({ id: schema.projectDocumentRevisions.id });
+        if (!revision) throw new DomainError('internal_error', '文档修订创建失败');
+        await enqueueProjectDocumentMemory(tx, revision.id);
         const audit = {
           entity_type: 'project_document', entity_id: document.id, principal_id: principal.id,
           base_snapshot: 0, to: 'active', action: 'project_document.created',
@@ -582,10 +587,12 @@ export function createProjectDocumentUseCases(db: Db) {
           updated_by: principal.id,
           updated_at: updatedAt,
         }).where(eq(schema.projectDocuments.id, document.id));
-        await tx.insert(schema.projectDocumentRevisions).values({
+        const [storedRevision] = await tx.insert(schema.projectDocumentRevisions).values({
           code: createPublicCode(), document_id: document.id, revision, title, summary, content,
           change_summary: changeSummary, created_by: principal.id, created_at: updatedAt,
-        });
+        }).returning({ id: schema.projectDocumentRevisions.id });
+        if (!storedRevision) throw new DomainError('internal_error', '文档修订创建失败');
+        await enqueueProjectDocumentMemory(tx, storedRevision.id);
         const audit = {
           entity_type: 'project_document', entity_id: document.id, principal_id: principal.id,
           base_snapshot: locked.revision, action: 'project_document.revised',

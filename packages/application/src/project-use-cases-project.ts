@@ -9,6 +9,7 @@ import { createPublicCode, findProjectByCode, findTeamByCode, findUserByCode } f
 import { ensureProjectSystemFolders } from './project-document-folders.js';
 import { assertProjectAccess, effectiveProjectMember, isProjectManager, projectCapabilities, resolveProjectAccess, resolveTeamRole } from './project-access.js';
 import { createMemberUseCases } from './member-use-cases.js';
+import { enqueueProjectDocumentMemory } from './project-document-memory.js';
 
 async function usersByIds(db: Db, ids: bigint[]) {
   if (ids.length === 0) return new Map<bigint, typeof schema.users.$inferSelect>();
@@ -413,7 +414,7 @@ export function createProjectUseCasesProject(db: Db) {
           }).returning();
         if (!document) throw new DomainError('internal_error', '项目文档保存失败');
         if (!existing) await tx.update(schema.projects).set({ overview_document_id: document.id }).where(eq(schema.projects.id, project.id));
-        await tx.insert(schema.projectDocumentRevisions).values({
+        const [storedRevision] = await tx.insert(schema.projectDocumentRevisions).values({
           code: createPublicCode(),
           document_id: document.id,
           revision,
@@ -423,7 +424,9 @@ export function createProjectUseCasesProject(db: Db) {
           change_summary: existing ? '通过兼容接口更新交接文档' : '通过兼容接口创建交接文档',
           created_by: principal.id,
           created_at: updatedAt,
-        });
+        }).returning({ id: schema.projectDocumentRevisions.id });
+        if (!storedRevision) throw new DomainError('internal_error', '文档修订创建失败');
+        await enqueueProjectDocumentMemory(tx, storedRevision.id);
         const audit = {
           entity_type: 'project',
           entity_id: project.id,

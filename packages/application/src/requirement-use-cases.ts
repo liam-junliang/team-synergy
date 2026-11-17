@@ -1,4 +1,5 @@
 import { writeRequirement } from './intake-entity-writers.js';
+import { lockAggregate } from './aggregate-lock.js';
 import { assertProjectAccess, effectiveProjectMember, isProjectManager } from './project-access.js';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { Db } from '@team-synergy/persistence';
@@ -87,6 +88,15 @@ export interface RequirementDetail extends RequirementSummary {
 }
 
 type RequirementRow = typeof schema.requirements.$inferSelect;
+
+async function lockRequirementForWrite(tx: Pick<Db, 'execute' | 'select'>, projectId: bigint, base: RequirementRow) {
+  await lockAggregate(tx, 'project', projectId);
+  const [current] = await tx.select().from(schema.requirements).where(eq(schema.requirements.id, base.id)).for('update');
+  if (!current || current.current_revision !== base.current_revision || current.state !== base.state ||
+    current.feature_id !== base.feature_id || current.module_id !== base.module_id || current.document_id !== base.document_id) {
+    throw new DomainError('snapshot_conflict', '需求内容、状态或绑定已变化，请重新加载后重试');
+  }
+}
 type RequirementRevisionRow = typeof schema.requirementRevisions.$inferSelect;
 type FeatureRow = typeof schema.features.$inferSelect;
 type ModuleRow = typeof schema.projectModules.$inferSelect;
@@ -102,7 +112,7 @@ function parseJsonArray(raw: string | null): unknown[] {
   }
 }
 
-function parseAcceptanceCriteria(raw: string | null): RequirementAcceptanceCriterion[] {
+export function parseAcceptanceCriteria(raw: string | null): RequirementAcceptanceCriterion[] {
   return parseJsonArray(raw).flatMap((item, index) => {
     if (typeof item === 'string' && item.trim()) {
       return [{ id: `AC-${index + 1}`, text: item.trim() }];
@@ -625,8 +635,10 @@ export function createRequirementUseCases(db: Db) {
       }
 
       const changedAt = now();
+      const projectId = currentRelations.project.id;
       const result = await db.transaction(async (tx) => {
-        await assertProjectAccess(tx, currentRelations.project!.id, principal.id, 'manage');
+        await lockRequirementForWrite(tx, projectId, requirement);
+        await assertProjectAccess(tx, projectId, principal.id, 'manage');
         let nextRevisionNumber = requirement.current_revision;
         if (contentChanged) {
           nextRevisionNumber += 1;
@@ -760,7 +772,6 @@ export function createRequirementUseCases(db: Db) {
       }
 
       const changedAt = now();
-      await db.update(schema.requirements).set({ state: cmd.to }).where(eq(schema.requirements.id, requirement.id));
       const audit = {
         entity_type: 'requirement',
         entity_id: requirement.id,
@@ -773,7 +784,13 @@ export function createRequirementUseCases(db: Db) {
         payload: { revision: requirement.current_revision },
       };
       assertAuditedChange(audit);
-      await insertAudit(db, toAuditEvent(audit, createPublicCode(), changedAt));
+      const projectId = relations.project.id;
+      await db.transaction(async tx => {
+        await lockRequirementForWrite(tx, projectId, requirement);
+        await assertProjectAccess(tx, projectId, principal.id, 'manage');
+        await tx.update(schema.requirements).set({ state: cmd.to }).where(eq(schema.requirements.id, requirement.id));
+        await insertAudit(tx, toAuditEvent(audit, createPublicCode(), changedAt));
+      });
 
       return {
         ok: true,
