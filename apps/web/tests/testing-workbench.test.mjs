@@ -39,6 +39,41 @@ test('asset reader shares Markdown and version controls without a raw content ed
   const readonly = render(assets.TestAssetReader, { document: { ...asset, can_edit: false }, onEdit() {} });
   assert.doesNotMatch(readonly, /编辑当前版本/); assert.match(readonly, /版本记录/);
 });
+test('delivered test artifacts link only to the current project and retain exact asset revisions', () => {
+  const project = 'P'.repeat(20), code = 'A'.repeat(20);
+  const uri = 'tsp:test-asset/' + code + '@1';
+  const path = routing.taskArtifactTestingPath({ project_code: project, uri }, project);
+  assert.equal(path, '/projects/' + project + '/testing?tab=assets&item=' + code + '&revision=1');
+  assert.equal(routing.parseWorkspacePath(path).testingRevision, '1');
+  const executionPath = routing.taskArtifactTestingPath({ project_code: project, uri: 'tsp:test-execution/' + code }, project);
+  assert.equal(executionPath, '/projects/' + project + '/testing?tab=executions&item=' + code);
+  assert.equal(routing.taskArtifactTestingPath({ project_code: 'Q'.repeat(20), uri }, project), undefined);
+  for (const value of [uri + '?other', uri.replace('@1', '@0'), uri.replace('@1', '@9007199254740993'),
+    'javascript:alert(1)', 'https://example.test', 'tsp:test-execution/' + code + '@1']) {
+    assert.equal(routing.taskArtifactTestingPath({ project_code: project, uri: value }, project), undefined);
+  }
+  for (const revision of ['', '0', '-1', 'abc']) {
+    assert.equal(routing.parseWorkspacePath('/projects/P/testing?tab=assets&item=A&revision=' + revision).testingRevision, revision);
+  }
+});
+test('asset links render the pinned revision and reject missing versions without falling through to current bytes', () => {
+  const historic = { ...asset.revisions[1], storage_kind: 'file', content: '',
+    file: { file_name: 'original.zip', mime_type: 'application/zip', content_base64: 'b2xk', size_bytes: 3, sha256: 'a'.repeat(64) } };
+  const upgraded = { ...asset, storage_kind: 'file', content: '',
+    file: { ...historic.file, file_name: 'new.zip', content_base64: 'bmV3', sha256: 'b'.repeat(64) },
+    revisions: [asset.revisions[0], historic] };
+  const pinned = render(assets.TestAssetReader, { document: upgraded, requestedRevision: 1, onEdit() {} });
+  assert.match(pinned, /original\.zip/); assert.match(pinned, new RegExp('a'.repeat(64)));
+  assert.doesNotMatch(pinned, /new\.zip|编辑当前版本/);
+  assert.match(pinned, /正在查看历史版本 r1/);
+  const absent = render(assets.TestAssetReader, { document: upgraded, requestedRevision: 88, onEdit() {} });
+  assert.match(absent, /role="alert"/); assert.match(absent, /所请求的资料版本不存在/);
+  assert.doesNotMatch(absent, /new\.zip|original\.zip|下载文件/);
+  const entries = [[['project', 'P'], { code: 'P', status: 'active', role: 'owner' }],
+    [['test-assets', 'P', {}], [upgraded]], [['test-asset', 'A'], upgraded]];
+  const invalid = render(workbench.TestingWorkbench, { projectCode: 'P', tab: 'assets', itemCode: 'A', revision: 'abc' }, entries);
+  assert.match(invalid, /资料版本必须为正整数/); assert.doesNotMatch(invalid, /下载文件/);
+});
 test('case reader renders structured preconditions, ordered actions and expected results', () => {
   const html = render(cases.TestCaseReader, { document: testCase, onEdit() {} });
   for (const text of ['账号已启用', '输入账号密码', '进入首页', '冒烟', '检查登录状态']) assert.ok(html.includes(text));

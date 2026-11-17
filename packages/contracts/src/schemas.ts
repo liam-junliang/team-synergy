@@ -143,15 +143,47 @@ export type DefectStatus = z.infer<typeof DefectStatusSchema>;
 export const DefectSeveritySchema = z.enum(['critical', 'high', 'medium', 'low']);
 export type DefectSeverity = z.infer<typeof DefectSeveritySchema>;
 
+export const DEFECT_EVIDENCE_MAX_ITEMS = 20;
+export const DEFECT_EVIDENCE_MAX_FILE_BYTES = 6 * 1024 * 1024;
+
+const defectTextEvidence = z.object({ kind: z.literal('text'), text: z.string() });
+const defectLinkEvidence = z.object({ kind: z.literal('link'), url: z.string() });
+const defectFile = z.object({ kind: z.literal('file'), file_name: z.string(), mime_type: z.string() });
+export const DefectEvidenceSchema = z.discriminatedUnion('kind', [
+  defectTextEvidence, defectLinkEvidence,
+  defectFile.extend({ size_bytes: z.number().int().positive(), sha256: z.string() }),
+]);
+export type DefectEvidence = z.infer<typeof DefectEvidenceSchema>;
+export type DefectEvidenceInput =
+  | Exclude<DefectEvidence, { kind: 'file' }>
+  | (z.infer<typeof defectFile> & { content_base64: string });
+
+export interface DefectReportInput {
+  feature_code: string;
+  title: string;
+  severity: DefectSeverity;
+  action_steps: string;
+  expected_result: string;
+  actual_result: string;
+  evidence: DefectEvidenceInput[];
+  description?: string;
+  found_in?: string;
+  related_requirement_code?: string;
+}
+
 export const DefectSchema = z.object({
   defect_code: PublicCodeSchema,
   title: z.string(),
   feature_code: PublicCodeSchema,
   severity: DefectSeveritySchema,
   reported_by_user_code: PublicCodeSchema,
-  found_in: z.string().optional(),
+  found_in: z.string().nullish(),
   description: z.string(),
-  related_requirement_code: PublicCodeSchema.optional(),
+  action_steps: z.string().nullable().default(null),
+  expected_result: z.string().nullable().default(null),
+  actual_result: z.string().nullable().default(null),
+  evidence: z.array(DefectEvidenceSchema).default([]),
+  related_requirement_code: PublicCodeSchema.nullish(),
   status: DefectStatusSchema,
   fix_task_code: PublicCodeSchema.optional(),
   verification_evidence_code: PublicCodeSchema.optional(),

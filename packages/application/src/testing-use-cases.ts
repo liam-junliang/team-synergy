@@ -1,7 +1,7 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { schema, type Db } from '@team-synergy/persistence';
 import { DomainError, toAuditEvent } from '@team-synergy/domain';
-import type { TestAssetContent, TestAssetDetail, TestAssetInput, TestAssetRevisionInput, TestAssetSummary,
+import type { DefectEvidence, TestAssetContent, TestAssetDetail, TestAssetInput, TestAssetRevisionInput, TestAssetSummary,
   TestCaseContent, TestCaseDetail, TestCaseInput, TestCaseRevision, TestCaseRevisionInput, TestCaseSummary,
   TestDocumentMetadata, TestRevisionMetadata, TestExecutionInput, TestExecutionDetail, TestExecutionSummary, TestExecutionAsset,
   TestExecutionResult, TestResultDefectInput } from '@team-synergy/contracts';
@@ -292,12 +292,19 @@ export function createTestingUseCases(db: Db) {
             const [requirement] = await tx.select().from(schema.requirements).where(eq(schema.requirements.code, snapshot.requirement_codes[0] ?? '')).limit(1);
             if (requirement) { await assertRequirementInProject(tx, requirement, execution.project_id); relatedRequirementId = requirement.id; }
           }
+          const reportUrls = JSON.parse(result.report_urls_json) as string[];
+          const evidence: DefectEvidence[] = reportUrls.map(url => ({ kind: 'link', url }));
+          if (result.notes.trim()) evidence.push({ kind: 'text', text: result.notes });
+          const actions = snapshot.steps.map((step, index) => `${index + 1}. ${step.action}`);
+          const expectations = snapshot.steps.flatMap((step, index) => step.expected.trim() ? [`${index + 1}. ${step.expected}`] : []);
           const description = [`测试执行：${execution.code}`, `用例：${result.case_code} r${result.case_revision}`, `环境：${execution.environment}`,
             `版本：${execution.tested_version}`, `Commit：${execution.commit_sha || '—'}`, '', '## 前置条件', snapshot.preconditions,
             '## 复现步骤', ...snapshot.steps.map((step, index) => `${index + 1}. ${step.action}\n预期：${step.expected}`),
-            '## 关联需求', ...snapshot.requirement_codes, '## 实际结果', result.actual_result, result.notes, '## 证据', ...(JSON.parse(result.report_urls_json) as string[])].join('\n');
+            '## 关联需求', ...snapshot.requirement_codes, '## 实际结果', result.actual_result, result.notes, '## 证据', ...reportUrls].join('\n');
           const [defect] = await tx.insert(schema.defects).values({ code: createPublicCode(), feature_id: feature.id, title, severity,
-            reported_by: principal.id, found_in: execution.tested_version, description, status: 'reported', related_requirement: relatedRequirementId }).returning();
+            reported_by: principal.id, found_in: execution.tested_version, description, status: 'reported', related_requirement: relatedRequirementId,
+            action_steps: actions.join('\n') || null, expected_result: expectations.join('\n') || null,
+            actual_result: result.actual_result.trim() || null, evidence_json: JSON.stringify(evidence) }).returning();
           if (!defect) throw new DomainError('internal_error', '缺陷创建失败');
           defectCode = defect.code;
           await audit(tx, 'defect', defect.id, principal.id, 'defect.reported', 0, { test_execution_code: execution.code, test_result_code: result.code, severity });

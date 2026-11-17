@@ -18,9 +18,9 @@ export function TestAssetContentView({ asset }: { asset: TestAssetContent }) {
     {asset.content && <MarkdownDocument content={asset.content} />}
   </>;
 }
-export function TestAssetReader({ document, onEdit, embedded = false, renderNotice }: { document: TestAssetDetail; onEdit: () => void; embedded?: boolean; renderNotice?: (revision: number) => ReactNode }) {
+export function TestAssetReader({ document, onEdit, embedded = false, renderNotice, requestedRevision }: { document: TestAssetDetail; onEdit: () => void; embedded?: boolean; renderNotice?: (revision: number) => ReactNode; requestedRevision?: number }) {
   useLocale();
-  return <TestVersionedReader document={document} category={t('测试资料')} onEdit={onEdit} embedded={embedded} renderNotice={renderNotice} render={view => <TestAssetContentView asset={view} />} />;
+  return <TestVersionedReader document={document} category={t('测试资料')} onEdit={onEdit} embedded={embedded} renderNotice={renderNotice} requestedRevision={requestedRevision} render={view => <TestAssetContentView asset={view} />} />;
 }
 const emptyGit: TestGit = { repository_code: '', path: '', ref: '', commit: '', command: '', setup: '' };
 export function TestAssetEditor({ projectCode, initial, onClose, onSaved }: { projectCode: string; initial?: TestAssetDetail; onClose: () => void; onSaved: (document: TestAssetDetail) => Promise<void> | void }) {

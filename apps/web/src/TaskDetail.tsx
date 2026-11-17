@@ -7,6 +7,7 @@ import { useProjectDisplayNames } from './ProjectDisplayNames';
 import type { ReactNode } from 'react';
 import { HandoverPanel } from './HandoverPanel';
 import { TaskBaselinePanel } from './TaskBaselinePanel';
+import { taskArtifactTestingPath } from './workspaceRouting';
 
 /** 审计动作中文映射 */
 const ACTION_LABEL: Record<string, string> = {
@@ -188,7 +189,8 @@ function EvidenceCard({ evidence }: { evidence: TaskEvidence }) {
   );
 }
 
-function ArtifactCard({ artifact }: { artifact: TaskArtifact }) {
+function ArtifactCard({ artifact, projectCode }: { artifact: TaskArtifact; projectCode: string }) {
+  const testingPath = taskArtifactTestingPath(artifact, projectCode);
   return (
     <article className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
       <div className="flex min-w-0 items-start justify-between gap-3">
@@ -204,6 +206,7 @@ function ArtifactCard({ artifact }: { artifact: TaskArtifact }) {
       <div className="mt-3 space-y-2">
         <CodeBlock>{artifact.uri}</CodeBlock>
         <CodeBlock>{artifact.content_hash}</CodeBlock>
+          {testingPath && <a href={testingPath} className="ui-button ui-button-secondary">{t('查看交付原件')}</a>}
       </div>
     </article>
   );
@@ -462,7 +465,7 @@ export function TaskDetail({ task, events, stale, staleHint }: {
             <EmptyState label={t("暂无产物")} />
           ) : (
             <div className="space-y-3">
-              {artifacts.map((artifact) => <ArtifactCard key={artifact.artifact_code} artifact={artifact} />)}
+              {artifacts.map((artifact) => <ArtifactCard key={artifact.artifact_code} artifact={artifact} projectCode={task.project_code} />)}
             </div>
           )}
         </Section>

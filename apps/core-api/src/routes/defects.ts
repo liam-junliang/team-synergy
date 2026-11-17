@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { createDefectUseCases } from '@team-synergy/application';
-import { DefectSeveritySchema, DefectStatusSchema } from '@team-synergy/contracts';
+import { DefectSeveritySchema, DefectStatusSchema, type DefectReportInput } from '@team-synergy/contracts';
 import type { Db } from '@team-synergy/persistence';
+import { unauthorized } from '../auth.js';
 
 interface StringEnumSchema<T extends string> {
   options: readonly T[];
@@ -44,7 +45,18 @@ export function registerDefectRoutes(app: FastifyInstance, db: Db): void {
     };
   });
 
-  app.post<{ Body: Record<string, unknown> }>('/defects', async (request) => {
+  app.get<{ Params: { defect_code: string; index: string } }>('/defects/:defect_code/evidence/:index/file', async (request, reply) => {
+    if (!request.principal) return unauthorized(reply);
+    const index = /^(0|[1-9]\d*)$/.test(request.params.index) ? Number(request.params.index) : NaN;
+    const result = await defects.getEvidenceFile(request.params.defect_code, index, request.principal);
+    if (!result.ok) return result;
+    const name = encodeURIComponent(result.data.file_name).replace(/['()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+    return reply.type('application/octet-stream')
+      .header('Content-Disposition', `attachment; filename="evidence"; filename*=UTF-8''${name}`)
+      .header('X-Content-Type-Options', 'nosniff').header('Cache-Control', 'private, no-store').send(result.data.bytes);
+  });
+
+  app.post<{ Body: DefectReportInput }>('/defects', { bodyLimit: 10 * 1024 * 1024 }, async (request) => {
     const body = request.body ?? {};
     const severity = parseEnum(DefectSeveritySchema, body.severity);
     if (!severity) {
@@ -52,9 +64,13 @@ export function registerDefectRoutes(app: FastifyInstance, db: Db): void {
     }
     return await defects.reportDefect({
       featureCode: String(body.feature_code ?? ''),
-      title: String(body.title ?? ''),
+      title: body.title,
       severity,
-      description: String(body.description ?? ''),
+      description: body.description,
+      actionSteps: body.action_steps,
+      expectedResult: body.expected_result,
+      actualResult: body.actual_result,
+      evidence: body.evidence,
       foundIn: typeof body.found_in === 'string' ? body.found_in : undefined,
       relatedRequirementCode: typeof body.related_requirement_code === 'string' ? body.related_requirement_code : undefined,
       principalCode: (request.principal ?? ''),

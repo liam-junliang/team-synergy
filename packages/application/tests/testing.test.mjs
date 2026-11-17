@@ -134,6 +134,10 @@ test('failed results create one audited defect using saved reproduction and evid
   const [defect] = await c.db.select().from(schema.defects).where(eq(schema.defects.code, linked.results[0].defect_code));
   assert.match(defect.description, /Submit login/); assert.match(defect.description, /Open dashboard/); assert.match(defect.description, /HTTP 500/); assert.match(defect.description, /https:\/\/example.com\/report\/42/);
   assert.doesNotMatch(defect.description, /New action/);
+  assert.equal(defect.action_steps, '1. Submit login');
+  assert.equal(defect.expected_result, '1. Open dashboard');
+  assert.equal(defect.actual_result, 'HTTP 500');
+  assert.deepEqual(JSON.parse(defect.evidence_json), [{ kind: 'link', url: 'https://example.com/report/42' }]);
   assert.equal(defect.related_requirement, requirement.id);
   assert.ok(defect.description.includes(requirement.code));
   rejected(await c.uc.linkResultDefect({ ...cmd, input: { feature_code: c.feature.code } }), 'testing_defect_conflict');
@@ -144,6 +148,21 @@ test('failed results create one audited defect using saved reproduction and evid
   const passed = data(await c.uc.createExecution({ ...c.base, input: runInput(testCase, { results: [{ case_code: testCase.code, case_revision: 1, result: 'pass' }] }) }));
   rejected(await c.uc.linkResultDefect({ code: passed.code, resultCode: passed.results[0].result_code, principalCode: c.users.author.code, input: { defect_code: defect.code } }), 'testing_invalid');
   rejected(await c.uc.linkResultDefect({ ...cmd, resultCode: passed.results[0].result_code, input: { defect_code: defect.code } }), 'test_result_not_found');
+});
+
+test('conversion preserves result notes verbatim and leaves missing execution facts empty', async () => {
+  const c = await setup();
+  const testCase = data(await c.uc.createCase({ ...c.base, input: caseInput({ steps: [] }) }));
+  for (const notes of ['', 'stderr: service unavailable']) {
+    const execution = data(await c.uc.createExecution({ ...c.base, input: runInput(testCase, {
+      results: [{ case_code: testCase.code, case_revision: 1, result: 'fail', notes }],
+    }) }));
+    const linked = data(await c.uc.linkResultDefect({ code: execution.code, resultCode: execution.results[0].result_code,
+      principalCode: c.base.principalCode, input: { feature_code: c.feature.code } }));
+    const [defect] = await c.db.select().from(schema.defects).where(eq(schema.defects.code, linked.results[0].defect_code));
+    assert.deepEqual([defect.action_steps, defect.expected_result, defect.actual_result], [null, null, null]);
+    assert.deepEqual(JSON.parse(defect.evidence_json), notes ? [{ kind: 'text', text: notes }] : []);
+  }
 });
 
 test('file metadata is derived and bytes only returned for authenticated detail reads', async () => {

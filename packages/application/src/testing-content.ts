@@ -30,7 +30,7 @@ export function testCommit(value: unknown): string {
   if (commit && !/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/i.test(commit)) invalid('commit 必须是完整的 40 或 64 位 Git commit SHA');
   return commit.toLowerCase();
 }
-function file(value: unknown): TestFile {
+export function normalizeTestFile(value: unknown): TestFile {
   if (!value || typeof value !== 'object') invalid('请提供文件内容');
   const input = value as Record<string, unknown>;
   const file_name = testText(input.file_name, '文件名', 255, true);
@@ -72,7 +72,7 @@ export function normalizeTestAsset(input: Record<string, unknown>): TestAssetCon
   const result: TestAssetContent = { ...common(input), storage_kind,
     purpose: testChoice(input.purpose ?? 'guide', ['guide', 'script', 'data', 'environment', 'report'], '资料用途'),
     content: testText(input.content ?? '', '资料说明', 2 * 1024 * 1024), url: null, file: null, git: null };
-  if (storage_kind === 'file') result.file = file(input.file);
+  if (storage_kind === 'file') result.file = normalizeTestFile(input.file);
   if (storage_kind === 'url') result.url = testUrl(input.url);
   if (storage_kind === 'git') {
     if (!input.git || typeof input.git !== 'object') invalid('请提供 Git 引用');

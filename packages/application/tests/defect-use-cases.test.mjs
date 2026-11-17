@@ -33,6 +33,10 @@ test('Defect 闭环：上报（任何成员）→ 分诊（Owner）→ 绑定缺
     title: '登录 500',
     severity: 'high',
     description: '特定字符密码触发 500',
+    actionSteps: '提交包含特殊字符的密码',
+    expectedResult: '进入首页',
+    actualResult: '返回 500',
+    evidence: [{ kind: 'text', text: 'POST /login 500' }],
     foundIn: 'v0.1',
     principalCode: ctx.users.wang.code,
   });
@@ -127,6 +131,8 @@ test('Defect 拒绝路径：rejected 为终态（rejected 不能再流转）', a
     title: '重复',
     severity: 'low',
     description: '重复缺陷',
+    actionSteps: '提交登录', expectedResult: '进入首页', actualResult: '出现错误页',
+    evidence: [{ kind: 'text', text: '请求日志：HTTP 500' }],
     principalCode: ctx.users.wang.code,
   });
   assert.equal(reported.ok, true, JSON.stringify(reported));
