@@ -3,6 +3,8 @@ import { appendFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { DomainError } from '@team-synergy/domain';
 import { createNativeCaptureBridge, nativeCaptureEventId } from './memory-native-capture.js';
+import { authDirectory } from './auth-store.js';
+import { harnessRuntimeVersion, installedSessionConfig, readHarnessInstallation, sameHarnessWorkspace } from './memory-harness-install.js';
 
 export interface MemoryDshCaptureConfig {
   harness: 'dsh';
@@ -148,6 +150,28 @@ export function mountMemoryDshCapture(ctx: DshContext, capture: ReturnType<typeo
   ctx.on('agent/status', ({ agent, status }) => { if (status === 'idle') capture.idle(agent.session); });
   ctx.on('dispose', () => capture.dispose());
 }
-export function apply(ctx: DshContext, config: MemoryDshCaptureConfig) {
-  mountMemoryDshCapture(ctx, createMemoryDshCapture(config));
+export function apply(ctx: DshContext, config: MemoryDshCaptureConfig | { installation: string }) {
+  if (!('installation' in config)) { mountMemoryDshCapture(ctx, createMemoryDshCapture(config)); return; }
+  const registration = readHarnessInstallation(config.installation, 'dsh');
+  harnessRuntimeVersion('dsh', registration.runtime);
+  const captures = new Map<string, ReturnType<typeof createMemoryDshCapture>>();
+  const captureFor = (session: Session) => {
+    const current = readHarnessInstallation(config.installation, 'dsh');
+    if (!sameHarnessWorkspace(authDirectory(), current.memberHome)) throw unavailable();
+    if (typeof session.id !== 'string' || session.header?.origin === 'subagent' ||
+      typeof session.header?.delegationDepth === 'number' && session.header.delegationDepth > 0 ||
+      !sameHarnessWorkspace(session.header?.cwd, current.workspace)) return;
+    let capture = captures.get(session.id);
+    if (!capture) {
+      const scope = { ...installedSessionConfig(current, session.id), harness: 'dsh' as const };
+      capture = createMemoryDshCapture(scope);
+      captures.set(session.id, capture);
+    }
+    return capture;
+  };
+  ctx.on('session/event', (session, event) => captureFor(session)?.event(session, event));
+  ctx.on('session/flush', async session => { await captureFor(session)?.flush(session); });
+  ctx.on('agent/created', ({ agent }) => captureFor(agent.session)?.created(agent.session));
+  ctx.on('agent/status', ({ agent, status }) => { if (status === 'idle') captureFor(agent.session)?.idle(agent.session); });
+  ctx.on('dispose', async () => { await Promise.all([...captures.values()].map(capture => capture.dispose())); });
 }

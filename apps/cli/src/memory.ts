@@ -200,6 +200,30 @@ export function registerMemoryCommands(program: Command, print: (result: { ok: t
       print({ ok: true, data: await captureText(opts.session, opts.event, await stdinText(32000)) });
     });
   const native = memory.command('native').description('原生宿主采集的本地持久队列；不作为 MCP 工具暴露');
+  for (const action of ['install', 'doctor', 'uninstall'] as const) {
+    native.command(action).requiredOption('--harness <name>', 'codex、dsh 或 opencode')
+      .option('--workspace <directory>', '明确绑定项目的工作区根目录')
+      .option('--host-home <directory>', '宿主配置根目录；默认采用该宿主的用户目录')
+      .option('--config <file>', '明确的宿主配置文件绝对路径')
+      .option('--runtime <file>', '已安装宿主的绝对入口；只接受已验证版本')
+      .description(action === 'install' ? '持久注册当前工作区与账号，备份配置且只管理自有条目' :
+        action === 'doctor' ? '读取当前时点的配置、账号、版本和本地采集线索，不推断服务端已收到事件' : '仅删除自有接入条目，保留其他插件与本地队列')
+      .action(async opts => {
+        const onboarding = await import('./memory-harness-install.js');
+        const execute = action === 'install' ? onboarding.installHarness : action === 'doctor' ? onboarding.doctorHarness : onboarding.uninstallHarness;
+        print({ ok: true, data: await execute(opts) });
+      });
+  }
+  native.command('event').requiredOption('--installation <file>').description('接收已安装 Codex 原生事件；只输出合法 Hook JSON')
+    .action(async opts => {
+      try {
+        await (await import('./memory-codex-lifecycle.js')).codexLifecycleEvent(opts.installation, JSON.parse(await stdinText(32000)));
+        process.stdout.write('{}\n');
+      } catch (error) {
+        const code = error instanceof DomainError ? error.code : 'memory_harness_event_failed';
+        process.stdout.write(JSON.stringify({ systemMessage: 'TeamSynergy 未采集当前输入：' + code + '。请运行 memory native doctor。' }) + '\n');
+      }
+    });
   native.command('config').requiredOption('--harness <name>', 'dsh 或 opencode').requiredOption('--host-session <id>')
     .option('--session <id>', '默认使用带宿主前缀的原生会话 ID').description('核验当前成员与项目并输出单会话插件配置').action(async opts => {
       const {nativeCaptureConfig}=await import('./memory-native-capture.js');
@@ -216,7 +240,7 @@ export function registerMemoryCommands(program: Command, print: (result: { ok: t
       .requiredOption('--session <id>').requiredOption('--owner <fingerprint>')
       .option('--message <id>', 'pending 精确读取原生消息').option('--after <cursor>', 'pending 读取游标之后的候选',Number).action(async opts => {
         const collector = await import('./memory-native-capture.js');
-        const scope = { harness: opts.harness as 'dsh'|'opencode',hostSessionId: opts.hostSession,memorySession: opts.session,owner: opts.owner };
+        const scope = { harness: opts.harness as 'dsh'|'opencode'|'codex',hostSessionId: opts.hostSession,memorySession: opts.session,owner: opts.owner };
         let data: unknown;
         if (action === 'enqueue') {
           let body: { event: import('./memory-native-capture.js').NativeCaptureEvent; ready: boolean };

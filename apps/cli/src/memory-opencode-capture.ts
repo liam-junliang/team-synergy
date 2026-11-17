@@ -2,6 +2,8 @@ import { DomainError } from '@team-synergy/domain';
 import { appendFileSync, realpathSync } from 'node:fs';
 import { createMemoryOpencodeLifecycle, type MemoryOpencodeLifecycleConfig } from './memory-opencode-lifecycle.js';
 import { createNativeCaptureBridge, nativeCaptureEventId } from './memory-native-capture.js';
+import { authDirectory } from './auth-store.js';
+import { harnessRuntimeVersion, installedSessionConfig, readHarnessInstallation, sameHarnessWorkspace } from './memory-harness-install.js';
 
 export type OpencodeUserCapture = { nativeSessionId: string; nativeEventId: string; sourceText: string };
 export type OpencodeMessageInput = { sessionID?: unknown; messageID?: unknown };
@@ -54,7 +56,7 @@ export function createMemoryOpencodeCapture(options: OpencodeCaptureConfig, brid
   const verifying = new Map<string, Promise<void>>();
   const audit = (kind: string, code?: string, eventId?: string) => {
     if (!config.auditFile) return;
-    try { appendFileSync(config.auditFile, JSON.stringify({ kind, harness: 'opencode', ...(code ? { code } : {}), ...(eventId ? { eventId } : {}) }) + '\n', { mode: 0o600 }); }
+    try { appendFileSync(config.auditFile, JSON.stringify({ at: new Date().toISOString(), kind, harness: 'opencode', ...(code ? { code } : {}), ...(eventId ? { eventId } : {}) }) + '\n', { mode: 0o600 }); }
     catch { /* Capture storage remains authoritative; never log private text. */ }
   };
   const failure = (error: unknown, eventId?: string) => {
@@ -169,6 +171,52 @@ export function opencodeNativePluginSource(config: OpencodeCaptureConfig) {
   return `import plugin from ${JSON.stringify(import.meta.url)};\n` +
     `const options = Object.freeze(${JSON.stringify(config)});\n` +
     `export default { id: plugin.id, server: input => plugin.server(input, options) };\n`;
+}
+
+/** Persistent native SDK module; session IDs come from chat.message rather than install-time options. */
+export function persistentOpencodePlugin(installationFile: string) {
+  const registration = readHarnessInstallation(installationFile, 'opencode');
+  return {
+    id: 'team-synergy-memory-persistent-capture-' + registration.id,
+    async server(input: PluginInput) {
+      const registration = readHarnessInstallation(installationFile, 'opencode');
+      harnessRuntimeVersion('opencode', registration.runtime);
+      if (!sameHarnessWorkspace(input.directory, registration.workspace)) {
+        // A global plugin may serve several workspaces; only explicit registrations collect.
+        return {};
+      }
+      let configured = false;
+      const captures = new Map<string, ReturnType<typeof createMemoryOpencodeCapture>>();
+      const forSession = (sessionID: unknown) => {
+        const current = readHarnessInstallation(installationFile, 'opencode');
+        if (!sameHarnessWorkspace(authDirectory(), current.memberHome)) throw invalid();
+        if (!nativeId(sessionID)) throw invalid();
+        let capture = captures.get(sessionID);
+        if (!capture) {
+          const config = { ...installedSessionConfig(current, sessionID), harness: 'opencode' as const };
+          capture = createMemoryOpencodeCapture(config, createNativeCaptureBridge(config), async messageID => {
+            const response = await input.client.session.message({ path: { id: sessionID, messageID }, signal: AbortSignal.timeout(5000) });
+            if (!response.data) throw invalid(); return response.data;
+          }, async () => {
+            const response = await input.client.session.get({ path: { id: sessionID }, signal: AbortSignal.timeout(5000) });
+            if (!response.data) throw invalid(); return response.data;
+          });
+          capture.start(); captures.set(sessionID, capture);
+        }
+        return capture;
+      };
+      return {
+        config: async () => { configured = true; },
+        'chat.message': async (value: OpencodeMessageInput, output: OpencodeMessageOutput) => {
+          if (configured && opencodeUserCapture(value, output)) await forSession(value.sessionID).message(value, output);
+        },
+        'chat.params': async (value: { sessionID?: unknown; message?: unknown }) => {
+          if (configured) await captures.get(String(value.sessionID))?.beforeModel(value);
+        },
+        event: async (value: NativeEvent) => { if (configured) captures.get(String(value.event.properties?.sessionID))?.event(value); },
+      };
+    },
+  };
 }
 
 /** Native v1.14.21 module. The explicitly installed options pin one authorized
