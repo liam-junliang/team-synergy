@@ -337,9 +337,13 @@ test('HTTP pause during an outbound document write prevents acknowledgement and 
       fx.hooks.afterPageWrite = async () => { assert.equal(ok(await request(app, f, 'POST', 'pause')).enabled, false); };
       const result = await projectNextMemory(db, fx.config);
       assert.equal(result.status, 'lease_changed');
-      const [job] = await f.q('select status,external_ref from memory_projection_jobs where material_index_id in (select v.id from project_material_index_versions v join project_document_revisions r on r.code=v.revision_code where r.id=$1)', [version.id]);
+      const [job] = await f.q(`select j.status,j.external_ref,v.code as index_code,b.wiki_id
+        from memory_projection_jobs j join project_material_index_versions v on v.id=j.material_index_id
+        join project_document_revisions r on r.code=v.revision_code join project_memory_bindings b on b.project_id=v.project_id
+        where r.id=$1`, [version.id]);
       assert.notEqual(job.status, 'synced');
-      assert.equal(job.external_ref, null);
+      const page = 'wiki/sources/tsp-material-' + createHash('sha256').update(f.project.code + '/' + job.index_code).digest('hex') + '.md';
+      assert.equal(job.external_ref, 'wiki:' + job.wiki_id + '/' + page);
       assert.equal(ok(await request(app, f)).retrievalEnabled, false);
       assert.equal(await projectNextMemory(db, fx.config), null);
     }));
@@ -395,9 +399,13 @@ test('a pause after outbound verification but before the final acknowledgement t
       finally { db.transaction = originalTransaction; }
       assert.equal(pauses, 1, 'Did not exercise the acknowledgement race');
       assert.equal(result.status, 'lease_changed');
-      const [job] = await f.q('select status,external_ref from memory_projection_jobs where material_index_id in (select v.id from project_material_index_versions v join project_document_revisions r on r.code=v.revision_code where r.id=$1)', [version.id]);
+      const [job] = await f.q(`select j.status,j.external_ref,v.code as index_code,b.wiki_id
+        from memory_projection_jobs j join project_material_index_versions v on v.id=j.material_index_id
+        join project_document_revisions r on r.code=v.revision_code join project_memory_bindings b on b.project_id=v.project_id
+        where r.id=$1`, [version.id]);
       assert.notEqual(job.status, 'synced');
-      assert.equal(job.external_ref, null);
+      const page = 'wiki/sources/tsp-material-' + createHash('sha256').update(f.project.code + '/' + job.index_code).digest('hex') + '.md';
+      assert.equal(job.external_ref, 'wiki:' + job.wiki_id + '/' + page);
       assert.equal(ok(await request(app, f)).enabled, false);
       assert.equal(await projectNextMemory(db, fx.config), null);
     }));
