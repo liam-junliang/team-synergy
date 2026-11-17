@@ -21,6 +21,35 @@ const cursors = new WeakMap<Db, string>();
 const safeKey = /^[a-z0-9_.-]{1,128}$/iu;
 export const projectMaterialIndexPage = (project: string, code: string) => 'wiki/sources/tsp-material-' + hash(project + '/' + code) + '.md';
 const legacyPage = (project: string, code: string) => 'wiki/sources/tsp-evidence-' + hash('tsp-wiki-page/' + project + '/' + code) + '.md';
+// A URI fragment qualifies the delivery receipt, never the remote resource.
+// Unlike last_error it survives source retirement and binding reconciliation.
+const uncertainReceipt = '#uncertain-material-write';
+const resourceRef = (ref: string) => ref.endsWith(uncertainReceipt) ? ref.slice(0, -uncertainReceipt.length) : ref;
+const isUncertain = (ref: string | null) => ref?.endsWith(uncertainReceipt) === true;
+type MaterialQuery = Pick<Db['$client'], 'query'>;
+
+async function sameClaim(connection: MaterialQuery, job: IndexJob) {
+  const result = await connection.query(`select id from memory_projection_jobs where id=$1 and attempts=$2
+    and generation=$3 and operation=$4 and status='processing'`, [job.id, job.attempts, job.generation, job.operation]);
+  return result.rowCount === 1;
+}
+
+async function compensateLateMaterialWrite(connection: MaterialQuery, job: IndexJob, ref: string, uncertain: boolean) {
+  if (job.operation !== 'upsert') return;
+  // Do not replace a newer upsert intent, another resource receipt, or a cleanup error.
+  // A completed delete must be reopened even when the old claim no longer exists.
+  await connection.query(`update memory_projection_jobs set
+    status=case when $4 and status='synced' then 'needs_reconcile'
+      when not $4 and status='synced' then 'pending' else status end,
+    generation=case when status='synced' and operation='delete' then generation+1 else generation end,
+    external_ref=case when $4 then $3 || '${uncertainReceipt}' else coalesce(external_ref,$3) end,
+    lease_until=case when $4 and status='synced' then now()+least(greatest(attempts,1),20)*interval '30 seconds'
+      when status='synced' then null else lease_until end,
+    last_error=case when $4 then 'uncertain_material_write' when status='synced' then 'stale_upsert_cleanup' else last_error end
+    where id=$1 and (operation='delete' and generation<>$2 or $4 and (generation<>$2 or attempts<>$5))
+      and (external_ref is null or external_ref=$3 or external_ref=$3 || '${uncertainReceipt}')`,
+  [job.id, job.generation, resourceRef(ref), uncertain, job.attempts]);
+}
 
 async function api<T>(config: EngineConfig, wiki: boolean, operation: string, body: object): Promise<T> {
   const base = wiki ? config.tencent.baseUrl : config.tencent.coreBaseUrl;
@@ -65,7 +94,7 @@ async function readPage(config: EngineConfig, p: Mapping, ref: string) {
   if (typeof row.content !== 'string') throw Error('Invalid engine envelope');
   return row.content;
 }
-async function coreCopy(config: EngineConfig, p: Mapping, session: string, content: string, remove = false) {
+async function coreCopy(config: EngineConfig, p: Mapping, session: string, content: string, remove = false, writing = () => {}) {
   const read = async () => {
     const result = await core(config, p, 'query', { session_id: session, limit: 100 });
     if (!Array.isArray(result.messages) || result.total !== result.messages.length) throw Error('Invalid semantic receipt');
@@ -81,11 +110,11 @@ async function coreCopy(config: EngineConfig, p: Mapping, session: string, conte
     }
     return;
   }
-  if (!rows.length) { await core(config, p, 'add', { session_id: session, messages: [{ role: 'assistant', content }] }); rows = await read(); }
+  if (!rows.length) { writing(); await core(config, p, 'add', { session_id: session, messages: [{ role: 'assistant', content }] }); rows = await read(); }
   if (rows.length !== 1) throw Error('Engine readback mismatch');
 }
 
-async function transferIndex(config: EngineConfig, p: Mapping, job: IndexJob) {
+async function transferIndex(config: EngineConfig, p: Mapping, job: IndexJob, writing = () => {}) {
   const text = projectMaterialIndexText(job), path = projectMaterialIndexPage(job.project, job.code);
   const page = '---\ntype: source\nlocked: true\n---\n\n# 项目资料目录：' + job.title.replace(/[\r\n]+/gu, ' ') + '\n\n' + text + '\n';
   const previous = await readPage(config, p, path);
@@ -94,13 +123,13 @@ async function transferIndex(config: EngineConfig, p: Mapping, job: IndexJob) {
     if (previous !== null) await wiki(config, p, 'page/rm', { refs: [path] });
     if (await readPage(config, p, path) !== null) throw Error('Engine readback mismatch');
   } else {
-    if (previous === null) await wiki(config, p, 'page/write', { pages: [{ ref: path, content: page }] });
+    if (previous === null) { writing(); await wiki(config, p, 'page/write', { pages: [{ ref: path, content: page }] }); }
     if (await readPage(config, p, path) !== page) throw Error('Engine readback mismatch');
     const indexed = await wiki(config, p, 'search', { query: job.code, limit: 16 });
     if (!indexed.results?.some(row => row.path.replace(/\\/gu, '/') === path)) throw Error('Wiki page not indexed');
   }
   if (p.semanticAgentId && config.tencent.coreBaseUrl) await coreCopy(config, p, 'tsp-material-' + p.wikiId + '-' + job.code,
-    text + '\n\n[tsp-material-index ' + p.wikiId + ' ' + job.code + ']', job.operation === 'delete');
+    text + '\n\n[tsp-material-index ' + p.wikiId + ' ' + job.code + ']', job.operation === 'delete', writing);
   return 'wiki:' + p.wikiId + '/' + path;
 }
 
@@ -195,13 +224,18 @@ export async function projectNextMaterialIndex(db: Db, config: EngineConfig) {
   left join project_document_revisions r on r.id=j.project_document_revision_id left join project_documents d on d.id=r.document_id
   join projects p on p.id=coalesce(v.project_id,d.project_id) left join project_memory_bindings b on b.project_id=p.id`, [Object.keys(config.projects)]);
   const job = result.rows[0]; if (!job) return null;
-  const update = (status: string, error: string | null, ref: string | null = job.externalRef) => db.$client.query(`update memory_projection_jobs
-    set status=$5,last_error=$6,external_ref=$7,lease_until=case when $5='needs_reconcile' then now()+interval '30 seconds' else null end
+  const deliver = async (connection: MaterialQuery) => {
+  if (!await sameClaim(connection, job)) return { status: 'lease_changed', engine: 'tencent' };
+  let ref = job.externalRef;
+  let writeAttempted = false;
+  const update = (status: string, error: string | null) => connection.query(`update memory_projection_jobs
+    set status=$5,last_error=$6,external_ref=$7,lease_until=case when $5='needs_reconcile'
+      then now()+least(greatest(attempts,1),20)*interval '30 seconds' else null end
     where id=$1 and attempts=$2 and generation=$3 and operation=$4 and status='processing'`,
   [job.id, job.attempts, job.generation, job.operation, status, error, ref]);
   try {
     if (!job.legacy && job.operation === 'upsert' && (!job.active || !await stillCurrent(db, job))) {
-      await db.$client.query(`update memory_projection_jobs set operation='delete',generation=generation+1,status='pending',lease_until=null
+      await connection.query(`update memory_projection_jobs set operation='delete',generation=generation+1,status='pending',lease_until=null
         where id=$1 and attempts=$2 and generation=$3 and operation=$4`, [job.id, job.attempts, job.generation, job.operation]);
       return { status: 'source_unavailable', engine: 'tencent' };
     }
@@ -211,17 +245,30 @@ export async function projectNextMaterialIndex(db: Db, config: EngineConfig) {
     let p = mapping;
     // Deletes may still own a previous binding's external reference. Verify its
     // project Wiki identity, never reinterpret it as the new Wiki's resource.
-    if (job.operation === 'delete' && job.externalRef) {
-      const match = /^wiki:([^/]+)\//u.exec(job.externalRef);
+    if (job.operation === 'delete' && ref) {
+      const match = /^wiki:([^/]+)\/(.+)$/u.exec(resourceRef(ref));
       const wikiId = match?.[1];
-      if (!wikiId || !safeKey.test(wikiId)) throw Error('Wiki identity mismatch');
+      const expectedPath = job.legacy ? legacyPage(job.project, job.code) : projectMaterialIndexPage(job.project, job.code);
+      if (!wikiId || !safeKey.test(wikiId) || match?.[2] !== expectedPath) throw Error('Wiki identity mismatch');
       p = { ...p, wikiId };
     }
     await owned(resolved.config, job.project, p);
-    const ref = job.legacy ? await deleteLegacyCopy(resolved.config, p, job) : await transferIndex(resolved.config, p, job);
+    const destination = 'wiki:' + p.wikiId + '/' + (job.legacy ? legacyPage(job.project, job.code) : projectMaterialIndexPage(job.project, job.code));
+    if (ref !== null && resourceRef(ref) !== destination) throw Error('Wiki identity mismatch');
+    ref ??= destination;
+    // Record ownership before network I/O, so retirement can clean the old Wiki
+    // even if the binding changes before a write returns or its ACK is lost.
+    const recorded = await connection.query(`update memory_projection_jobs set external_ref=$5
+      where id=$1 and attempts=$2 and generation=$3 and operation=$4 and status='processing'
+        and (external_ref is null or external_ref=$5) returning id`, [job.id, job.attempts, job.generation, job.operation, ref]);
+    if (recorded.rowCount !== 1) return { status: 'lease_changed', engine: 'tencent' };
+    if (job.legacy) await deleteLegacyCopy(resolved.config, p, job);
+    else await transferIndex(resolved.config, p, job, () => { writeAttempted = true; });
+    writeAttempted = false; // All writes returned and their readbacks completed.
     if (!job.legacy && job.operation === 'upsert' && !await stillCurrent(db, job)) {
-      await db.$client.query(`update memory_projection_jobs set operation='delete',generation=generation+1,status='pending',lease_until=null,external_ref=$4
+      await connection.query(`update memory_projection_jobs set operation='delete',generation=generation+1,status='pending',lease_until=null,external_ref=$4
         where id=$1 and attempts=$2 and generation=$3 and operation='upsert'`, [job.id, job.attempts, job.generation, ref]);
+      await compensateLateMaterialWrite(connection, job, ref, isUncertain(ref));
       return { status: 'source_unavailable', engine: 'tencent' };
     }
     const acknowledged = await db.transaction(async tx => {
@@ -229,17 +276,23 @@ export async function projectNextMaterialIndex(db: Db, config: EngineConfig) {
       const [project] = await tx.select({ status: schema.projects.status }).from(schema.projects).where(eq(schema.projects.id, BigInt(job.projectId)));
       const [binding] = await tx.select().from(schema.projectMemoryBindings).where(eq(schema.projectMemoryBindings.project_id, BigInt(job.projectId)));
       if (project?.status !== 'active' || (binding?.generation ?? null) !== job.bindingGeneration ||
-          (binding ? !binding.enabled || binding.state !== 'ready' : !config.projects[job.project])) return false;
+          (binding ? !binding.enabled || binding.state !== 'ready' : !config.projects[job.project])) return null;
       if (!job.legacy && job.operation === 'upsert' && !await stillCurrent(tx, job)) {
         await tx.execute(sql`update memory_projection_jobs set operation='delete',generation=generation+1,status='pending',lease_until=null,external_ref=${ref}
           where id=${job.id}::bigint and attempts=${job.attempts} and generation=${job.generation} and operation='upsert'`);
-        return false;
+        return null;
       }
-      const ack = await tx.execute(sql`update memory_projection_jobs set status='synced',last_error=null,external_ref=${ref},lease_until=null
-        where id=${job.id}::bigint and attempts=${job.attempts} and generation=${job.generation} and operation=${job.operation} and status='processing' returning id`);
-      return ack.rows.length === 1;
+      const ack = await tx.execute(sql`update memory_projection_jobs set status=case when external_ref like ${'%' + uncertainReceipt}
+          then 'needs_reconcile' else 'synced' end,
+        last_error=case when external_ref like ${'%' + uncertainReceipt} then 'uncertain_material_write' else null end,
+        lease_until=case when external_ref like ${'%' + uncertainReceipt}
+          then now()+least(greatest(attempts,1),20)*interval '30 seconds' else null end
+        where id=${job.id}::bigint and attempts=${job.attempts} and generation=${job.generation} and operation=${job.operation}
+          and status='processing' returning id,status`);
+      return ack.rows[0]?.status as string | undefined;
     });
-    return { status: acknowledged ? 'synced' : 'lease_changed', engine: 'tencent', sourceKind: job.legacy ? 'legacy_cleanup' : 'project_material',
+    if (!acknowledged) await compensateLateMaterialWrite(connection, job, ref, isUncertain(ref));
+    return { status: acknowledged ?? 'lease_changed', engine: 'tencent', sourceKind: job.legacy ? 'legacy_cleanup' : 'project_material',
       source: job.sourceCitation, operation: job.operation };
   } catch (error) {
     const errors = new Map([['Legacy mixed source page', 'legacy_cleanup_pending'], ['Legacy cleanup requires review', 'legacy_cleanup_pending'],
@@ -247,7 +300,30 @@ export async function projectNextMaterialIndex(db: Db, config: EngineConfig) {
       ['Wiki ingestion pending', 'wiki_ingesting'], ['Wiki page not indexed', 'wiki_index_pending'],
       ['Project memory changed', 'project_memory_changed'], ['Engine readback mismatch', 'readback_mismatch']]);
     const code = error instanceof Error ? errors.get(error.message) ?? 'delivery_not_verified' : 'delivery_not_verified';
+    if (ref !== null && job.operation === 'upsert') {
+      // A failed HTTP result cannot prove that the remote server stopped writing.
+      // Keep a durable qualifier and periodic cleanup until upstream quiescence
+      // is independently established; a clean readback alone cannot release it.
+      if (writeAttempted) ref = resourceRef(ref) + uncertainReceipt;
+      await compensateLateMaterialWrite(connection, job, ref, isUncertain(ref));
+    }
     await update('needs_reconcile', code); return { status: 'needs_reconcile', engine: 'tencent', code };
   }
+  };
+  // Only the resource lock spans HTTP I/O. Source/outbox rows remain writable,
+  // and different material resources (including other projects) stay independent.
+  const client = await db.$client.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query("select pg_advisory_xact_lock(hashtext('memory_projection_material:' || $1::text)::bigint)", [job.project + '/' + job.code]);
+    // The lock transaction must not own outbox row updates across HTTP: source
+    // retirement needs to commit while this worker is waiting for the engine.
+    const result = await deliver(db.$client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally { client.release(); }
 }
 

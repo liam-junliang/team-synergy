@@ -144,7 +144,8 @@ test('a replaced index lease cannot acknowledge a newer attempt or duplicate ver
       fx.hooks.afterPageWrite = () => db.$client.query("update memory_projection_jobs set attempts=attempts+1,lease_until=now()+interval '2 minutes' where operation='upsert'");
       assert.equal((await projectNextMemory(db, fx.config)).status, 'lease_changed');
       const state = (await db.$client.query('select status,attempts,external_ref from memory_projection_jobs')).rows[0];
-      assert.deepEqual(state, { status: 'processing', attempts: 2, external_ref: null });
+      assert.equal(state.status, 'processing'); assert.equal(state.attempts, 2);
+      assert.match(state.external_ref, /^wiki:test-wiki\/wiki\/sources\/tsp-material-/u);
       await db.$client.query("update memory_projection_jobs set lease_until=now()-interval '1 second'");
       assert.equal((await projectNextMemory(db, fx.config)).status, 'synced');
       assert.deepEqual(fx.calls, { rawWrites: 0, pageWrites: 1, coreAdds: 1 });
