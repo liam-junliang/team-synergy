@@ -1,6 +1,7 @@
 import { t, getLocale } from './i18n.ts';
 import { ApiError } from './apiError.ts';
 import { webClientIdentity } from './clientIdentity';
+import type { DefectEvidence, DefectReportInput } from '../../../packages/contracts/src/schemas';
 
 /**
  * core-api 客户端（看板数据源）：任务列表/详情/审计流、成员。
@@ -721,6 +722,10 @@ export interface DefectSummary {
   status: string;
   reported_by: string;
   description: string;
+  action_steps: string | null;
+  expected_result: string | null;
+  actual_result: string | null;
+  evidence: DefectEvidence[];
   found_in: string | null;
   related_requirement_code: string | null;
   reported_at: string | null;
@@ -733,14 +738,7 @@ export interface DefectSummary {
   }>;
 }
 
-export interface CreateDefectInput {
-  feature_code: string;
-  title: string;
-  severity: 'critical' | 'high' | 'medium' | 'low';
-  description: string;
-  found_in?: string;
-  related_requirement_code?: string;
-}
+export type CreateDefectInput = DefectReportInput;
 
 export interface Feature {
   code: string;
@@ -1763,6 +1761,10 @@ function normalizeDefect(defect: RawDefectSummary): DefectSummary {
     status: defect.status ?? 'reported',
     reported_by: codeFrom(defect.reported_by, defect.reported_by_user_code),
     description: defect.description ?? '',
+    action_steps: defect.action_steps ?? null,
+    expected_result: defect.expected_result ?? null,
+    actual_result: defect.actual_result ?? null,
+    evidence: defect.evidence ?? [],
     found_in: defect.found_in ?? null,
     related_requirement_code: optionalCode(defect.related_requirement_code, defect.related_requirement),
     reported_at: defect.reported_at ?? null,
@@ -2660,7 +2662,14 @@ export function reviseDesignPrototype(prototypeCode: string, input: DesignProtot
 
 export async function getDesignPrototypeFile(prototypeCode: string, revision: number): Promise<Blob> {
   if (!Number.isSafeInteger(revision) || revision < 1) throw new Error(t('设计资料版本无效'));
-  const path = `/design-prototypes/${encodeURIComponent(prototypeCode)}/file?revision=${revision}`;
+  return fetchLocalFile(`/design-prototypes/${encodeURIComponent(prototypeCode)}/file?revision=${revision}`);
+}
+
+export function getDefectEvidenceFile(defectCode: string, index: number): Promise<Blob> {
+  return fetchLocalFile(`/defects/${encodeURIComponent(defectCode)}/evidence/${index}/file`);
+}
+
+async function fetchLocalFile(path: string): Promise<Blob> {
   const headers = new Headers({ 'X-Principal-Code': currentPrincipalCode() });
   // Fixed same-origin paths keep the HttpOnly session away from external URLs.
   const response = await fetch(`/api${path}`, { headers, credentials: 'same-origin', redirect: 'error' });

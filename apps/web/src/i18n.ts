@@ -11,10 +11,12 @@ import admin from './locales/admin.ts';
 import intake from './locales/intake.ts';
 import documentQuality from './locales/documentQuality.ts';
 import systemAgent from './locales/systemAgent.ts';
+import codeUnderstanding from './locales/codeUnderstanding.ts';
+import memory from './locales/memory.ts';
 
 export type Locale = 'zh-CN' | 'en-US';
 export const LOCALE_STORAGE_KEY = 'tsp:web:locale';
-export const englishMessages: Readonly<Record<string, string>> = { ...documentQuality, ...workspace, ...knowledge, ...execution, ...projectSwitcher, ...permissions, ...testing, ...skills, ...core, ...agentConnection, ...admin, ...intake, ...systemAgent };
+export const englishMessages: Readonly<Record<string, string>> = { ...documentQuality, ...workspace, ...knowledge, ...execution, ...projectSwitcher, ...permissions, ...testing, ...skills, ...core, ...agentConnection, ...admin, ...intake, ...systemAgent, ...codeUnderstanding, ...memory };
 type Parameters = Record<string, string | number>;
 let currentLocale: Locale = 'zh-CN';
 const listeners = new Set<() => void>();

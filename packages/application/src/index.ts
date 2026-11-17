@@ -14,6 +14,7 @@ export * from './password-auth.js';
 export * from './project-use-cases-project.js';
 export * from './project-structure-use-cases.js';
 export * from './project-document-use-cases.js';
+export * from './memory-project-management.js';
 export * from './project-home-use-cases.js';
 export * from './project-standards.js';
 export * from './team-use-cases.js';
@@ -30,6 +31,7 @@ export * from './testing-use-cases.js';
 
 export { createSkillsUseCases } from './skills-use-cases.js';
 export { normalizeSkillPackage } from './skills-content.js';
+export { ensurePlatformSkillRelease, platformSkillVersion } from './platform-skill-release.js';
 export { captureRunSkills, resolveRunSkillManifest, copyRunSkills, projectSkillManifest, skillManifestMetadata } from './skills-run.js';
 
 export { resolveSessionToken, revokeStableDevice } from './auth-device.js';
@@ -47,3 +49,11 @@ export { bootstrapPasswordTtlMinutes, resetLocalAdminPassword } from './admin-re
 export { exportAuditPage } from './audit-export.js';
 export * from './login-security.js';
 export { getWebSessionUser } from './web-session-user.js';
+export { createCodeUnderstandingUseCases } from './code-understanding-use-cases.js';
+export { createHostedCodeAnalysisUseCases, type HostedCodeAnalysisExecution } from './code-hosted-analysis-use-cases.js';
+export { createMemorySliceUseCases } from './memory-slice-use-cases.js';
+export { createPersonalMemoryUseCases } from './personal-memory-use-cases.js';
+export { reconcileProjectMaterialIndexes } from './project-material-index.js';
+export { createProjectMaterialQueryUseCases } from './project-material-query.js';
+export { loadProjectMaterialCatalog, listCurrentProjectMaterialCandidates, type ProjectMaterialCandidate, type ProjectMaterialBodyLocator } from './project-material-catalog.js';
+export { readCurrentProjectMaterialCandidate, resolveCurrentProjectMaterialSource } from './project-material-body.js';

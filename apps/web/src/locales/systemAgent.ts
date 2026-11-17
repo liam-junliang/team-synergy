@@ -1,5 +1,6 @@
 export default {
   '系统 Agent': 'System Agent',
+  '文档批注': 'Document annotations',
   '打开系统 Agent': 'Open System Agent',
   '文档协作 · 第一版': 'Document collaboration · v1',
   '收窄窗口': 'Narrow window', '展开窗口': 'Expand window',

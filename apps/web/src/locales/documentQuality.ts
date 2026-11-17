@@ -26,5 +26,5 @@ export default {
   '采用下列标准的相关主题形成项目规则；这里展示检查范围，不提供标准符合性评分。': 'Project rules draw on relevant topics from these standards. This is a check scope, not a compliance score.',
   '本次检查版本与范围': 'Checked revision and scope', '检查时间': 'Checked at', '规则版本': 'Rule version',
   '文档编码': 'Document code', '图源指纹': 'Diagram source hash',
-  '返回文档正文': 'Back to document', '文档目录': 'Document directory',
+  '返回文档正文': 'Back to document', '文档目录': 'Document directory', '文档正文': 'Document body',
 } satisfies Record<string, string>;

@@ -26,8 +26,13 @@ import { registerHandoverCommands } from './handover.js';
 import { registerArchitectureCommands } from './architecture.js';
 import { registerPermissionCommands } from './permissions.js';
 import { registerTestingCommands } from './testing.js';
+import { defectReportEvidence, type DefectEvidenceOptions } from './defect-evidence.js';
 import { registerSkillCommands } from './skills.js';
 import { registerIntakeCommands } from './intake.js';
+import { registerMemoryCommands } from './memory.js';
+import { registerAgentToolCommands, registerProjectMaterialCommands } from './agent-tools.js';
+import { documentPlacementGuide } from './agent-capabilities.js';
+import { registerCodeUnderstandingCommands } from './code-understanding.js';
 import { prepareRunSkillContext } from './skill-context.js';
 import { generateWorkspaceGuidance, checkWorkspaceGuidance } from './guidance.js';
 import { DomainError } from '@team-synergy/domain';
@@ -911,11 +916,12 @@ task
   .requiredOption('--feature <feature_code>', '所属 Feature 编码')
   .requiredOption('--title <title>', '任务标题')
   .requiredOption('--profile <profile>', 'planner / builder / verifier')
-  .requiredOption('--source <source>', 'requirement / defect / ad-hoc / integration')
+  .requiredOption('--source <source>', 'requirement / defect-fix / ad-hoc / integration')
   .requiredOption('--acceptance <json>', '验收标准 JSON：[{"id":"AC-1","text":"..."}]')
   .option('--brief <markdown>', '完整执行简报（Markdown）')
   .option('--brief-file <path>', '从本地 Markdown 文件读取完整执行简报')
   .option('--requirement <requirement_code>', '关联稳定需求条目编码')
+  .option('--defect <defect_code>', '修复任务所关联的缺陷编码（--source defect-fix）')
   .option('--baseline <baseline_code>', '按指定冻结需求基线创建任务（仅 Owner）')
   .option('--depends-on <codes>', '依赖任务编码，逗号分隔')
   .option('--validation-seams <json>', '验证接缝 JSON 数组')
@@ -923,7 +929,7 @@ task
   .action(
     async (
       opts: { feature: string; title: string; profile: string; source: string; acceptance: string;
-        brief?: string; briefFile?: string; requirement?: string; baseline?: string; dependsOn?: string; validationSeams?: string; scope?: string },
+        brief?: string; briefFile?: string; requirement?: string; defect?: string; baseline?: string; dependsOn?: string; validationSeams?: string; scope?: string },
     ) => {
       try {
         if (opts.brief && opts.briefFile) {
@@ -941,6 +947,7 @@ task
           profile,
           source,
           requirement_code: opts.requirement,
+          defect_code: opts.defect,
           baseline_code: opts.baseline,
           acceptance: parseAcceptanceJson(opts.acceptance),
           depends_on_codes: opts.dependsOn ? opts.dependsOn.split(',').map((s) => s.trim()) : undefined,
@@ -1455,20 +1462,26 @@ team
 registerPermissionCommands(program, project, team, { requireApiClient, resolveProjectCode, printResult, failResult });
 
 // ---- defect 命令族（docs/19：Defect 闭环与任务来源分类） ----
-const defect = program.command('defect').description('缺陷操作：report / list / transition');
+const defect = program.command('defect').description('上报、查询、下载缺陷证据与状态流转');
 
 defect
   .command('report')
-  .description('上报缺陷（编码由服务端生成；任何成员；docs/19 闭环起点）')
+  .description('上报缺陷，记录实际操作、预期、实际结果及至少一项证据')
   .requiredOption('--feature <feature_code>', '所属 Feature 编码')
   .requiredOption('--title <title>', '缺陷标题')
   .requiredOption('--severity <severity>', 'critical / high / medium / low')
-  .requiredOption('--description <text>', '缺陷描述')
+  .requiredOption('--action <text>', '执行的操作或复现步骤')
+  .requiredOption('--expected <text>', '预期看到的结果')
+  .requiredOption('--actual <text>', '实际发生的结果')
+  .option('--evidence-text <text...>', '日志或报错响应，可传多项')
+  .option('--evidence-url <url...>', 'HTTP(S) 证据链接，可传多项')
+  .option('--evidence-file <path...>', '截图、录屏或其他原始文件，可传多项')
+  .option('--description <text>', '补充说明')
   .option('--found-in <version>', '发现版本')
   .option('--related-requirement <requirement_code>', '关联需求编码')
   .action(
     async (
-      opts: { feature: string; title: string; severity: string; description: string; foundIn?: string; relatedRequirement?: string },
+      opts: DefectEvidenceOptions & { feature: string; title: string; severity: string; action: string; expected: string; actual: string; description?: string; foundIn?: string; relatedRequirement?: string },
     ) => {
       try {
         const severity = parseEnum(DefectSeveritySchema, opts.severity);
@@ -1479,6 +1492,10 @@ defect
           feature_code: opts.feature,
           title: opts.title,
           severity,
+          action_steps: opts.action,
+          expected_result: opts.expected,
+          actual_result: opts.actual,
+          evidence: defectReportEvidence(opts),
           description: opts.description,
           found_in: opts.foundIn,
           related_requirement_code: opts.relatedRequirement,
@@ -1496,7 +1513,9 @@ defect
   .command('list')
   .description('缺陷列表（--status 过滤）')
   .option('--status <status>', 'reported / triaged / fixing / retest / closed / rejected')
-  .action(async (opts: { status?: string }) => {
+  .option('--project <project_code>', '指定项目')
+  .option('--feature <feature_code>', '指定 Feature')
+  .action(async (opts: { status?: string; project?: string; feature?: string }) => {
     try {
       if (opts.status) {
         const parsed = parseEnum(DefectStatusSchema, opts.status);
@@ -1504,7 +1523,11 @@ defect
           throw new DomainError('invalid_status', `非法状态：${opts.status}`, { valid: DefectStatusSchema.options });
         }
       }
-      const result = await requireApiClient().listDefects(opts.status ? `?status=${encodeURIComponent(opts.status)}` : '');
+      const query = new URLSearchParams();
+      if (opts.status) query.set('status', opts.status);
+      if (opts.project) query.set('project_code', opts.project);
+      if (opts.feature) query.set('feature_code', opts.feature);
+      const result = await requireApiClient().listDefects(query.size ? `?${query}` : '');
       printResult(result);
       if (!result.ok) process.exitCode = 1;
     } catch (e) {
@@ -1513,9 +1536,23 @@ defect
     }
   });
 
+defect.command('download <defect_code> <index>')
+  .description('按 list 返回的 evidence 数组下标（从 0 起）下载附件')
+  .requiredOption('--out <path>', '文件保存路径')
+  .action((code: string, index: string, opts: { out: string }) => printCommandResult(async () => {
+    if (!/^(0|[1-9]\d*)$/.test(index) || !Number.isSafeInteger(Number(index))) {
+      throw new DomainError('defect_index_invalid', '证据下标必须是非负整数');
+    }
+    const result = await requireApiClient().downloadDefectEvidence(code, Number(index));
+    if (!result.ok) return result;
+    const file = path.resolve(opts.out);
+    writeFileSync(file, result.data, { flag: 'wx' });
+    return { ok: true, data: { defect_code: code, index: Number(index), file, size_bytes: result.data.byteLength } };
+  }));
+
 defect
   .command('transition')
-  .description('缺陷状态流转：triaged（Owner 分诊）/ fixing（绑定修复任务）/ retest / closed / rejected')
+  .description('缺陷状态流转：triaged（项目 Owner 或 Admin 分诊）/ fixing（绑定修复任务）/ retest / closed / rejected')
   .argument('<defect_code>')
   .requiredOption('--to <status>', '目标状态')
   .option('--fix-task <task_code>', '修复任务编码（进入 fixing 必填，来源须 defect-fix）')
@@ -1957,7 +1994,9 @@ topic.command('link-ideas').argument('<topic_code>').requiredOption('--ideas <co
 topic.command('link-documents').argument('<topic_code>').requiredOption('--documents <codes>', '需求文档公开编码，逗号分隔').action(async (topicCode: string, opts: { documents: string }) => { try { const result = await requireApiClient().linkRequirementTopicDocuments(topicCode, opts.documents.split(',').map((code) => code.trim()).filter(Boolean)); printResult(result); if (!result.ok) process.exitCode = 1; } catch (error) { printResult(failResult(error)); process.exitCode = 1; } });
 
 // ---- docs 命令族：项目文档库，多级目录与不可变 Revision ----
-const docs = program.command('docs').alias('handoff').description('项目文档库：list / search / show / folder-create / folder-update / create / upload / revise');
+const docs = program.command('docs').alias('handoff').description('项目文档库：资料检索 index / glob / grep / read，文档管理 list / search / show / create / upload / revise');
+registerProjectMaterialCommands(docs, printResult);
+docs.addHelpText('after', '\n' + documentPlacementGuide);
 
 docs
   .command('list')
@@ -2059,6 +2098,7 @@ docs
 docs
   .command('create')
   .description('从本地 Markdown 文件上传一份项目文档')
+  .addHelpText('after', '\n' + documentPlacementGuide)
   .requiredOption('--title <title>', '文档标题')
   .requiredOption('--file <path>', '本地 Markdown 文件')
   .option('--project <project_code>', '项目编码；默认从当前项目工作空间推断')
@@ -2086,6 +2126,7 @@ docs
 
 docs
   .command('upload')
+  .addHelpText('after', '\n' + documentPlacementGuide)
   .description('上传单个 Markdown，或递归上传文件夹及其中的 Markdown 文档')
   .argument('<path>', '本地 .md/.markdown/.txt 文件或文件夹')
   .option('--project <project_code>', '项目编码；默认从当前项目工作空间推断')
@@ -2401,7 +2442,49 @@ design
   });
 
 // ---- requirement 命令族（结构化条目：稳定引用、任务关联与验收） ----
-const requirement = program.command('requirement').description('需求清单：create / list / search / show / update');
+const requirement = program.command('requirement').description('需求条目、状态与版本基线');
+
+async function printCommandResult<T>(call: () => Promise<CliErrorResult | CliSuccessResult<T>>): Promise<void> {
+  try {
+    const result = await call();
+    printResult(result);
+    if (!result.ok) process.exitCode = 1;
+  } catch (error) {
+    printResult(failResult(error));
+    process.exitCode = 1;
+  }
+}
+
+requirement.command('transition <requirement_code>')
+  .description('按当前项目权限与需求状态推进流程')
+  .requiredOption('--to <status>', 'draft / clarifying / confirmed / implementing / delivered / change_proposed / deprecated')
+  .action((code: string, opts: { to: string }) =>
+    printCommandResult(() => requireApiClient().transitionRequirement(code, opts.to)));
+
+const requirementBaseline = requirement.command('baseline').description('查阅和冻结需求修订');
+requirementBaseline.command('list')
+  .option('--project <project_code>', '默认当前目录绑定项目')
+  .action((opts: { project?: string }) =>
+    printCommandResult(async () => requireApiClient().listRequirementBaselines(await resolveProjectCode(opts.project))));
+requirementBaseline.command('create')
+  .option('--project <project_code>', '默认当前目录绑定项目')
+  .requiredOption('--name <name>', '基线名称')
+  .requiredOption('--scope <scope>', '范围说明')
+  .requiredOption('--reason <reason>', '冻结原因')
+  .requiredOption('--item <code@revision...>', '需求编码与确切修订，例如 CODE@2')
+  .option('--parent <code>', '期望的父基线编码；none 表示期望项目目前无基线')
+  .action((opts: { project?: string; name: string; scope: string; reason: string; item: string[]; parent?: string }) =>
+    printCommandResult(async () => {
+      const requirements = opts.item.map(item => {
+        const match = /^([A-Za-z0-9]+)@([1-9]\d*)$/.exec(item);
+        if (!match || !Number.isSafeInteger(Number(match[2]))) throw new DomainError('baseline_item_invalid', '请用需求编码@正整数修订');
+        return { requirement_code: match[1], revision: Number(match[2]) };
+      });
+      return requireApiClient().createRequirementBaseline(await resolveProjectCode(opts.project), {
+        name: opts.name, scope: opts.scope, reason: opts.reason, requirements,
+        parent_baseline_code: opts.parent === 'none' ? null : opts.parent,
+      });
+    }));
 
 requirement
   .command('create')
@@ -2698,6 +2781,8 @@ repository
   });
 
 registerDbCheckOrphans(program);
+registerMemoryCommands(program, printResult);
+registerAgentToolCommands(program, printResult);
 registerDbPlanTenants(program);
 registerAdminRecoveryCommands(program);
 registerAuditCommands(program, requireApiClient);
@@ -2706,6 +2791,7 @@ registerArchitectureCommands(program, { requireApiClient, resolveProjectCode, pr
 registerTestingCommands(program, { requireApiClient, resolveProjectCode, printResult, failResult });
 registerSkillCommands(program, { requireApiClient, resolveProjectCode, printResult, failResult });
 registerIntakeCommands(program, { requireApiClient, resolveProjectCode, printResult, failResult });
+registerCodeUnderstandingCommands(program, { requireApiClient, resolveProjectCode, printResult, failResult });
 
 // Server-local operation: never forwarded through the control-plane HTTP API.
 program.command('db:migrate').description('在服务器本机应用数据库迁移').action(async () => {

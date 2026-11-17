@@ -115,6 +115,9 @@ importers:
       '@team-synergy/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@team-synergy/integrations':
+        specifier: workspace:*
+        version: link:../../packages/integrations
       '@team-synergy/persistence':
         specifier: workspace:*
         version: link:../../packages/persistence

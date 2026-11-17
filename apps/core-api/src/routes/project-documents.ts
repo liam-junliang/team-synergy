@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { registerProjectMaterialRoutes } from './project-materials.js';
 import {
   PROJECT_DOCUMENT_INPUT_KINDS,
   createProjectDocumentUseCases,
@@ -25,6 +26,7 @@ function statusOf(value: unknown): ProjectDocumentStatus | undefined {
 
 /** Project handoff library: nested folders, multiple documents and immutable revisions. */
 export function registerProjectDocumentRoutes(app: FastifyInstance, db: Db): void {
+  registerProjectMaterialRoutes(app, db);
   const uc = createProjectDocumentUseCases(db);
 
   app.get<{

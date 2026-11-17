@@ -49,16 +49,16 @@ export function DocumentQualityPanel({ projectCode, documentCode, revision, onLo
 
   const status = report ? (report.summary.failed ? '需完善' : report.summary.needs_review ? '待人工核验' : '规则检查通过') : query.error ? '检查未完成' : mismatch ? '检查版本已变化' : '正在检查…';
   const tone = report?.summary.failed ? 'bg-amber-50 text-amber-900' : 'bg-slate-50 text-slate-600';
-  return <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3" aria-label={t('文档质检摘要')}>
+  return <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-1.5" aria-label={t('文档质检摘要')}>
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
         <span className="font-semibold text-slate-700">{t('文档质检')}</span>
         <span role="status" className={`rounded px-2 py-1 font-medium ${tone}`}>{t(status)}</span>
-        {report && <span className="text-slate-500">{t('{failed} 项待完善 · {pending} 项待核验', { failed: report.summary.failed, pending: report.summary.needs_review })}</span>}
+        {report && <span className="hidden text-slate-500 sm:inline">{t('{failed} 项待完善 · {pending} 项待核验', { failed: report.summary.failed, pending: report.summary.needs_review })}</span>}
       </div>
       <button ref={trigger} type="button" onClick={() => setOpen(true)} aria-haspopup="dialog" aria-expanded={open} className="ui-context-action shrink-0">{t('查看质量报告')} →</button>
     </div>
-    {report && <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs leading-5 text-slate-500"><span>{t(documentQualityPurposes[report.purpose])} · r{revision}</span><span>{t('人工评审')}：{t(reviewLabels[report.review.status])}</span><span>{t('正式采用')}：{t('未核验')}</span></p>}
+    {report && <p className="hidden flex-wrap gap-x-3 gap-y-0.5 text-xs leading-5 text-slate-500 sm:flex"><span>{t(documentQualityPurposes[report.purpose])} · r{revision}</span><span>{t('人工评审')}：{t(reviewLabels[report.review.status])}</span><span>{t('正式采用')}：{t('未核验')}</span></p>}
     {open && typeof document !== 'undefined' && createPortal(<div className="fixed inset-0 z-[80] flex justify-end bg-slate-950/35" onMouseDown={event => { if (event.target === event.currentTarget) setOpen(false); }}>
       <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} tabIndex={-1} onKeyDown={keyboard} className="flex h-full w-full max-w-[680px] flex-col overflow-hidden bg-white shadow-2xl outline-none">
         <header className="shrink-0 border-b border-slate-200 p-4 sm:p-6">

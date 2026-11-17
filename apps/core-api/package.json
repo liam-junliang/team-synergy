@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json && node scripts/copy-migrations.mjs && node scripts/bundle-system-agent-skill.mjs",
+    "build": "tsc -p tsconfig.json && node scripts/copy-migrations.mjs && node scripts/bundle-system-agent-skill.mjs && node scripts/bundle-platform-skill.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --test --test-concurrency=1 tests/*.test.mjs",
+    "test": "node ../../scripts/run-tests.mjs -- node --test --test-concurrency=1 tests/*.test.mjs",
     "start": "node dist/index.js"
   },
   "dependencies": {
@@ -16,6 +16,7 @@
     "@team-synergy/application": "workspace:*",
     "@team-synergy/contracts": "workspace:*",
     "@team-synergy/domain": "workspace:*",
+    "@team-synergy/integrations": "workspace:*",
     "@team-synergy/persistence": "workspace:*",
     "drizzle-orm": "^0.44.7",
     "fastify": "^5.6.1",

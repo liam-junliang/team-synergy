@@ -2,7 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { useLocale } from './useLocale';
 import { t } from './i18n';
 
-export function WorkspaceDialog({ id, title, description, onClose, children, footer, size = 'default' }: { id: string; title: string; description: string; onClose: () => void; children: ReactNode; footer?: ReactNode; size?: 'default' | 'wide' }) {
+export function WorkspaceDialog({ id, title, description, onClose, children, footer, size = 'default' }: { id: string; title: string; description: string; onClose: () => void; children: ReactNode; footer?: ReactNode; size?: 'default' | 'wide' | 'large' }) {
   useLocale();
   const dialog = useRef<HTMLElement>(null);
   const closeRef = useRef(onClose);
@@ -26,9 +26,9 @@ export function WorkspaceDialog({ id, title, description, onClose, children, foo
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/55 p-0 backdrop-blur-[2px] sm:items-center sm:p-4" onClick={onClose}>
-      <section ref={dialog} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={`${id}-description`} onClick={(event) => event.stopPropagation()} className={`flex max-h-[94vh] w-full flex-col overflow-hidden rounded-t-2xl border border-slate-200 bg-white shadow-2xl sm:rounded-2xl ${size === 'wide' ? 'sm:max-w-2xl' : 'sm:max-w-lg'}`}>
+      <section ref={dialog} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={`${id}-description`} onClick={(event) => event.stopPropagation()} className={`flex max-h-[94vh] w-full flex-col overflow-hidden rounded-t-2xl border border-slate-200 bg-white shadow-2xl sm:rounded-2xl ${size === 'large' ? 'sm:max-w-5xl' : size === 'wide' ? 'sm:max-w-2xl' : 'sm:max-w-lg'}`}>
         <header className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
-          <div>
+          <div className="min-w-0 break-words">
             <h2 id={`${id}-title`} className="text-lg font-bold text-slate-900">{title}</h2>
             <p id={`${id}-description`} className="mt-1 text-sm text-slate-500">{description}</p>
           </div>

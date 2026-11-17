@@ -1,5 +1,6 @@
 import { AdminNavigation } from './AdminNavigation';
-import { AccountClosurePanel } from './AccountClosurePanel';
+import { AccountSettings } from './AccountClosurePanel';
+import { AccountMenu } from './AccountMenu';
 import { useProjectAccess } from './useProjectAccess';
 import { t, getLocale, formatDateTime } from './i18n.ts';
 import { useLocale } from './useLocale';
@@ -32,6 +33,8 @@ const ProjectDocumentsWorkbench = lazy(() => import('./ProjectDocumentsWorkbench
 const ProjectHandoversWorkbench = lazy(() => import('./ProjectHandoversWorkbench').then((module) => ({ default: module.ProjectHandoversWorkbench })));
 const ProjectWorkspace = lazy(() => import('./ProjectWorkspace').then((module) => ({ default: module.ProjectWorkspace })));
 const AgentWorkspace = lazy(() => import('./AgentWorkspace').then((module) => ({ default: module.AgentWorkspace })));
+const CodeUnderstandingWorkbench = lazy(() => import('./CodeUnderstandingWorkbench').then((module) => ({ default: module.CodeUnderstandingWorkbench })));
+const PersonalMemoryWorkbench = lazy(() => import('./PersonalMemoryWorkbench').then((module) => ({ default: module.PersonalMemoryWorkbench })));
 
 const TASK_CARD_BRIEF_STYLE: CSSProperties = {
   display: '-webkit-box',
@@ -54,6 +57,7 @@ const TASK_CARD_BRIEF_STYLE: CSSProperties = {
 export const PROJECT_VIEWS: Array<{ id: ProjectSection; label: string }> = [
   { id: 'overview', label: '项目' },
   { id: 'documents', label: '文档' },
+  { id: 'understanding', label: '规格' },
   { id: 'plan', label: '计划' },
   { id: 'requirements', label: '需求' },
   { id: 'design', label: '设计' },
@@ -272,7 +276,6 @@ export default function App() {
   const route = useWorkspaceRoute();
   const { projectCode } = route;
   const queryClient = useQueryClient();
-  const [accountOpen, setAccountOpen] = useState(false);
   const [session, setSession] = useState<AuthUser | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
   const view = session?.is_system_admin && route.view === 'teams' ? 'admin' : route.view;
@@ -304,12 +307,16 @@ export default function App() {
     };
   }, [queryClient]);
 
+  function finishSession() {
+    queryClient.clear();
+    setSession(null);
+    navigateWorkspace('/teams', { replace: true });
+  }
+
   async function logout() {
     try {
       await logoutWebSession();
-      queryClient.clear();
-      setSession(null);
-      navigateWorkspace('/teams', { replace: true });
+      finishSession();
     } catch {
       window.alert(t('退出失败，请检查网络并刷新后重试。'));
     }
@@ -322,15 +329,15 @@ export default function App() {
   return (
     <ProjectDisplayNamesProvider projectCode={projectCode}>
     <div className="flex h-screen min-w-[320px] flex-col overflow-hidden">
-      <header className="z-40 grid shrink-0 grid-cols-1 items-center gap-x-4 gap-y-2 border-b border-slate-200 bg-slate-950 px-4 py-2.5 text-white shadow-sm sm:grid-cols-[minmax(0,1fr)_auto] lg:px-6 xl:grid-cols-[auto_minmax(0,1fr)_auto]">
+      <header className="relative z-40 grid shrink-0 grid-cols-1 items-center gap-x-4 gap-y-2 border-b border-slate-200 bg-slate-950 px-4 py-2.5 text-white shadow-sm sm:grid-cols-[minmax(0,1fr)_auto] lg:px-6 xl:grid-cols-[auto_minmax(0,1fr)_auto]">
         <a href={session.is_system_admin ? "/admin/teams" : "/teams"} className="col-start-1 row-start-1 flex items-center gap-2 text-left" aria-label={t(session.is_system_admin ? "系统管理" : "返回团队与项目")}>
           <span className="grid h-8 w-8 grid-cols-2 gap-1 rounded-lg bg-cyan-600 p-1.5" aria-hidden="true"><i className="rounded-sm bg-white" /><i className="rounded-sm bg-cyan-200" /><i className="rounded-sm bg-cyan-200" /><i className="rounded-sm bg-white" /></span>
           <span><strong className="block text-sm leading-tight">Team Synergy</strong><span className="block text-[9px] font-semibold tracking-[0.16em] text-slate-400">{inAdminConsole ? 'SYSTEM ADMIN' : 'TEAM WORKSPACE'}</span></span>
         </a>
         <nav className="col-start-1 row-start-3 flex min-w-0 flex-wrap sm:col-span-2 sm:row-start-2 xl:col-span-1 xl:col-start-2 xl:row-start-1" aria-label={t("工作台导航")}>
           {inAdminConsole ? <AdminNavigation tab={route.adminTab ?? (view === 'admin' ? 'teams' : undefined)} /> : view === 'agent' ? <>
-            <a href={session.is_system_admin ? '/admin/teams' : safeAgentReturnPath(route.agentReturnPath, projectCode)} className="shrink-0 border-b-2 border-transparent px-3 py-2 text-sm font-medium text-slate-400 hover:text-slate-100">← {t(session.is_system_admin ? '系统管理' : projectCode ? '返回项目' : '团队与项目')}</a>
-            {route.agentTab !== 'authorize' && (['connect', 'skills'] as const).map(tab => <a key={tab} href={agentWorkspacePath(tab, route)} aria-current={route.agentTab === tab ? 'page' : undefined} className={`shrink-0 border-b-2 px-3 py-2 text-sm font-medium transition ${route.agentTab === tab ? 'border-cyan-400 text-white' : 'border-transparent text-slate-400 hover:text-slate-100'}`}>{t(tab === 'connect' ? 'CLI 接入' : '技能库')}</a>)}
+            <a href={session.is_system_admin ? '/admin/teams' : safeAgentReturnPath(route.agentReturnPath, projectCode)} className="inline-flex shrink-0 items-center gap-1.5 border-b-2 border-transparent px-3 py-2 text-sm font-medium text-slate-400 hover:text-slate-100"><svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M7 4 3 8l4 4M3 8h8a5 5 0 0 1 0 10H9" /></svg>{t(session.is_system_admin ? '系统管理' : projectCode ? '返回项目' : '团队与项目')}</a>
+            {route.agentTab !== 'authorize' && (['connect', 'skills'] as const).map(tab => <a key={tab} href={agentWorkspacePath(tab, route)} aria-current={route.agentTab === tab ? 'page' : undefined} className={`shrink-0 border-b-2 px-3 py-2 text-sm font-medium transition ${route.agentTab === tab ? 'border-cyan-400 text-white' : 'border-transparent text-slate-400 hover:text-slate-100'}`}>{t(tab === 'connect' ? 'Agent 接入' : '技能库')}</a>)}
           </> : <>
           <a href="/teams" aria-current={view === 'teams' ? 'page' : undefined} className={`shrink-0 border-b-2 px-3 py-2 text-sm font-medium transition ${view === 'teams' ? 'border-cyan-400 text-white' : 'border-transparent text-slate-400 hover:text-slate-100'}`}>{t("团队与项目")}</a>
         {projectCode && PROJECT_VIEWS.map((item) => (
@@ -338,32 +345,29 @@ export default function App() {
           ))}
           </>}
         </nav>
-        <div className="col-start-1 row-start-2 flex w-full max-w-full items-center justify-self-end gap-2 text-xs sm:col-start-2 sm:row-start-1 sm:w-auto xl:col-start-3">
-          {!inAdminConsole && <a href={agentWorkspacePath('connect', { projectCode, agentReturnPath: view === 'agent' ? route.agentReturnPath : `${window.location.pathname}${window.location.search}` })} aria-label={t('Agent 工作台')} title={t('Agent 工作台')} aria-current={view === 'agent' ? 'page' : undefined} className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${view === 'agent' ? 'border-cyan-500 bg-cyan-500/15 text-cyan-300' : 'border-slate-700 bg-slate-900 text-slate-300 hover:border-cyan-500 hover:text-cyan-300'}`}><svg aria-hidden="true" viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="7" width="14" height="13" rx="3" /><path d="M12 3v4M9 12v1m6-1v1m-6 4h6M2 11v5m20-5v5" /><circle cx="12" cy="2.5" r=".5" /></svg></a>}
+        <div className="col-start-1 row-start-2 flex w-full max-w-full flex-wrap items-center justify-self-end gap-2 text-xs sm:col-start-2 sm:row-start-1 sm:w-auto xl:col-start-3">
+          {!inAdminConsole && <a href={agentWorkspacePath('connect', { projectCode, agentReturnPath: view === 'agent' ? route.agentReturnPath : `${window.location.pathname}${window.location.search}` })} aria-label={t('Agent 集成')} title={t('Agent 集成')} aria-current={view === 'agent' ? 'page' : undefined} className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${view === 'agent' ? 'border-cyan-500 bg-cyan-500/15 text-cyan-300' : 'border-slate-700 bg-slate-900 text-slate-300 hover:border-cyan-500 hover:text-cyan-300'}`}><svg aria-hidden="true" viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="7" width="14" height="13" rx="3" /><path d="M12 3v4M9 12v1m6-1v1m-6 4h6M2 11v5m20-5v5" /><circle cx="12" cy="2.5" r=".5" /></svg><span>{t('Agent 集成')}</span></a>}
           {!inAdminConsole && (projectCode || view === 'agent') && <ProjectSwitcher route={route} currentProjectName={projectQuery.data?.name} />}
           <LanguageSwitcher />
-          <button type="button" onClick={() => setAccountOpen(true)} title={t("我的账号")} aria-label={t("我的账号")} className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1">
-            <span className="grid h-7 w-7 place-items-center rounded-md bg-cyan-600 font-bold text-white" aria-hidden="true">{session.display_name.trim().charAt(0).toUpperCase()}</span>
-            <span className="hidden text-left md:block"><strong className="block max-w-28 truncate text-xs text-slate-100">{session.display_name}</strong><code className="block max-w-28 truncate text-[10px] text-slate-400">@{session.account}</code></span>
-          </button>
-          <button type="button" onClick={() => void logout()} className="rounded-lg border border-slate-700 px-2.5 py-2 text-slate-300 transition hover:border-rose-500 hover:text-rose-300">{t("退出")}</button>
+          <AccountMenu key={window.location.pathname + window.location.search} user={session} currentView={view} onLogout={() => void logout()} />
         </div>
       </header>
-      {accountOpen && <AccountClosurePanel onClose={() => setAccountOpen(false)} onClosed={() => { setAccountOpen(false); queryClient.clear(); setSession(null); navigateWorkspace('/teams', { replace: true }); }} />}
       <ErrorBoundary>
         {view === 'admin' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t('正在加载…')}</div>}><AdminWorkspace tab={route.adminTab} isSystemAdmin={session.is_system_admin} /></Suspense>}
         {view === 'agent' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t('正在加载…')}</div>}><AgentWorkspace key={`${projectCode ?? ''}:${route.teamCode ?? ''}:${route.agentTab}`} route={route} user={session} /></Suspense>}
         {view === 'teams' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载团队…")}</div>}><TeamsWorkspace /></Suspense>}
+        {view === 'personal-memory' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t('正在读取个人记忆…')}</div>}><PersonalMemoryWorkbench key={`${session.code}:${route.personalMemoryProject ?? ''}`} ownerCode={session.code} initialProject={route.personalMemoryProject} /></Suspense>}
         {projectCode && view === 'overview' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载项目…")}</div>}><ProjectWorkspace key={projectCode} projectCode={projectCode} tab={route.projectTab} documentCode={route.documentCode} /></Suspense>}
         {projectCode && view === 'board' && <TeamBoard key={projectCode} projectCode={projectCode} />}
+        {projectCode && view === 'understanding' && <Suspense fallback={<div className="p-8 text-sm text-slate-500">{t('正在加载代码理解…')}</div>}><CodeUnderstandingWorkbench key={projectCode} projectCode={projectCode} route={route} /></Suspense>}
         {projectCode && view === 'requirements' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载需求…")}</div>}><RequirementsWorkbench key={projectCode} projectCode={projectCode} documentCode={route.documentCode} initialTab={route.requirementsTab} /></Suspense>}
         {projectCode && view === 'design' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载设计原型…")}</div>}><DesignWorkbench key={projectCode} projectCode={projectCode} /></Suspense>}
         {projectCode && view === 'plan' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载计划…")}</div>}><ProjectPlanWorkbench key={projectCode} projectCode={projectCode} /></Suspense>}
-        {projectCode && view === 'testing' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载…")}</div>}><TestingWorkbench key={projectCode} projectCode={projectCode} tab={route.testingTab} itemCode={route.testingCode} /></Suspense>}
+        {projectCode && view === 'testing' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载…")}</div>}><TestingWorkbench key={projectCode} projectCode={projectCode} tab={route.testingTab} itemCode={route.testingCode} revision={route.testingRevision} /></Suspense>}
         {projectCode && view === 'defects' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载…")}</div>}><DefectsWorkbench key={projectCode} projectCode={projectCode} /></Suspense>}
         {projectCode && view === 'documents' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载项目文档…")}</div>}><ProjectDocumentsWorkbench key={`${projectCode}:${route.documentCode ?? ''}:${route.folderCode ?? ''}:${route.createDocument ?? false}`} projectCode={projectCode} documentCode={route.documentCode} folderCode={route.folderCode} createDocument={route.createDocument} /></Suspense>}
         {projectCode && view === 'handovers' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载交接记录…")}</div>}><ProjectHandoversWorkbench key={projectCode} projectCode={projectCode} handoverCode={route.handoverCode} /></Suspense>}
-        {view === 'account' && <main className="min-h-0 flex-1 overflow-y-auto bg-slate-50 p-5 lg:p-7"><section className="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><h1 className="text-xl font-bold text-slate-900">{t('我的账号')}</h1><p className="mt-4 text-sm text-slate-700">{session.display_name} <span className="text-slate-500">@{session.account}</span></p><button type="button" className="ui-button ui-button-secondary mt-5" onClick={() => setAccountOpen(true)}>{t('管理我的账号')}</button></section></main>}
+        {view === 'account' && <AccountSettings user={session} onClosed={finishSession} />}
       </ErrorBoundary>
       {projectCode && !inAdminConsole && <SystemAgentPanel key={`${session.code}:${projectCode}`} projectCode={projectCode} projectName={projectQuery.data?.name ?? projectCode} userCode={session.code} />}
     </div>

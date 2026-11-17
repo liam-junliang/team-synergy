@@ -202,20 +202,22 @@ export function SystemAgentAnnotation({ target, content, children }: { target: S
   const [selection, setSelection] = useState('');
   const [invalidSelection, setInvalidSelection] = useState<'format' | 'too_long' | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const tools = useRef<HTMLDetailsElement>(null);
   const capture = () => {
     const selected = window.getSelection();
     if (!selected || selected.isCollapsed || !contentRef.current?.contains(selected.anchorNode) || !contentRef.current.contains(selected.focusNode)) return;
     const text = selected.toString().trim();
     if (!text) return;
     const quote = exactSystemAgentQuote(content, text);
+    if (tools.current) tools.current.open = true;
     setSelection(quote ?? ''); setInvalidSelection(quote ? null : text.length > 20_000 ? 'too_long' : 'format');
   };
   return <>
-    <div className="system-agent-annotation"><div><span>{t('选中正文中的文字，即可添加批注。')}</span><button type="button" className="system-agent-link" onClick={() => { setSelection(''); setInvalidSelection(null); window.dispatchEvent(new CustomEvent(SYSTEM_AGENT_OPEN_EVENT, { detail: target })); }}>{t('整篇交给 Agent')}</button></div>
+    <details ref={tools} className="system-agent-annotation"><summary>{t('文档批注')}</summary><div className="system-agent-annotation-actions"><span>{t('选中正文中的文字，即可添加批注。')}</span><button type="button" className="system-agent-link" onClick={() => { setSelection(''); setInvalidSelection(null); window.dispatchEvent(new CustomEvent(SYSTEM_AGENT_OPEN_EVENT, { detail: target })); }}>{t('整篇交给 Agent')}</button></div>
       {selection && <div className="system-agent-selected-quote"><blockquote>{selection}</blockquote><button type="button" className="ui-button ui-button-primary ui-button-compact" onClick={() => window.dispatchEvent(new CustomEvent(SYSTEM_AGENT_OPEN_EVENT, { detail: { ...target, quote: selection } }))}>{t('批注交给 Agent')}</button><button type="button" className="system-agent-link" onClick={() => setSelection('')}>{t('清除选区')}</button></div>}
       {invalidSelection && <p role="status" className="system-agent-notice">{t(invalidSelection === 'too_long' ? '批注引用最多 20000 字符，请缩小选区或改为整篇批注。' : '选中文字含渲染格式，无法精确定位原文。请在下方 Markdown 原文中选择，或改为整篇批注。')}</p>}
       <details open={Boolean(invalidSelection) || undefined}><summary>{t('从 Markdown 原文选择')}</summary><textarea readOnly rows={7} value={content} aria-label={t('选择批注原文')} onSelect={event => { const element = event.currentTarget; const quote = content.slice(element.selectionStart, element.selectionEnd).trim(); if (quote) { setSelection(quote.length <= 20_000 ? quote : ''); setInvalidSelection(quote.length > 20_000 ? 'too_long' : null); } }} /></details>
-    </div>
+    </details>
     <div ref={contentRef} onMouseUp={capture} onKeyUp={capture}>{children}</div>
   </>;
 }

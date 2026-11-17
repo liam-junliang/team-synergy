@@ -26,11 +26,23 @@ import { TestAssetEditor, TestAssetReader } from './TestAssets';
 import { DocumentVersionHistory as ProjectDocumentHistory, formatDocumentDate as formatDate } from './DocumentVersionHistory';
 import { DocumentReaderHeader } from './DocumentReaderHeader';
 import { DocumentQualityPanel } from './DocumentQualityPanel';
+import { ProjectMemoryPanel } from './ProjectMemoryPanel';
+import { isDocumentLibraryTestAsset } from '../../../packages/contracts/src/testing';
+import { navigateWorkspace } from './workspaceNavigation';
+import { projectMemoryQueryKey } from './memoryManagementApi';
 import { SystemAgentAnnotation } from './SystemAgentPanel';
 import { systemAgentDocumentEligible } from './systemAgentApi';
 import { projectHomeWorkspacePath, requirementWorkspacePath, testingWorkspacePath } from './workspaceRouting';
 export { MarkdownDocument } from './MarkdownDocument';
 export { DocumentVersionHistory as ProjectDocumentHistory } from './DocumentVersionHistory';
+
+/** Old bookmarks resolve to the original evidence, which is maintained in Testing. */
+export function testingEvidencePath(document?: HandoffDocumentDetail): string | null {
+  const asset = document?.testing_asset;
+  if (document?.source_kind !== 'testing' || !asset || asset.code !== document.document_code ||
+      asset.project_code !== document.project_code || isDocumentLibraryTestAsset(asset)) return null;
+  return testingWorkspacePath(document.project_code, 'assets', asset.code);
+}
 
 export function ProjectDocumentsWorkbench({ projectCode, projectId, documentCode, folderCode, createDocument = false }: { projectCode?: string; projectId?: string; documentCode?: string; folderCode?: string; createDocument?: boolean }) {
   useLocale();
@@ -55,11 +67,15 @@ export function ProjectDocumentsWorkbench({ projectCode, projectId, documentCode
     folder_code: folderCode ?? null, kind: 'doc', title: '', summary: '', content: '',
   });
   const documentPaneRef = useRef<HTMLElement>(null);
+  const pageRef = useRef<HTMLElement>(null);
+  const mobileDirectoryToggle = useRef<HTMLButtonElement>(null);
+  const readingPosition = useRef(0);
   const historyToggleRef = useRef<HTMLButtonElement>(null);
 
   const libraryQuery = useQuery({
     queryKey: ['handoff-library', activeProjectCode, deferredQuery],
     queryFn: () => listHandoffLibrary(activeProjectCode, deferredQuery),
+    placeholderData: previous => previous?.project_code === activeProjectCode ? previous : undefined,
     enabled: Boolean(activeProjectCode),
   });
   const library = useMemo(() => libraryQuery.data ? { ...libraryQuery.data, can_create: canWrite && libraryQuery.data.can_create, folders: libraryQuery.data.folders.map(folder => ({ ...folder, can_edit: canWrite && folder.can_edit })) } : undefined, [libraryQuery.data, canWrite]);
@@ -90,11 +106,30 @@ export function ProjectDocumentsWorkbench({ projectCode, projectId, documentCode
   const documentProjectMismatch = Boolean(documentQuery.data && documentQuery.data.project_code !== activeProjectCode);
   const document = documentProjectMismatch || !documentQuery.data ? undefined : { ...documentQuery.data, can_edit: canWrite && documentQuery.data.can_edit, source_can_edit: canWrite && documentQuery.data.source_can_edit };
   const documentFolder = activeFolders.find(folder => folder.folder_code === document?.folder_code);
+  const evidencePath = testingEvidencePath(document);
+
+  useEffect(() => {
+    if (evidencePath) navigateWorkspace(evidencePath, { replace: true });
+  }, [evidencePath]);
+
+  useEffect(() => {
+    const page = pageRef.current;
+    if (!page) return;
+    const measure = () => page.style.setProperty('--library-viewport-height', `${page.clientHeight}px`);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(page);
+    return () => observer.disconnect();
+  }, [activeProjectCode, libraryQuery.isLoading, libraryQuery.isError]);
 
   useEffect(() => {
     setViewRevision(null);
     setHistoryOpen(false);
-    documentPaneRef.current?.scrollTo({ top: 0 });
+    const page = pageRef.current, pane = documentPaneRef.current;
+    if (page && pane && page.scrollTop) {
+      const distance = pane.getBoundingClientRect().top - page.getBoundingClientRect().top - (mobileDirectoryToggle.current?.offsetHeight ?? 0);
+      if (distance < 0) page.scrollBy({ top: distance });
+    }
   }, [effectiveDocumentCode]);
 
   useEffect(() => {
@@ -204,24 +239,38 @@ export function ProjectDocumentsWorkbench({ projectCode, projectId, documentCode
     });
   }
 
+  function selectDocument(item: HandoffDocumentSummary) {
+    setSelectedFolderCode(item.folder_code);
+    setSelectedDocumentCode(item.document_code);
+    setMobileDirectoryOpen(false);
+    requestAnimationFrame(() => {
+      const page = pageRef.current, pane = documentPaneRef.current;
+      if (!page || !pane) return;
+      page.scrollBy({ top: pane.getBoundingClientRect().top - page.getBoundingClientRect().top - (mobileDirectoryToggle.current?.offsetHeight ?? 0) });
+      pane.focus({ preventScroll: true });
+    });
+  }
+
+  function toggleMobileDirectory() {
+    if (!mobileDirectoryOpen) readingPosition.current = pageRef.current?.scrollTop ?? 0;
+    setMobileDirectoryOpen(!mobileDirectoryOpen);
+    requestAnimationFrame(() => pageRef.current?.scrollTo({ top: mobileDirectoryOpen ? readingPosition.current : 0 }));
+  }
+
   function renderDocuments(folderCode: string | null, depth: number) {
     return activeDocuments.filter((item) => item.folder_code === folderCode).map((item) => (
       <button
         key={item.document_code}
         type="button"
-        onClick={() => {
-          setMobileDirectoryOpen(false);
-          setSelectedFolderCode(item.folder_code);
-          setSelectedDocumentCode(item.document_code);
-        }}
-        style={{ paddingLeft: 14 + depth * 14 }}
-        className={`group flex w-full items-start gap-2 border-l-2 py-2 pr-2 text-left transition ${effectiveDocumentCode === item.document_code ? 'border-cyan-600 bg-cyan-50 text-cyan-950' : 'border-transparent text-slate-600 hover:bg-slate-50 hover:text-slate-950'}`}
+        onClick={() => selectDocument(item)}
+        aria-current={effectiveDocumentCode === item.document_code ? 'page' : undefined}
+        title={item.title}
+        style={{ paddingLeft: 12 + Math.min(depth, 6) * 12 }}
+        className={`group flex w-full items-start gap-1.5 border-l-2 py-1.5 pr-2 text-left transition ${effectiveDocumentCode === item.document_code ? 'border-cyan-600 bg-cyan-50 text-cyan-950' : 'border-transparent text-slate-600 hover:bg-slate-50 hover:text-slate-950'}`}
       >
         <span className={`mt-0.5 rounded px-1.5 py-0.5 text-[11px] font-semibold ${kindMeta[canonicalDocumentKind(item.kind)].badge}`}>{kindMeta[canonicalDocumentKind(item.kind)].short}</span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-[13px] font-semibold">{item.title}</span>
-          <span className="mt-0.5 block text-[10px] text-slate-400">r{item.current_revision}</span>
-        </span>
+        <span className="min-w-0 flex-1 wrap-anywhere text-[13px] font-medium leading-5">{item.title}</span>
+        <span className="shrink-0 text-[10px] leading-5 text-slate-500">r{item.current_revision}</span>
       </button>
     ));
   }
@@ -231,8 +280,8 @@ export function ProjectDocumentsWorkbench({ projectCode, projectId, documentCode
       const expanded = Boolean(deferredQuery.trim()) || !collapsedFolderCodes.has(folder.folder_code);
       return [<div key={`folder-${folder.folder_code}`}>
         <div
-          style={{ paddingLeft: 10 + depth * 14 }}
-          className={`group flex items-center gap-2 py-2 pr-2 ${selectedFolderCode === folder.folder_code ? 'bg-slate-100' : 'hover:bg-slate-50'}`}
+          style={{ paddingLeft: 8 + Math.min(depth, 6) * 12 }}
+          className={`group flex items-center gap-1.5 py-1.5 pr-2 ${selectedFolderCode === folder.folder_code ? 'bg-slate-100' : 'hover:bg-slate-50'}`}
         >
           <button
             type="button"
@@ -245,7 +294,7 @@ export function ProjectDocumentsWorkbench({ projectCode, projectId, documentCode
             {expanded ? '▾' : '▸'}
           </button>
           <button type="button" aria-current={selectedFolderCode === folder.folder_code ? 'location' : undefined} onClick={() => { setSelectedFolderCode(folder.folder_code); setSelectedDocumentCode(null); setDialog(null); }} className="flex min-w-0 flex-1 items-center gap-2 text-left text-[13px] font-bold text-slate-700">
-            <DocumentTreeIcon /><span className="truncate">{systemFolderName(folder)}</span>
+            <DocumentTreeIcon /><span className="min-w-0 wrap-anywhere leading-5">{systemFolderName(folder)}</span>
           </button>
           {folder.system_role && <span className="ui-meta shrink-0" title={t("系统固定目录，不可改名、移动、删除或新建子文件夹")}>{t("系统")}</span>}
           {library?.can_create && canCreateHandoffSubfolder(activeFolders, folder.folder_code) && <button type="button" aria-label={t("在{0}下新建文件夹", { "0": systemFolderName(folder) })} title={t("新建子文件夹")} onClick={() => openFolderDialog(undefined, folder.folder_code)} className="rounded px-1 text-xs text-slate-500 hover:bg-white hover:text-cyan-700">＋</button>}
@@ -257,39 +306,44 @@ export function ProjectDocumentsWorkbench({ projectCode, projectId, documentCode
     });
   }
 
+  if (!activeProjectCode) return <main className="grid flex-1 place-items-center text-sm text-slate-500">{t('选择项目')}</main>;
   if (libraryQuery.isLoading) return <div className="grid flex-1 place-items-center text-sm text-slate-500">{t("正在加载项目文档库…")}</div>;
   if (libraryQuery.error) return <div className="m-6 rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">{t("项目文档库加载失败：{0}", { "0": libraryQuery.error.message })}</div>;
 
   return (
-    <main className="min-h-0 flex-1 overflow-y-auto bg-slate-50 p-4 lg:overflow-hidden lg:p-6">
-      <section className="mx-auto flex h-full min-h-[620px] max-w-[1640px] flex-col">
-        <header className="mb-4 flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <p className="text-xs font-bold tracking-[0.18em] text-cyan-700">PROJECT HANDOFF</p>
-            <h1 className="mt-1 text-2xl font-bold text-slate-950">{t("{0} · 文档", { "0": projectName || t('项目') })}</h1>
-            <p className="mt-1 text-sm text-slate-500">{t("统一查阅项目规范、需求、架构与其他文档，正文和版本与业务页面同步。")}</p>
+    <main ref={pageRef} tabIndex={0} aria-label={t('文档库')} className="project-document-library min-h-0 min-w-0 flex-1 overflow-y-auto bg-slate-50 focus-visible:outline-cyan-600">
+      <section className="mx-auto max-w-[1640px] p-3 sm:p-4">
+        <header className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-3">
+            <h1 className="wrap-anywhere text-xl font-bold text-slate-950">{t("{0} · 文档", { "0": projectName || t('项目') })}</h1>
+            <span className="text-xs text-slate-500">{t("{0} 文件夹 · {1} 文档", { "0": activeFolders.length, "1": activeDocuments.length })}</span>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">{t("{0} 文件夹 · {1} 文档", { "0": activeFolders.length, "1": activeDocuments.length })}</span>
+          <div className="flex flex-wrap items-center gap-2">
             {library?.can_create && <button type="button" disabled={missingFolder || !canCreateHandoffSubfolder(activeFolders, selectedFolderCode)} onClick={() => openFolderDialog()} className="ui-button ui-button-secondary">{t("新建文件夹")}</button>}
             {library?.can_create && <button type="button" disabled={missingFolder || sourceFolderSelected || selectedSystemRole === 'root'} onClick={() => openDocumentDialog()} className="ui-button ui-button-primary">{t("新建文档")}</button>}
           </div>
         </header>
+        <ProjectMemoryPanel key={activeProjectCode} projectCode={activeProjectCode} onSelectDocument={code => {
+          const target = activeDocuments.find(item => item.document_code === code);
+          if (!target) return false;
+          selectDocument(target);
+          return true;
+        }} />
         {missingFolder && <p role="alert" className="mb-4 rounded-lg bg-rose-50 px-4 py-3 text-sm text-rose-700">{t("该文件夹不存在或已归档，请从文档库重新选择。")}</p>}
         {selectedSystemRole === 'standards' && <p className="mb-4 text-sm leading-6 text-slate-500">{t("项目规范为固定目录，可添加和编辑规范文档，不能新建子文件夹；已有子目录和文档继续保留。")}</p>}
         {selectedSystemRole === 'requirements' && <p className="mb-4 text-sm leading-6 text-slate-500">{t("需求文档在此自动归集，可直接阅读正文和历史版本。新增与编辑请前往")}<a href={requirementWorkspacePath(activeProjectCode, { tab: 'documents' })} className="ml-1 font-medium text-cyan-700 hover:text-cyan-900">{t("需求文档页面")}</a>{getLocale() === 'zh-CN' ? '。' : '.'}</p>}
         {selectedSystemRole === 'architecture' && <p className="mb-4 text-sm leading-6 text-slate-500">{t("架构设计在此自动归集，图源、说明和历史版本与项目页面同步，可直接阅读和编辑。新增请前往")}<a href={projectHomeWorkspacePath(activeProjectCode, 'architecture')} className="ml-1 font-medium text-cyan-700 hover:text-cyan-900">{t("架构设计页面")}</a>{getLocale() === 'zh-CN' ? '。' : '.'}</p>}
 
-        {selectedSystemRole === 'testing' && <p className="mb-4 text-sm leading-6 text-slate-500">{t('测试资料在此自动归集，内容与历史版本保持同步。新增请前往')}<a href={testingWorkspacePath(activeProjectCode, 'assets')} className="ml-1 font-medium text-cyan-700 hover:text-cyan-900">{t('测试页面')}</a></p>}
-        <button type="button" onClick={() => setMobileDirectoryOpen(open => !open)} aria-expanded={mobileDirectoryOpen} aria-controls="project-document-directory" className="ui-button ui-button-secondary mb-3 self-start lg:hidden">{t(mobileDirectoryOpen ? '返回文档正文' : '文档目录')}</button>
-        <div className={`relative grid min-h-[500px] flex-1 grid-cols-[minmax(0,1fr)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:min-h-0 lg:grid-cols-[260px_minmax(0,1fr)] ${historyOpen && document && !['architecture', 'testing'].includes(document.source_kind ?? '') ? 'xl:grid-cols-[260px_minmax(0,1fr)_240px]' : ''}`}>
-          <aside id="project-document-directory" className={`${mobileDirectoryOpen ? 'flex' : 'hidden'} min-h-0 flex-col border-r border-slate-200 bg-white lg:flex`}>
-            <div className="border-b border-slate-200 p-3">
+        {selectedSystemRole === 'testing' && <p className="mb-4 text-sm leading-6 text-slate-500">{t('这里收录测试策略、验收矩阵与环境说明。源码包、日志和单次验收报告请在关联任务或测试执行中查看。')}<a href={testingWorkspacePath(activeProjectCode, 'assets')} className="ml-1 font-medium text-cyan-700 hover:text-cyan-900">{t('测试页面')}</a></p>}
+        <button ref={mobileDirectoryToggle} type="button" onClick={toggleMobileDirectory} aria-expanded={mobileDirectoryOpen} aria-controls="project-document-directory" className="ui-button ui-button-secondary ui-button-compact sticky top-0 z-20 mb-1 lg:hidden">{t(mobileDirectoryOpen ? '返回文档正文' : '文档目录')}</button>
+        <div className={`project-library-columns relative grid min-w-0 grid-cols-[minmax(0,1fr)] items-start gap-3 lg:grid-cols-[clamp(19rem,31%,24rem)_minmax(0,1fr)] ${historyOpen && document && !['architecture', 'testing'].includes(document.source_kind ?? '') ? 'xl:grid-cols-[clamp(19rem,29%,24rem)_minmax(0,1fr)_15rem]' : ''}`}>
+          <aside id="project-document-directory" className={`${mobileDirectoryOpen ? 'flex' : 'hidden'} min-w-0 flex-col rounded-xl border border-slate-200 bg-white lg:sticky lg:top-0 lg:flex lg:max-h-[var(--library-viewport-height,80dvh)]`}>
+            <div className="shrink-0 border-b border-slate-200 p-2">
               <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-400 focus-within:border-cyan-500 focus-within:bg-white">
                 <span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("搜索项目文档")} className="min-w-0 flex-1 bg-transparent text-sm text-slate-800 outline-none" />
               </label>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto py-2">
+            <div tabIndex={0} role="region" aria-label={t('文档目录')} className="min-h-0 min-w-0 py-1 focus-visible:outline-cyan-600 lg:overflow-y-auto">
               <div className={`group flex items-center gap-2 px-3 py-2 ${selectedFolderCode === null ? 'bg-slate-100' : 'hover:bg-slate-50'}`}>
                 <button type="button" onClick={() => { setSelectedFolderCode(null); setSelectedDocumentCode(null); setDialog(null); }} className="flex min-w-0 flex-1 items-center gap-2 text-left text-[13px] font-bold text-slate-700"><DocumentTreeIcon library />{t("文档库")}</button>
                 {library?.can_create && <button type="button" title={t("在根目录新建文件夹")} onClick={() => openFolderDialog(undefined, null)} className="invisible rounded px-1 text-slate-400 hover:bg-white group-hover:visible">＋</button>}
@@ -300,9 +354,10 @@ export function ProjectDocumentsWorkbench({ projectCode, projectId, documentCode
             </div>
           </aside>
 
-          <section ref={documentPaneRef} className={`${mobileDirectoryOpen ? 'hidden lg:block' : ''} min-h-0 min-w-0 overflow-y-auto bg-white`}>
+          <section ref={documentPaneRef} tabIndex={-1} aria-label={t('文档正文')} className={`${mobileDirectoryOpen ? 'hidden lg:block' : ''} project-library-reader min-w-0 rounded-xl border border-slate-200 bg-white focus:outline-none`}>
             {documentQuery.isLoading ? <div className="grid h-full place-items-center text-sm text-slate-400">{t("正在读取文档…")}</div> : documentProjectMismatch || documentQuery.error ? <div role="alert" className="m-5 rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{documentProjectMismatch ? t("该文档不属于当前项目，请从文档库重新选择。") : t("读取文档失败：{0}", { "0": documentQuery.error?.message ?? '' })}</div> : document ? (() => {
               if (document.source_kind === 'architecture') return <ProjectArchitectureDocument key={document.document_code} document={document} />;
+              if (evidencePath) return <p role="status" className="m-5 text-sm text-slate-600"><a href={evidencePath} className="text-cyan-700 underline">{t('前往原始测试资料')}</a></p>;
               if (document.source_kind === 'testing') return <ProjectTestingDocument key={document.document_code} document={document} />;
               const historical = viewRevision === null ? null : document.revisions.find((revision) => revision.revision === viewRevision) ?? null;
               const shownContent = historical?.content ?? document.content;
@@ -311,7 +366,7 @@ export function ProjectDocumentsWorkbench({ projectCode, projectId, documentCode
                   authorName={memberName(historical?.created_by_user_code ?? document.updated_by_user_code ?? '')}
                   onToggleHistory={() => setHistoryOpen(open => !open)} onReturnCurrent={() => setViewRevision(null)} onEdit={() => openDocumentDialog(document)}
                   notice={<DocumentQualityPanel key={`${document.document_code}:${historical?.revision ?? document.current_revision}`} projectCode={document.project_code} documentCode={document.document_code} revision={historical?.revision ?? document.current_revision} onLocate={line => locateDocumentQualityLine(documentPaneRef.current, line)} />} />
-                <div className="mx-auto max-w-[920px] px-4 py-6 sm:px-6 lg:px-8">{!historical && systemAgentDocumentEligible(document) ? <SystemAgentAnnotation key={`${document.document_code}:${document.current_revision}`} target={{ project_code: document.project_code, document_code: document.document_code, title: document.title, base_revision: document.current_revision }} content={shownContent}><MarkdownDocument content={shownContent} outline={document.outline} /></SystemAgentAnnotation> : <MarkdownDocument content={shownContent} outline={historical ? undefined : document.outline} />}</div>
+                <div className="mx-auto max-w-[920px] px-4 py-3 sm:px-6 sm:py-4 lg:px-8">{!historical && systemAgentDocumentEligible(document) ? <SystemAgentAnnotation key={`${document.document_code}:${document.current_revision}`} target={{ project_code: document.project_code, document_code: document.document_code, title: document.title, base_revision: document.current_revision }} content={shownContent}><MarkdownDocument content={shownContent} outline={document.outline} /></SystemAgentAnnotation> : <MarkdownDocument content={shownContent} outline={historical ? undefined : document.outline} />}</div>
               </article>;
             })() : <div className="grid h-full place-items-center px-8 text-center"><div><div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-cyan-50 text-2xl text-cyan-700">{t("文")}</div><h2 className="mt-4 text-lg font-bold text-slate-900">{t("选择一份项目文档")}</h2><p className="mt-2 text-sm text-slate-500">{t("从左侧目录查阅，或新建接口、部署、数据等项目资料。")}</p></div></div>}
           </section>
@@ -471,6 +526,7 @@ export async function invalidateProjectDocumentQueries(queryClient: QueryClient,
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: ['handoff-library', projectCode] }),
     queryClient.invalidateQueries({ queryKey: ['project-home', projectCode] }),
+    queryClient.invalidateQueries({ queryKey: projectMemoryQueryKey(projectCode) }),
     ...(documentCode ? [queryClient.invalidateQueries({ queryKey: ['handoff-document', documentCode] })] : []),
   ]);
 }
