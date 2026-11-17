@@ -36,6 +36,78 @@ async function setup() {
 afterEach(async () => { for (const { db, app } of fixtures.splice(0)) { await app.close(); await closeTestDb(db); } });
 function data(response) { assert.equal(response.statusCode, 200, response.body); assert.equal(response.json().ok, true, response.body); return response.json().data; }
 
+test('material-only HTTP intake publishes readable structured acceptance without a repository or duplicate replay', async () => {
+  const f = await setup();
+  await f.db.delete(schema.projectRepositories).where(eq(schema.projectRepositories.id, f.repository.id));
+  const file = { path: 'materials/team/decisions.md', sha256: 'd'.repeat(64) };
+  const module = { ...f.item, assessment: 'documented', evidence: [{ ...file, line_start: 1, line_end: 5 }] };
+  const acceptance = [{ id: 'AC-ACCESS-001', text: 'Given a viewer, when changing a document, then reject the change and keep the original revision.' }];
+  const bundle = { ...f.bundle, repository_code: null, namespace: 'material-http', source: { ...f.bundle.source,
+    mode: 'materials', commit: null, dirty: false, scope: ['materials/team'], files: [file],
+    manifest_sha256: createHash('sha256').update(intakeManifestText([file])).digest('hex'),
+    inputs: [{ key: 'team', kind: 'team_note', label: 'Access decisions', prefix: 'materials/team' }],
+  }, items: [module, { ...module, key: 'requirement.access', kind: 'requirement', module_key: module.key,
+    title: 'Restrict document mutation', content_markdown: '# REQ-ACCESS-001\nGiven a viewer, when editing a document, then reject the change.', acceptance_criteria: acceptance }] };
+  for (const actor of ['viewer', 'system']) assert.equal((await f.request('POST', '', { bundle, idempotency_key: 'materials-forbidden' }, actor)).statusCode, 403);
+  const staged = data(await f.request('POST', '', { bundle, idempotency_key: 'materials-submit' }, 'member'));
+  assert.equal(staged.repository_code, null); assert.deepEqual(staged.source.inputs, bundle.source.inputs);
+  assert.equal(data(await f.request('GET')).batches[0].repository_code, null);
+  const decisions = bundle.items.map(item => ({ key: item.key, action: 'create' }));
+  assert.equal((await f.request('POST', `/${staged.code}/review`, { base_revision: staged.revision, decisions }, 'member')).statusCode, 403);
+  const frozen = data(await f.request('POST', `/${staged.code}/review`, { base_revision: staged.revision, decisions }));
+  const published = data(await f.request('POST', `/${staged.code}/apply`, { plan_hash: frozen.plan_hash, idempotency_key: 'materials-apply' }));
+  assert.equal(published.status, 'applied'); assert.equal(published.publication.created, 2);
+  const requirementCode = published.items.find(row => row.item.kind === 'requirement').target_code;
+  const requirement = data(await f.app.inject({ method: 'GET', url: `/requirements/${requirementCode}`, headers: f.users.owner.headers }));
+  assert.deepEqual(requirement.acceptance_criteria, acceptance); assert.deepEqual(requirement.revisions[0].acceptance_criteria, acceptance);
+  assert.equal(requirement.state, 'draft');
+  assert.equal(data(await f.request('POST', '', { bundle, idempotency_key: 'materials-submit' }, 'member')).code, staged.code);
+  assert.equal(data(await f.request('POST', `/${staged.code}/apply`, { plan_hash: frozen.plan_hash, idempotency_key: 'materials-apply' })).code, staged.code);
+  assert.equal((await f.db.select().from(schema.requirements)).length, 1);
+  const context = data(await f.request('GET', '/context'));
+  assert.deepEqual(context.repositories, []); assert.equal(context.bindings.length, 2); assert(context.bindings.every(binding => binding.repository_code === null));
+  const invalid = { ...bundle, source: { ...bundle.source, mode: 'repository' } };
+  assert.equal((await f.request('POST', '', { bundle: invalid, idempotency_key: 'invalid-source-mode' })).statusCode, 422);
+});
+
+test('enterprise draft HTTP preserves quality evidence while direct freeze/apply and profile downgrades are gated', async () => {
+  const f = await setup();
+  const bundle = { ...f.bundle, profile: 'enterprise' };
+  const batch = data(await f.request('POST', '', { bundle, idempotency_key: 'enterprise-gaps' }, 'member'));
+  assert.equal(batch.profile, 'enterprise'); assert.equal(batch.quality_gate.status, 'blocked');
+  assert(batch.quality_report.summary.blockers > 0); assert.equal(batch.quality_report.batch_revision, batch.revision);
+  const decisions = [{ key: f.item.key, action: 'create' }];
+  const rejected = await f.request('POST', `/${batch.code}/review`, { base_revision: batch.revision, decisions });
+  assert.equal(rejected.statusCode, 409, rejected.body);
+  assert(rejected.json().error.details.quality_report.summary.blockers > 0);
+  for (const profile of ['pilot']) {
+    const downgrade = await f.request('POST', `/${batch.code}/review`, { base_revision: batch.revision, decisions, profile });
+    assert.equal(downgrade.statusCode, 409, downgrade.body);
+    assert.equal((await f.request('PUT', `/${batch.code}`, { base_revision: batch.revision, bundle: { ...bundle, profile } })).statusCode, 409);
+  }
+  assert.equal((await f.request('POST', `/${batch.code}/apply`, { plan_hash: 'a'.repeat(64), idempotency_key: 'bypass' })).statusCode, 409);
+  const current = data(await f.request('GET', `/${batch.code}`));
+  assert.equal(current.revision, batch.revision); assert.equal(current.plan_hash, null); assert.equal(current.items[0].decision, null);
+  assert.equal(current.approval.status, 'not_requested'); assert.equal(current.dossier.content_verified, false);
+  assert.equal((await f.db.select().from(schema.intakeAttempts)).length, 0); assert.equal((await f.db.select().from(schema.projectModules)).length, 0);
+});
+
+test('HTTP legacy rows require explicit profile for new review and reject stale persisted report at apply', async () => {
+  const f = await setup();
+  const batch = data(await f.request('POST', '', { bundle: f.bundle, idempotency_key: 'legacy-profile' }));
+  await f.db.update(schema.intakeBatches).set({ profile: null, quality_rule_version: null, quality_report_json: null, frozen_quality_json: null }).where(eq(schema.intakeBatches.code, batch.code));
+  const current = data(await f.request('GET', `/${batch.code}`));
+  assert.equal(current.profile, null); assert.equal(current.quality_gate.status, 'unknown'); assert.equal(current.quality_report, null);
+  const decisions = [{ key: f.item.key, action: 'create' }];
+  assert.equal((await f.request('POST', `/${batch.code}/review`, { base_revision: current.revision, decisions })).statusCode, 409);
+  const frozen = data(await f.request('POST', `/${batch.code}/review`, { base_revision: current.revision, decisions, profile: 'pilot' }));
+  assert.equal(frozen.profile, 'pilot'); assert.equal(frozen.quality_gate.status, 'eligible');
+  await f.db.update(schema.intakeBatches).set({ quality_rule_version: 'obsolete' }).where(eq(schema.intakeBatches.code, batch.code));
+  assert.equal(data(await f.request('GET', `/${batch.code}`)).quality_gate.status, 'stale');
+  assert.equal((await f.request('POST', `/${batch.code}/apply`, { plan_hash: frozen.plan_hash, idempotency_key: 'stale-quality' })).statusCode, 409);
+  assert.equal((await f.db.select().from(schema.projectModules)).length, 0);
+});
+
 test('intake requires bearer project write access and rejects viewer and unrelated system admin', async () => {
   const f = await setup();
   for (const suffix of ['', '/context']) {

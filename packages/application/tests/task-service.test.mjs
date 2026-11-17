@@ -51,7 +51,7 @@ async function seededDb() {
     status: 'draft',
     acceptance: [{ id: 'AC-1', text: '验收标准' }, { id: 'AC-2', text: '第二条' }],
     baseSnapshot: 0,
-    createdAt: 't0',
+    createdAt: '2026-01-01T00:00:00.000Z',
     ...extra,
   });
 
@@ -443,7 +443,7 @@ test('list：--assigned-to 与 --status 过滤', async () => {
   assert.ok(mine.every((task) => task.assignee_principal_code === ctx.users.wang.code));
   const closed = await svc.listTasks({ status: 'closed', principalCode: ctx.users.wang.code });
   assert.deepEqual(closed.map((task) => task.task_code), [ctx.tasks.task303.code]);
-  assert.equal(closed[0].created_at, 't0');
+  assert.equal(closed[0].created_at, '2026-01-01T00:00:00.000Z');
   assert.equal(closed[0].completed_at, '2026-08-17T12:30:00.000Z');
 });
 
@@ -482,4 +482,55 @@ test('cancel：普通成员不能取消任务', async () => {
   });
   assert.equal(result.ok, false);
   assert.equal(result.error.code, 'task_cancel_forbidden');
+});
+
+test('task reads preserve owner, explicit and inherited access while hiding private projects and inactive users', async () => {
+  const ctx = await seededDb();
+  const svc = createTaskService(ctx.db);
+  assert.equal((await svc.listTasks({ principalCode: ctx.users.li.code })).length, 6);
+  await ctx.db.delete(schema.members).where(eq(schema.members.principal_id, ctx.users.li.id));
+  assert.deepEqual(await svc.listTasks({ principalCode: ctx.users.li.code }), []);
+  await ctx.db.delete(schema.members).where(eq(schema.members.principal_id, ctx.users.wang.id));
+  assert.deepEqual(await svc.listTasks({ principalCode: ctx.users.wang.code }), []);
+  await ctx.db.update(schema.projects).set({ member_policy: 'team_read' }).where(eq(schema.projects.id, ctx.project.id));
+  assert.equal((await svc.listTasks({ principalCode: ctx.users.wang.code })).length, 6);
+  await ctx.db.update(schema.users).set({ deleted_at: '2026-10-23T00:00:00Z' }).where(eq(schema.users.id, ctx.users.wang.id));
+  assert.deepEqual(await svc.listTasks({ principalCode: ctx.users.wang.code }), []);
+});
+
+test('task pages use stable id tie-break, counts, filters and empty out-of-bounds pages', async () => {
+  const ctx = await seededDb();
+  const svc = createTaskService(ctx.db);
+  const filter = { principalCode: ctx.users.chen.code, projectCode: ctx.project.code, limit: 2 };
+  const first = await svc.listTaskPage(filter);
+  assert.equal(first.total, 6);
+  assert.equal(first.page, 1);
+  assert.equal(first.has_more, true);
+  assert.deepEqual(first.data.map(t => t.task_code), [ctx.tasks.task306.code, ctx.tasks.task305.code]);
+  const second = await svc.listTaskPage({ ...filter, offset: 2 });
+  assert.equal(second.page, 2);
+  assert.deepEqual(second.data.map(t => t.task_code), [ctx.tasks.task304.code, ctx.tasks.task303.code]);
+  const beyond = await svc.listTaskPage({ ...filter, offset: 100 });
+  assert.equal(beyond.total, 6);
+  assert.equal(beyond.has_more, false);
+  assert.deepEqual(beyond.data, []);
+  for (const limit of [0, -1, 1.5, 501, NaN]) {
+    await assert.rejects(svc.listTaskPage({ ...filter, limit }), { code: 'validation_failed' });
+  }
+  for (const offset of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
+    await assert.rejects(svc.listTaskPage({ ...filter, offset }), { code: 'validation_failed' });
+  }
+});
+
+test('task graph preserves dependency edges and denies principals outside visible projects', async () => {
+  const ctx = await seededDb();
+  const svc = createTaskService(ctx.db);
+  const graph = await svc.taskGraph({ principalCode: ctx.users.chen.code, projectCode: ctx.project.code });
+  assert.equal(graph.nodes.length, 6);
+  assert.deepEqual(graph.edges.sort((a, b) => a.to.localeCompare(b.to)), [
+    { from: ctx.tasks.task305.code, to: ctx.tasks.task303.code },
+    { from: ctx.tasks.task305.code, to: ctx.tasks.task304.code },
+  ].sort((a, b) => a.to.localeCompare(b.to)));
+  await ctx.db.delete(schema.members).where(eq(schema.members.principal_id, ctx.users.li.id));
+  assert.deepEqual(await svc.taskGraph({ principalCode: ctx.users.li.code }), { nodes: [], edges: [] });
 });

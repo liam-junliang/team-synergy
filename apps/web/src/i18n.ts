@@ -9,10 +9,14 @@ import skills from './locales/skills.ts';
 import agentConnection from './locales/agentConnection.ts';
 import admin from './locales/admin.ts';
 import intake from './locales/intake.ts';
+import documentQuality from './locales/documentQuality.ts';
+import systemAgent from './locales/systemAgent.ts';
+import codeUnderstanding from './locales/codeUnderstanding.ts';
+import memory from './locales/memory.ts';
 
 export type Locale = 'zh-CN' | 'en-US';
 export const LOCALE_STORAGE_KEY = 'tsp:web:locale';
-export const englishMessages: Readonly<Record<string, string>> = { ...workspace, ...knowledge, ...execution, ...projectSwitcher, ...permissions, ...testing, ...skills, ...core, ...agentConnection, ...admin, ...intake };
+export const englishMessages: Readonly<Record<string, string>> = { ...documentQuality, ...workspace, ...knowledge, ...execution, ...projectSwitcher, ...permissions, ...testing, ...skills, ...core, ...agentConnection, ...admin, ...intake, ...systemAgent, ...codeUnderstanding, ...memory };
 type Parameters = Record<string, string | number>;
 let currentLocale: Locale = 'zh-CN';
 const listeners = new Set<() => void>();
@@ -101,6 +105,8 @@ export function formatNumber(value: number, options?: Intl.NumberFormatOptions, 
 
 export function systemFolderName(folder: { name: string; system_role?: string | null }): string {
   switch (folder.system_role) {
+    case 'root': return t('项目资料');
+    case 'overview': return t('项目说明');
     case 'standards': return t('项目规范');
     case 'requirements': return t('需求文档');
     case 'architecture': return t('架构设计');

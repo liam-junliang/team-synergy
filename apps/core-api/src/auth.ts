@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { createAuthUseCases } from '@team-synergy/application';
 import type { Db } from '@team-synergy/persistence';
+import { isSafeMethod, readWebCookies, trustedWebOrigin, verifyWebCsrf, webCookieSecure } from './web-session.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -8,7 +9,7 @@ declare module 'fastify' {
     authDeviceToken: string | null;
     authDeviceCode: string | null;
     authSessionCode: string | null;
-    authKind: 'bearer' | 'legacy' | null;
+    authKind: 'bearer' | 'cookie' | 'legacy' | null;
     passwordChangeRequired: boolean;
   }
 }
@@ -20,11 +21,16 @@ export function unauthorized(reply: FastifyReply) {
   });
 }
 
+/** Both kinds are cryptographically resolved by middleware; legacy declarations do not qualify. */
+export function hasAuthenticatedSession(request: FastifyRequest): boolean {
+  return new Set<string>(['bearer', 'cookie']).has(request.authKind ?? '') && !!request.principal;
+}
+
 /** Exact anonymous endpoints; release filenames remain validated by the distribution handler. */
 export function isPublicRoute(method: string, pathname: string): boolean {
-  if (method === 'GET' && (pathname === '/health' || ['/cli/manifest.json', '/cli/install.ps1', '/cli/install.sh'].includes(pathname))) return true;
+  if (method === 'GET' && ((pathname === '/health' || pathname === '/ready') || ['/cli/manifest.json', '/cli/install.ps1', '/cli/install.sh'].includes(pathname))) return true;
   if (method === 'GET' && /^\/cli\/releases\/[A-Za-z0-9][A-Za-z0-9._-]*$/.test(pathname)) return true;
-  return method === 'POST' && ['/auth/login', '/auth/password-login', '/auth/device/start', '/auth/device/token'].includes(pathname);
+  return method === 'POST' && ['/auth/login', '/auth/password-login', '/auth/web/login', '/auth/device/start', '/auth/device/token', '/security/csp-report'].includes(pathname);
 }
 
 /** Resolve Bearer credentials before routes, retaining x-principal-code for non-bearer transition flows. */
@@ -38,6 +44,35 @@ export function registerAuthMiddleware(app: FastifyInstance, db: Db): void {
   app.decorateRequest('passwordChangeRequired', false);
 
   app.addHook('onRequest', async (request, reply) => {
+    const path = request.url.split('?', 1)[0] ?? request.url;
+    // Browser CSP telemetry carries no platform authority or state mutation.
+    if (request.method === 'POST' && path === '/security/csp-report') return;
+    // A stale Cookie must not prevent a new login; Origin protects this anonymous boundary.
+    if (request.method === 'POST' && path === '/auth/web/login') {
+      if (!trustedWebOrigin(request)) return reply.code(403).send({ ok: false, error: { code: 'csrf_origin_invalid', message: '请求来源无效' } });
+      if (webCookieSecure(request) === null) return reply.code(403).send({ ok: false, error: { code: 'web_auth_https_required', message: '浏览器登录需要 HTTPS' } });
+      if (readWebCookies(request).invalid) return unauthorized(reply);
+      return;
+    }
+    const cookies = readWebCookies(request);
+    if (cookies.invalid) return unauthorized(reply);
+    if (cookies.session !== undefined) {
+      if (!isSafeMethod(request.method) && !verifyWebCsrf(request, cookies.session, cookies.csrf)) return reply.code(403).send({ ok: false, error: { code: 'csrf_invalid', message: '会话安全校验失败，请刷新后重试' } });
+      // Never select Bearer/legacy as a fallback around a presented Cookie identity.
+      if (request.headers.authorization !== undefined || webCookieSecure(request) === null || !/^[a-f0-9]{64}$/.test(cookies.session)) return unauthorized(reply);
+      const resolved = await auth.resolveToken(cookies.session);
+      if (!resolved.ok) return unauthorized(reply);
+      request.principal = resolved.data.principal_code;
+      request.authDeviceToken = cookies.session;
+      request.authDeviceCode = resolved.data.device_code;
+      request.authSessionCode = resolved.data.session_code;
+      request.authKind = 'cookie';
+      request.passwordChangeRequired = resolved.data.password_change_required;
+      if (request.passwordChangeRequired && !['/auth/web/session', '/auth/web/logout', '/auth/whoami', '/auth/password-change', '/auth/logout'].includes(path)) {
+        return reply.code(403).send({ ok: false, error: { code: 'password_change_required', message: '首次登录必须先修改密码' } });
+      }
+      return;
+    }
     const authorization = request.headers.authorization;
     if (authorization !== undefined) {
       const match = /^Bearer\s+([^\s]+)$/i.exec(authorization);

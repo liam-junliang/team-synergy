@@ -3,19 +3,22 @@ import {
   boolean,
   check,
   index,
+  foreignKey,
   integer,
   pgTable,
   primaryKey,
   text,
+  timestamp,
   uniqueIndex,
   varchar,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+import { isoTimestamp } from './iso-timestamp.js';
 
 /**
  * Project Core 存储 Schema。
  * 设计依据：docs/02 领域模型、docs/09 图存储、docs/15 成员模型、docs/19 Defect。
- * 软引用策略：跨聚合关系不在库层声明 FK，由 application 用例保证业务完整性。
+ * 核心父子关系使用具名 RESTRICT 外键（ADR-0015）；其余跨聚合弱引用由 application 与巡检保证。
  */
 
 const PUBLIC_CODE_PATTERN_SQL = '^[0-9A-HJKMNP-TV-Z]{20}$';
@@ -80,12 +83,14 @@ export const projects = pgTable(
     standards_document_id: bigint('standards_document_id', { mode: 'bigint' }),
     status: text('status', { enum: ['active', 'archived'] }).notNull().default('active'),
     current_snapshot: integer('current_snapshot').notNull().default(0),
-    created_at: text('created_at').notNull(),
+    created_at: isoTimestamp('created_at').notNull().default(sql`now()`),
   },
   (t) => [
     ...codeConstraints('projects', t),
     uniqueIndex('uq_projects_legacy_code').on(t.legacy_code),
     index('idx_projects_team').on(t.team_id),
+    index('idx_projects_created_at').on(t.created_at),
+    check('ck_projects_created_at_finite', sql`isfinite(${t.created_at}) and ${t.created_at} >= '0001-01-01T00:00:00Z'::timestamptz and ${t.created_at} < '10000-01-01T00:00:00Z'::timestamptz`),
     check('ck_projects_member_policy', sql`${t.member_policy} in ('private', 'team_read', 'team_write')`),
   ],
 );
@@ -143,7 +148,7 @@ export const projectDocumentFolders = pgTable(
     project_id: bigint('project_id', { mode: 'bigint' }).notNull(),
     parent_id: bigint('parent_id', { mode: 'bigint' }),
     name: text('name').notNull(),
-    system_role: text('system_role', { enum: ['standards', 'requirements', 'architecture', 'testing'] }),
+    system_role: text('system_role', { enum: ['root', 'overview', 'standards', 'requirements', 'architecture', 'testing'] }),
     sort_order: integer('sort_order').notNull().default(0),
     status: text('status', { enum: ['active', 'archived'] }).notNull().default('active'),
     created_by: bigint('created_by', { mode: 'bigint' }),
@@ -153,8 +158,8 @@ export const projectDocumentFolders = pgTable(
   (t) => [
     ...codeConstraints('project_document_folders', t),
     uniqueIndex('uq_project_document_folders_system_role').on(t.project_id, t.system_role),
-    check('ck_project_document_folders_system_role', sql`${t.system_role} is null or ${t.system_role} in ('standards', 'requirements', 'architecture', 'testing')`),
-    check('ck_project_document_folders_system_shape', sql`${t.system_role} is null or (${t.parent_id} is null and ${t.status} = 'active' and ((${t.system_role} = 'standards' and ${t.name} = '项目规范') or (${t.system_role} = 'requirements' and ${t.name} = '需求文档') or (${t.system_role} = 'architecture' and ${t.name} = '架构设计') or (${t.system_role} = 'testing' and ${t.name} = '测试资料')))`),
+    check('ck_project_document_folders_system_role', sql`${t.system_role} is null or ${t.system_role} in ('root', 'overview', 'standards', 'requirements', 'architecture', 'testing')`),
+    check('ck_project_document_folders_system_shape', sql`${t.system_role} is null or (${t.status} = 'active' and ((${t.system_role} = 'root' and ${t.parent_id} is null and ${t.name} = '项目资料') or (${t.system_role} in ('overview', 'standards', 'requirements', 'architecture', 'testing') and ${t.parent_id} is not null and ((${t.system_role} = 'overview' and ${t.name} = '项目说明') or (${t.system_role} = 'standards' and ${t.name} = '项目规范') or (${t.system_role} = 'requirements' and ${t.name} = '需求文档') or (${t.system_role} = 'architecture' and ${t.name} = '架构设计') or (${t.system_role} = 'testing' and ${t.name} = '测试资料')))))`),
     check('ck_project_document_folders_creator', sql`${t.created_by} is not null or ${t.system_role} is not null`),
     index('idx_project_document_folders_project').on(t.project_id, t.status, t.sort_order),
     index('idx_project_document_folders_parent').on(t.parent_id, t.sort_order),
@@ -210,6 +215,43 @@ export const projectDocumentRevisions = pgTable(
     index('idx_project_document_revisions_document').on(t.document_id, t.revision),
   ],
 );
+
+/** Platform-owned draft work, separate from development Runs and user workspaces. */
+export const systemAgentJobs = pgTable('system_agent_jobs', {
+  id: identityId(),
+  code: publicCode(),
+  project_id: bigint('project_id', { mode: 'bigint' }).notNull(),
+  document_id: bigint('document_id', { mode: 'bigint' }).notNull(),
+  requester_id: bigint('requester_id', { mode: 'bigint' }).notNull(),
+  request_key: text('request_key').notNull(),
+  request_hash: text('request_hash').notNull(),
+  base_revision: integer('base_revision').notNull(),
+  base_title: text('base_title').notNull(),
+  base_summary: text('base_summary').notNull(),
+  base_content: text('base_content').notNull(),
+  instruction: text('instruction').notNull(),
+  quote: text('quote'),
+  status: text('status', { enum: ['queued', 'running', 'awaiting_review', 'applied', 'rejected', 'failed', 'cancelled'] }).notNull().default('queued'),
+  proposal_json: text('proposal_json'),
+  proposal_hash: text('proposal_hash'),
+  quality_json: text('quality_json'),
+  executor_id: text('executor_id'),
+  execution_metadata_json: text('execution_metadata_json'),
+  execution_token: text('execution_token'),
+  lease_expires_at: text('lease_expires_at'),
+  error: text('error'),
+  applied_revision: integer('applied_revision'),
+  applied_by: bigint('applied_by', { mode: 'bigint' }),
+  created_at: text('created_at').notNull(),
+  updated_at: text('updated_at').notNull(),
+}, (t) => [
+  ...codeConstraints('system_agent_jobs', t),
+  uniqueIndex('uq_system_agent_jobs_request').on(t.project_id, t.requester_id, t.request_key),
+  index('idx_system_agent_jobs_queue').on(t.status, t.created_at),
+  index('idx_system_agent_jobs_requester').on(t.project_id, t.requester_id, t.created_at),
+  check('ck_system_agent_jobs_status', sql`${t.status} in ('queued', 'running', 'awaiting_review', 'applied', 'rejected', 'failed', 'cancelled')`),
+  check('ck_system_agent_jobs_base_revision', sql`${t.base_revision} > 0`),
+]);
 
 export const projectModules = pgTable(
   'project_modules',
@@ -618,6 +660,8 @@ export const users = pgTable(
     password_hash: text('password_hash'),
     must_change_password: boolean('must_change_password').notNull().default(false),
     password_expires_at: text('password_expires_at'),
+    login_failure_count: integer('login_failure_count').notNull().default(0),
+    login_locked_until: timestamp('login_locked_until', { withTimezone: true, mode: 'date' }),
     bind_token_hash: text('bind_token_hash'),
     bind_token_expires_at: text('bind_token_expires_at'),
     created_at: text('created_at').notNull(),
@@ -629,6 +673,15 @@ export const users = pgTable(
     uniqueIndex('uq_users_account').on(t.account),
   ],
 );
+
+/** Shared across API instances; identifiers are SHA-256, never credentials. */
+export const authRateLimits = pgTable('auth_rate_limits', {
+  key: text('key').primaryKey(),
+  minute_started_at: timestamp('minute_started_at', { withTimezone: true, mode: 'date' }).notNull(),
+  minute_count: integer('minute_count').notNull(),
+  hour_started_at: timestamp('hour_started_at', { withTimezone: true, mode: 'date' }).notNull(),
+  hour_count: integer('hour_count').notNull(),
+}, t => [index('idx_auth_rate_limits_expiry').on(t.hour_started_at)]);
 
 /** 团队成员关系：团队是项目的上级协作边界，独立于项目内角色。 */
 export const teamMembers = pgTable(
@@ -660,6 +713,7 @@ export const members = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.principal_id, t.project_id] }),
+    foreignKey({ name: 'fk_members_project', columns: [t.project_id], foreignColumns: [projects.id] }).onDelete('restrict').onUpdate('no action'),
     index('idx_members_project').on(t.project_id),
   ],
 );
@@ -724,7 +778,7 @@ export const deviceSessions = pgTable('device_sessions', {
   token_hash: text('token_hash').notNull(),
   created_at: text('created_at').notNull(),
   expires_at: text('expires_at'), revoked_at: text('revoked_at'),
-}, (t) => [...codeConstraints('device_sessions', t), uniqueIndex('uq_device_sessions_token').on(t.token_hash), index('idx_device_sessions_device').on(t.device_id)]);
+}, (t) => [...codeConstraints('device_sessions', t), foreignKey({ name: 'fk_device_sessions_device', columns: [t.device_id], foreignColumns: [devices.id] }).onDelete('restrict').onUpdate('no action'), uniqueIndex('uq_device_sessions_token').on(t.token_hash), index('idx_device_sessions_device').on(t.device_id)]);
 
 export const deviceAuthorizationRequests = pgTable('device_authorization_requests', {
   id: identityId(),
@@ -759,6 +813,7 @@ export const features = pgTable(
   },
   (t) => [
     ...codeConstraints('features', t),
+    foreignKey({ name: 'fk_features_project', columns: [t.project_id], foreignColumns: [projects.id] }).onDelete('restrict').onUpdate('no action'),
     uniqueIndex('uq_features_legacy_code').on(t.legacy_code),
     index('idx_features_project').on(t.project_id),
     index('idx_features_project_sort').on(t.project_id, t.sort_order),
@@ -827,6 +882,10 @@ export const defects = pgTable(
     reported_by: bigint('reported_by', { mode: 'bigint' }).notNull(),
     found_in: text('found_in'),
     description: text('description').notNull(),
+    action_steps: text('action_steps'),
+    expected_result: text('expected_result'),
+    actual_result: text('actual_result'),
+    evidence_json: text('evidence_json').notNull().default('[]'),
     status: text('status', {
       enum: ['reported', 'triaged', 'fixing', 'retest', 'closed', 'rejected'],
     })
@@ -841,6 +900,12 @@ export const defects = pgTable(
     index('idx_defects_status').on(t.status),
   ],
 );
+
+export const defectEvidenceFiles = pgTable('defect_evidence_files', {
+  defect_id: bigint('defect_id', { mode: 'bigint' }).notNull().references(() => defects.id, { onDelete: 'cascade' }),
+  evidence_index: integer('evidence_index').notNull(),
+  content_base64: text('content_base64').notNull(),
+}, (t) => [primaryKey({ columns: [t.defect_id, t.evidence_index] })]);
 
 /** Approved immutable sets of exact requirement revisions. */
 export const requirementBaselines = pgTable('requirement_baselines', {
@@ -900,12 +965,16 @@ export const tasks = pgTable(
     scope: text('scope'),
     base_snapshot: integer('base_snapshot').notNull(),
     execution_epoch: integer('execution_epoch').notNull().default(0),
-    created_at: text('created_at').notNull(),
+    created_at: isoTimestamp('created_at').notNull().default(sql`now()`),
   },
   (t) => [
     ...codeConstraints('tasks', t),
+    foreignKey({ name: 'fk_tasks_feature', columns: [t.feature_id], foreignColumns: [features.id] }).onDelete('restrict').onUpdate('no action'),
     uniqueIndex('uq_tasks_legacy_code').on(t.legacy_code),
     index('idx_tasks_feature').on(t.feature_id),
+    index('idx_tasks_created_id').on(t.created_at.desc(), t.id.desc()),
+    check('ck_tasks_created_at_finite', sql`isfinite(${t.created_at}) and ${t.created_at} >= '0001-01-01T00:00:00Z'::timestamptz and ${t.created_at} < '10000-01-01T00:00:00Z'::timestamptz`),
+    index('idx_tasks_feature_created_id').on(t.feature_id, t.created_at.desc(), t.id.desc()),
     index('idx_tasks_status').on(t.status),
     index('idx_tasks_assignee').on(t.assignee_principal_id),
     index('idx_tasks_requirement').on(t.requirement_id),
@@ -963,6 +1032,7 @@ export const runs = pgTable(
   },
   (t) => [
     ...codeConstraints('runs', t),
+    foreignKey({ name: 'fk_runs_task', columns: [t.task_id], foreignColumns: [tasks.id] }).onDelete('restrict').onUpdate('no action'),
     uniqueIndex('uq_runs_legacy_code').on(t.legacy_code),
     index('idx_runs_task').on(t.task_id),
     index('idx_runs_status').on(t.status),
@@ -1161,7 +1231,7 @@ export const auditEvents = pgTable(
     id: identityId(),
     code: publicCode(),
     legacy_code: text('legacy_code'),
-    timestamp: text('timestamp').notNull(),
+    timestamp: isoTimestamp('timestamp').notNull().default(sql`now()`),
     principal_id: bigint('principal_id', { mode: 'bigint' }).notNull(),
     run_id: bigint('run_id', { mode: 'bigint' }),
     action: text('action').notNull(),
@@ -1178,6 +1248,8 @@ export const auditEvents = pgTable(
     uniqueIndex('uq_audit_events_legacy_code').on(t.legacy_code),
     index('idx_audit_entity').on(t.entity_type, t.entity_id),
     index('idx_audit_principal').on(t.principal_id),
+    index('idx_audit_timestamp_id').on(t.timestamp, t.id),
+    check('ck_audit_events_timestamp_finite', sql`isfinite(${t.timestamp}) and ${t.timestamp} >= '0001-01-01T00:00:00Z'::timestamptz and ${t.timestamp} < '10000-01-01T00:00:00Z'::timestamptz`),
   ],
 );
 
@@ -1299,17 +1371,18 @@ export const testExecutionResults = pgTable('test_execution_results', {
   check('ck_test_execution_results_revision', sql`${t.case_revision} > 0`), check('ck_test_execution_results_result', sql`${t.result} in ('not_run', 'pass', 'fail', 'blocked', 'skipped')`)]);
 
 export const skills = pgTable('skills', {
-  id: identityId(), code: publicCode(), scope_type: text('scope_type', { enum: ['team', 'project'] }).notNull(),
-  scope_id: bigint('scope_id', { mode: 'bigint' }).notNull(), owner_principal_id: bigint('owner_principal_id', { mode: 'bigint' }).notNull(),
+  id: identityId(), code: publicCode(), scope_type: text('scope_type', { enum: ['team', 'project', 'platform'] }).notNull(),
+  scope_id: bigint('scope_id', { mode: 'bigint' }), owner_principal_id: bigint('owner_principal_id', { mode: 'bigint' }),
   current_revision: integer('current_revision').notNull(), archived: boolean('archived').notNull().default(false),
   created_at: text('created_at').notNull(), updated_at: text('updated_at').notNull(),
 }, t => [...codeConstraints('skills', t), index('idx_skills_scope').on(t.scope_type, t.scope_id),
-  check('ck_skills_scope', sql`${t.scope_type} in ('team', 'project')`), check('ck_skills_revision', sql`${t.current_revision} > 0`)]);
+  check('ck_skills_scope', sql`(${t.scope_type} = 'platform' and ${t.scope_id} is null and ${t.owner_principal_id} is null) or (${t.scope_type} in ('team', 'project') and ${t.scope_id} is not null and ${t.owner_principal_id} is not null)`), check('ck_skills_revision', sql`${t.current_revision} > 0`)]);
 export const skillRevisions = pgTable('skill_revisions', {
   id: identityId(), code: publicCode(), skill_id: bigint('skill_id', { mode: 'bigint' }).notNull(), revision: integer('revision').notNull(),
   package_json: text('package_json').notNull(), change_summary: text('change_summary').notNull(),
-  created_by: bigint('created_by', { mode: 'bigint' }).notNull(), created_at: text('created_at').notNull(), published_at: text('published_at'),
-}, t => [...codeConstraints('skill_revisions', t), uniqueIndex('uq_skill_revisions_number').on(t.skill_id, t.revision), check('ck_skill_revisions_number', sql`${t.revision} > 0`)]);
+  created_by: bigint('created_by', { mode: 'bigint' }), created_at: text('created_at').notNull(), published_at: text('published_at'), release_version: text('release_version'),
+}, t => [...codeConstraints('skill_revisions', t), uniqueIndex('uq_skill_revisions_number').on(t.skill_id, t.revision), uniqueIndex('uq_skill_revisions_release').on(t.skill_id, t.release_version),
+  check('ck_skill_revision_origin', sql`(${t.release_version} is null and ${t.created_by} is not null) or (${t.release_version} is not null and ${t.created_by} is null and ${t.published_at} is not null)`), check('ck_skill_revisions_number', sql`${t.revision} > 0`)]);
 export const skillShares = pgTable('skill_shares', {
   id: identityId(), code: publicCode(), skill_id: bigint('skill_id', { mode: 'bigint' }).notNull(),
   target_type: text('target_type', { enum: ['team', 'project'] }).notNull(), target_id: bigint('target_id', { mode: 'bigint' }).notNull(),
@@ -1334,16 +1407,19 @@ export const runSkillManifests = pgTable('run_skill_manifests', {
 /** Candidate packages are isolated from business entities until an explicit reviewed plan is applied. */
 export const intakeBatches = pgTable('intake_batches', {
   id: identityId(), code: publicCode(), project_id: bigint('project_id', { mode: 'bigint' }).notNull(),
-  repository_id: bigint('repository_id', { mode: 'bigint' }).notNull(), namespace: text('namespace').notNull(),
+  repository_id: bigint('repository_id', { mode: 'bigint' }), namespace: text('namespace').notNull(),
   created_by: bigint('created_by', { mode: 'bigint' }).notNull(), source_json: text('source_json').notNull(),
   payload_hash: text('payload_hash').notNull(), submit_key: text('submit_key').notNull(), submit_hash: text('submit_hash').notNull(),
   status: text('status', { enum: ['draft', 'ready', 'applying', 'applied', 'partial', 'cancelled', 'stopped'] }).notNull(),
   revision: integer('revision').notNull().default(1), plan_hash: text('plan_hash'),
+  profile: text('profile', { enum: ['pilot', 'enterprise'] }),
+  quality_rule_version: text('quality_rule_version'), quality_report_json: text('quality_report_json'), frozen_quality_json: text('frozen_quality_json'),
   stop_requested: boolean('stop_requested').notNull().default(false),
   created_at: text('created_at').notNull(), updated_at: text('updated_at').notNull(),
 }, t => [...codeConstraints('intake_batches', t), index('idx_intake_batches_project').on(t.project_id),
   uniqueIndex('uq_intake_batches_submit').on(t.project_id, t.created_by, t.submit_key),
   check('ck_intake_batches_status', sql`${t.status} in ('draft','ready','applying','applied','partial','cancelled','stopped')`),
+  check('ck_intake_batches_profile', sql`${t.profile} is null or ${t.profile} in ('pilot','enterprise')`),
   check('ck_intake_batches_revision', sql`${t.revision} > 0`)]);
 export const intakeItems = pgTable('intake_items', {
   id: identityId(), batch_id: bigint('batch_id', { mode: 'bigint' }).notNull(), item_key: text('item_key').notNull(),
@@ -1354,11 +1430,12 @@ export const intakeItems = pgTable('intake_items', {
   check('ck_intake_items_kind', sql`${t.kind} in ('module','feature','requirement_document','requirement','architecture')`),
   check('ck_intake_items_status', sql`${t.status} in ('pending','applied','bound','skipped','failed','blocked')`)]);
 export const intakeBindings = pgTable('intake_bindings', {
-  id: identityId(), project_id: bigint('project_id', { mode: 'bigint' }).notNull(), repository_id: bigint('repository_id', { mode: 'bigint' }).notNull(),
+  id: identityId(), project_id: bigint('project_id', { mode: 'bigint' }).notNull(), repository_id: bigint('repository_id', { mode: 'bigint' }),
   namespace: text('namespace').notNull(), kind: text('kind').notNull(), source_key: text('source_key').notNull(),
   target_code: text('target_code').notNull(), target_fingerprint: text('target_fingerprint').notNull(),
   batch_id: bigint('batch_id', { mode: 'bigint' }).notNull(), created_at: text('created_at').notNull(),
-}, t => [uniqueIndex('uq_intake_bindings_source').on(t.project_id, t.repository_id, t.namespace, t.kind, t.source_key)]);
+}, t => [uniqueIndex('uq_intake_bindings_source').on(t.project_id, t.repository_id, t.namespace, t.kind, t.source_key),
+  uniqueIndex('uq_intake_bindings_material_source').on(t.project_id, t.namespace, t.kind, t.source_key).where(sql`${t.repository_id} is null`)]);
 export const intakeAttempts = pgTable('intake_attempts', {
   id: identityId(), batch_id: bigint('batch_id', { mode: 'bigint' }).notNull(), idempotency_key: text('idempotency_key').notNull(),
   plan_hash: text('plan_hash').notNull(), principal_id: bigint('principal_id', { mode: 'bigint' }).notNull(),
@@ -1367,3 +1444,234 @@ export const intakeAttempts = pgTable('intake_attempts', {
 }, t => [uniqueIndex('uq_intake_attempts_request').on(t.batch_id, t.idempotency_key),
   uniqueIndex('uq_intake_attempts_running').on(t.batch_id).where(sql`${t.status} = 'running'`),
   check('ck_intake_attempts_status', sql`${t.status} in ('running','completed','stopped')`)]);
+
+/** Anonymous authentication observations are separate from principal-required domain audits. */
+export const authSecurityEvents = pgTable('auth_security_events', {
+  id: identityId(),
+  occurred_at: timestamp('occurred_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  kind: text('kind', { enum: ['login_failed', 'locked', 'unlocked'] }).notNull(),
+  reason: text('reason', { enum: ['invalid_credentials', 'locked', 'rate_limited', 'failure_limit', 'expired', 'password_changed', 'local_admin_reset'] }).notNull(),
+  principal_id: bigint('principal_id', { mode: 'bigint' }),
+  account_hash: text('account_hash').notNull(),
+  ip_hash: text('ip_hash'),
+}, t => [
+  index('idx_auth_security_time').on(t.occurred_at),
+  index('idx_auth_security_account_time').on(t.account_hash, t.occurred_at),
+  index('idx_auth_security_ip_time').on(t.ip_hash, t.occurred_at),
+  check('ck_auth_security_kind', sql`${t.kind} in ('login_failed', 'locked', 'unlocked')`),
+  check('ck_auth_security_reason', sql`${t.reason} in ('invalid_credentials','locked','rate_limited','failure_limit','expired','password_changed','local_admin_reset')`),
+  check('ck_auth_security_account_hash', sql`${t.account_hash} ~ '^[a-f0-9]{64}$'`),
+  check('ck_auth_security_ip_hash', sql`${t.ip_hash} is null or ${t.ip_hash} ~ '^[a-f0-9]{64}$'`),
+]);
+
+/** Immutable code projections are separate from document Agent jobs and intake approval. */
+export const codeUnderstandingRuns = pgTable('code_understanding_runs', {
+  id: identityId(), code: publicCode(), project_id: bigint('project_id', { mode: 'bigint' }).notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  repository_id: bigint('repository_id', { mode: 'bigint' }).notNull().references(() => projectRepositories.id, { onDelete: 'restrict' }),
+  created_by: bigint('created_by', { mode: 'bigint' }).notNull().references(() => users.id, { onDelete: 'restrict' }),
+  request_key: text('request_key').notNull(), request_hash: text('request_hash').notNull(), request_json: text('request_json').notNull(),
+  status: text('status').notNull(), revision: integer('revision').notNull().default(0), snapshot_json: text('snapshot_json'),
+  artifact_json: text('artifact_json'), artifact_sha256: text('artifact_sha256'), message: text('message'), created_at: text('created_at').notNull(), updated_at: text('updated_at').notNull(),
+}, t => [...codeConstraints('code_understanding_runs', t), uniqueIndex('uq_code_runs_request').on(t.project_id, t.created_by, t.request_key), index('idx_code_runs_project').on(t.project_id),
+  check('ck_code_runs_status', sql`${t.status} in ('preparing','indexing','awaiting_agent','validating','uploading','succeeded','failed','cancelled')`), check('ck_code_runs_revision', sql`${t.revision} >= 0`)]);
+
+export const codeUnderstandingViews = pgTable('code_understanding_views', {
+  id: identityId(), code: publicCode(), project_id: bigint('project_id', { mode: 'bigint' }).notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  kind: text('kind', { enum: ['commit', 'draft'] }).notNull(), selections_json: text('selections_json').notNull(), content_hash: text('content_hash').notNull(),
+  created_by: bigint('created_by', { mode: 'bigint' }).notNull().references(() => users.id, { onDelete: 'restrict' }), created_at: text('created_at').notNull(),
+}, t => [...codeConstraints('code_understanding_views', t), uniqueIndex('uq_code_views_content').on(t.project_id, t.content_hash), check('ck_code_views_kind', sql`${t.kind} in ('commit','draft')`)]);
+
+export const codeUnderstandingSelections = pgTable('code_understanding_selections', {
+  id: identityId(), project_id: bigint('project_id', { mode: 'bigint' }).notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  kind: text('kind', { enum: ['commit', 'draft'] }).notNull(), view_code: varchar('view_code', { length: 20 }).notNull().references(() => codeUnderstandingViews.code, { onDelete: 'restrict' }),
+  selected_by: bigint('selected_by', { mode: 'bigint' }).notNull().references(() => users.id, { onDelete: 'restrict' }), selected_at: text('selected_at').notNull(),
+}, t => [index('idx_code_selections_project').on(t.project_id, t.kind), check('ck_code_selections_kind', sql`${t.kind} in ('commit','draft')`)]);
+
+/** Cumulative source excerpt budget for identical bytes, across analysis runs. */
+export const codeUnderstandingExcerptBudgets = pgTable('code_understanding_excerpt_budgets', {
+  project_id: bigint('project_id', { mode: 'bigint' }).notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  file_sha256: text('file_sha256').notNull(), claims_json: text('claims_json').notNull(),
+}, t => [primaryKey({ columns: [t.project_id, t.file_sha256] })]);
+
+/** Durable server jobs; one active execution per project repository, with fenced leases. */
+export const codeHostedAnalysisJobs = pgTable('code_hosted_analysis_jobs', {
+  id: identityId(), code: publicCode(),
+  project_id: bigint('project_id', { mode: 'bigint' }).notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  repository_id: bigint('repository_id', { mode: 'bigint' }).notNull().references(() => projectRepositories.id, { onDelete: 'restrict' }),
+  requester_id: bigint('requester_id', { mode: 'bigint' }).notNull().references(() => users.id, { onDelete: 'restrict' }),
+  request_key: text('request_key').notNull(), request_hash: text('request_hash').notNull(),
+  source_remote_url: text('source_remote_url').notNull(), source_branch: text('source_branch').notNull(),
+  status: text('status', { enum: ['queued', 'running', 'succeeded', 'failed'] }).notNull().default('queued'),
+  run_code: varchar('run_code', { length: 20 }).references(() => codeUnderstandingRuns.code, { onDelete: 'restrict' }),
+  executor_id: text('executor_id'), execution_token: text('execution_token'), lease_expires_at: text('lease_expires_at'), completion_token_hash: text('completion_token_hash'),
+  execution_metadata_json: text('execution_metadata_json'), error: text('error'),
+  created_at: text('created_at').notNull(), updated_at: text('updated_at').notNull(),
+}, t => [...codeConstraints('code_hosted_analysis_jobs', t),
+  uniqueIndex('uq_code_hosted_request').on(t.project_id, t.requester_id, t.request_key, t.repository_id),
+  uniqueIndex('uq_code_hosted_active_repository').on(t.repository_id).where(sql`${t.status} in ('queued','running')`),
+  uniqueIndex('uq_code_hosted_run').on(t.run_code), index('idx_code_hosted_queue').on(t.status, t.id),
+  check('ck_code_hosted_status', sql`${t.status} in ('queued','running','succeeded','failed')`),
+  check('ck_code_hosted_lease', sql`(${t.status} = 'running' and ${t.executor_id} is not null and ${t.execution_token} is not null and ${t.lease_expires_at} is not null) or (${t.status} <> 'running' and ${t.execution_token} is null and ${t.lease_expires_at} is null)`),
+]);
+
+/** Private conversation inbox; payload access is restricted to the submitting owner. */
+export const memoryCaptureJobs = pgTable('memory_capture_jobs', {
+  id: identityId(), code: publicCode(),
+  project_id: bigint('project_id', { mode: 'bigint' }).notNull().references(() => projects.id),
+  principal_id: bigint('principal_id', { mode: 'bigint' }).notNull().references(() => users.id),
+  session_key: text('session_key').notNull(), event_key: text('event_key').notNull(),
+  source_hash: text('source_hash').notNull(), payload_json: text('payload_json').notNull(),
+  status: text('status', { enum: ['pending', 'processing', 'completed', 'needs_clarification', 'skipped', 'failed'] }).notNull().default('pending'),
+  attempts: integer('attempts').notNull().default(0),
+  lease_until: timestamp('lease_until', { withTimezone: true }), result_json: text('result_json'),
+  last_error_code: text('last_error_code'),
+  created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updated_at: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [...codeConstraints('memory_capture_jobs', t),
+  uniqueIndex('uq_memory_capture_jobs_event').on(t.project_id, t.principal_id, t.session_key, t.event_key),
+  index('idx_memory_capture_jobs_delivery').on(t.status, t.lease_until, t.id),
+  check('ck_memory_capture_jobs_status', sql`${t.status} IN ('pending','processing','completed','needs_clarification','skipped','failed')`),
+  check('ck_memory_capture_jobs_attempts', sql`${t.attempts} >= 0`),
+]);
+
+export const memoryCaptureReceipts = pgTable('memory_capture_receipts', {
+  id: identityId(),
+  code: publicCode(),
+  project_id: bigint('project_id', { mode: 'bigint' }).notNull().references(() => projects.id),
+  principal_id: bigint('principal_id', { mode: 'bigint' }).notNull().references(() => users.id),
+  topic_id: bigint('topic_id', { mode: 'bigint' }).references(() => requirementTopics.id),
+  requirement_id: bigint('requirement_id', { mode: 'bigint' }).references(() => requirements.id),
+  session_key: text('session_key').notNull(),
+  event_key: text('event_key').notNull(),
+  source_hash: text('source_hash').notNull(),
+  base_revision: integer('base_revision'),
+  head_after: varchar('head_after', { length: 20 }),
+  revision_after: integer('revision_after'),
+  created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  ...codeConstraints('memory_capture_receipts', t),
+  uniqueIndex('uq_memory_capture_event').on(t.project_id, t.principal_id, t.session_key, t.event_key),
+  index('idx_memory_receipts_binding').on(t.project_id, t.topic_id, t.requirement_id),
+  check('ck_memory_receipts_binding', sql`(${t.topic_id} IS NULL AND ${t.requirement_id} IS NULL AND ${t.base_revision} IS NULL AND ${t.revision_after} IS NULL AND ${t.head_after} IS NULL) OR (${t.topic_id} IS NOT NULL AND ${t.requirement_id} IS NOT NULL AND ${t.base_revision} IS NOT NULL AND ${t.revision_after} IS NOT NULL)`),
+]);
+
+export const memoryFragments = pgTable('memory_fragments', {
+  id: identityId(),
+  code: publicCode(),
+  receipt_id: bigint('receipt_id', { mode: 'bigint' }).notNull().references(() => memoryCaptureReceipts.id),
+  state: text('state', { enum: ['discussed', 'confirmed', 'preference'] }).notNull(),
+  applicability: text('applicability', { enum: ['account', 'project'] }).notNull().default('project'),
+  text: text('text').notNull(),
+  entry_id: bigint('entry_id', { mode: 'bigint' }).references(() => requirementTopicEntries.id),
+  adopted_from_id: bigint('adopted_from_id', { mode: 'bigint' }),
+  root_id: bigint('root_id', { mode: 'bigint' }),
+  supersedes_id: bigint('supersedes_id', { mode: 'bigint' }),
+  revision: integer('revision').notNull().default(1),
+  withdrawn_at: timestamp('withdrawn_at', { withTimezone: true }),
+  withdrawn_by: bigint('withdrawn_by', { mode: 'bigint' }).references(() => users.id),
+  change_reason: text('change_reason'),
+  created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  ...codeConstraints('memory_fragments', t),
+  index('idx_memory_fragments_receipt').on(t.receipt_id),
+  uniqueIndex('uq_memory_fragments_entry').on(t.entry_id),
+  foreignKey({ columns: [t.adopted_from_id], foreignColumns: [t.id] }),
+  foreignKey({ columns: [t.root_id], foreignColumns: [t.id] }),
+  foreignKey({ columns: [t.supersedes_id], foreignColumns: [t.id] }),
+  uniqueIndex('uq_memory_fragments_revision').on(sql`coalesce(${t.root_id}, ${t.id})`, t.revision),
+  uniqueIndex('uq_memory_fragments_supersedes').on(t.supersedes_id),
+  index('idx_memory_fragments_root').on(t.root_id),
+  check('ck_memory_fragments_state', sql`${t.state} IN ('discussed','confirmed','preference')`),
+  check('ck_memory_fragments_applicability', sql`${t.applicability} IN ('account','project') AND (${t.applicability} = 'project' OR ${t.state} = 'preference')`),
+  check('ck_memory_fragments_entry', sql`${t.state} <> 'confirmed' OR ${t.entry_id} IS NOT NULL`),
+  check('ck_memory_fragments_preference_entry', sql`${t.state} <> 'preference' OR ${t.entry_id} IS NULL`),
+  check('ck_memory_fragments_revision', sql`(${t.root_id} IS NULL AND ${t.supersedes_id} IS NULL AND ${t.revision} = 1) OR (${t.state} = 'preference' AND ${t.root_id} IS NOT NULL AND ${t.supersedes_id} IS NOT NULL AND ${t.revision} > 1)`),
+  check('ck_memory_fragments_withdrawal', sql`(${t.withdrawn_at} IS NULL) = (${t.withdrawn_by} IS NULL) AND (${t.withdrawn_at} IS NULL OR ${t.state} = 'preference')`),
+  check('ck_memory_fragments_source', sql`(${t.state} = 'confirmed') = (${t.adopted_from_id} IS NOT NULL)`),
+]);
+
+/** Derived directory entries only: original project material stays in its native tables. */
+export const projectMaterialIndexVersions = pgTable('project_material_index_versions', {
+  id: identityId(), code: publicCode(),
+  project_id: bigint('project_id', { mode: 'bigint' }).notNull().references(() => projects.id),
+  source_kind: text('source_kind', { enum: ['project', 'requirement', 'architecture', 'testing'] }).notNull(),
+  object_code: varchar('object_code', { length: 20 }).notNull(),
+  revision: integer('revision').notNull(), revision_code: varchar('revision_code', { length: 20 }).notNull(),
+  metadata_hash: varchar('metadata_hash', { length: 64 }).notNull(),
+  source_citation: varchar('source_citation', { length: 20 }).notNull(),
+  path: text('path').notNull(), title: text('title').notNull(), summary: text('summary').notNull(),
+  summary_origin: text('summary_origin', { enum: ['authored', 'excerpt', 'title'] }).notNull(),
+  text_searchable: boolean('text_searchable').notNull(),
+  active: boolean('active').notNull().default(true),
+  created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  retired_at: timestamp('retired_at', { withTimezone: true }),
+}, t => [
+  ...codeConstraints('project_material_index_versions', t),
+  index('idx_project_material_index_versions_project').on(t.project_id, t.active),
+  uniqueIndex('uq_project_material_index_versions_current').on(t.project_id, t.source_kind, t.object_code).where(sql`${t.active}`),
+  check('ck_project_material_index_versions_kind', sql`${t.source_kind} IN ('project','requirement','architecture','testing')`),
+  check('ck_project_material_index_versions_revision', sql`${t.revision} > 0`),
+  check('ck_project_material_index_versions_summary_origin', sql`${t.summary_origin} IN ('authored','excerpt','title')`),
+  check('ck_project_material_index_versions_bounds', sql`char_length(${t.title}) <= 256 AND char_length(${t.summary}) <= 600 AND char_length(${t.path}) <= 2048`),
+]);
+
+/** System maintenance has its own audit identity; it never impersonates a member click. */
+export const projectMaterialIndexEvents = pgTable('project_material_index_events', {
+  id: identityId(), project_id: bigint('project_id', { mode: 'bigint' }).notNull().references(() => projects.id),
+  actor_kind: text('actor_kind').notNull().default('system'), action: text('action').notNull(),
+  payload: text('payload').notNull(), created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [index('idx_project_material_index_events_project').on(t.project_id, t.id),
+  check('ck_project_material_index_events_actor', sql`${t.actor_kind} = 'system'`)]);
+
+export const memoryProjectionJobs = pgTable('memory_projection_jobs', {
+  id: identityId(),
+  fragment_id: bigint('fragment_id', { mode: 'bigint' }).references(() => memoryFragments.id),
+  project_document_revision_id: bigint('project_document_revision_id', { mode: 'bigint' }).references(() => projectDocumentRevisions.id),
+  material_index_id: bigint('material_index_id', { mode: 'bigint' }).references(() => projectMaterialIndexVersions.id),
+  engine: text('engine', { enum: ['openviking', 'tencent'] }).notNull(),
+  status: text('status', { enum: ['pending', 'processing', 'synced', 'needs_reconcile'] }).notNull().default('pending'),
+  attempts: integer('attempts').notNull().default(0),
+  external_ref: text('external_ref'),
+  lease_until: timestamp('lease_until', { withTimezone: true }),
+  last_error: text('last_error'),
+  operation: text('operation', { enum: ['upsert', 'delete'] }).notNull().default('upsert'),
+  generation: integer('generation').notNull().default(1),
+}, t => [
+  uniqueIndex('uq_memory_projection_jobs_fragment').on(t.fragment_id),
+  uniqueIndex('uq_memory_projection_jobs_document_revision').on(t.project_document_revision_id),
+  uniqueIndex('uq_memory_projection_jobs_material_index').on(t.material_index_id),
+  index('idx_memory_projection_jobs_delivery').on(t.status, t.lease_until, t.id),
+  check('ck_memory_projection_jobs_engine', sql`${t.engine} IN ('openviking','tencent')`),
+  check('ck_memory_projection_jobs_status', sql`${t.status} IN ('pending','processing','synced','needs_reconcile')`),
+  check('ck_memory_projection_jobs_source', sql`num_nonnulls(${t.fragment_id},${t.project_document_revision_id},${t.material_index_id}) = 1`),
+  check('ck_memory_projection_jobs_document_engine', sql`${t.project_document_revision_id} IS NULL OR ${t.engine} = 'tencent'`),
+  check('ck_memory_projection_jobs_material_engine', sql`${t.material_index_id} IS NULL OR ${t.engine} = 'tencent'`),
+  check('ck_memory_projection_jobs_operation', sql`${t.operation} IN ('upsert','delete')`),
+  check('ck_memory_projection_jobs_generation', sql`${t.generation} > 0`),
+]);
+
+/** Project-owned resource lifecycle. Engine credentials remain server-side. */
+export const projectMemoryBindings = pgTable('project_memory_bindings', {
+  id: identityId(),
+  project_id: bigint('project_id', { mode: 'bigint' }).notNull().references(() => projects.id),
+  enabled: boolean('enabled').notNull().default(true),
+  state: text('state', { enum: ['provisioning', 'ready', 'failed'] }).notNull().default('provisioning'),
+  generation: integer('generation').notNull().default(1),
+  wiki_id: text('wiki_id'),
+  engine_team_id: text('engine_team_id'),
+  engine_user_id: text('engine_user_id'),
+  semantic_agent_id: text('semantic_agent_id'),
+  provision_lease_until: timestamp('provision_lease_until', { withTimezone: true }),
+  last_error: text('last_error'),
+  updated_by: bigint('updated_by', { mode: 'bigint' }).references(() => users.id),
+  updated_source: text('updated_source', { enum: ['member', 'system'] }).notNull().default('member'),
+  updated_at: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  uniqueIndex('uq_project_memory_bindings_project').on(t.project_id),
+  uniqueIndex('uq_project_memory_bindings_wiki').on(t.wiki_id),
+  check('ck_project_memory_bindings_state', sql`${t.state} IN ('provisioning','ready','failed')`),
+  check('ck_project_memory_bindings_generation', sql`${t.generation} > 0`),
+  check('ck_project_memory_bindings_ready', sql`${t.state} <> 'ready' OR (${t.wiki_id} IS NOT NULL AND ${t.engine_team_id} IS NOT NULL AND ${t.engine_user_id} IS NOT NULL)`),
+  check('ck_project_memory_bindings_lease', sql`(${t.state} = 'provisioning' AND ${t.enabled}) OR ${t.provision_lease_until} IS NULL`),
+  check('ck_project_memory_bindings_actor', sql`(${t.updated_source} = 'system' AND ${t.updated_by} IS NULL) OR (${t.updated_source} = 'member' AND ${t.updated_by} IS NOT NULL)`),
+]);

@@ -5,7 +5,48 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { schema } from '@team-synergy/persistence';
 import { eq } from 'drizzle-orm';
+import { ensurePlatformSkillRelease } from '@team-synergy/application';
 import { createHttpTestContext, insertMember, insertProject, insertTeam, insertUser, testCode } from './http-test-helpers.mjs';
+
+test('a clean member workspace discovers and syncs the complete released platform skill without a source checkout', async t => {
+  const context = await createHttpTestContext(import.meta.url);
+  t.after(() => context.cleanup());
+  const release = JSON.parse(readFileSync(new URL('../../core-api/dist/platform-skill-release.json', import.meta.url), 'utf8'));
+  const published = await ensurePlatformSkillRelease(context.db, release);
+  const owner = await insertUser(context.db, { account: 'released.owner', displayName: 'Owner' });
+  const member = await insertUser(context.db, { account: 'released.member', displayName: 'Member' });
+  const team = await insertTeam(context.db, { name: 'Release test' });
+  const project = await insertProject(context.db, { name: 'Release project', teamId: team.id });
+  await context.db.update(schema.projects).set({ owner_principal_id: owner.id, member_policy: 'private' }).where(eq(schema.projects.id, project.id));
+  for (const [user,role] of [[owner,'owner'],[member,'viewer']]) {
+    await insertMember(context.db, { principalId: user.id, projectId: project.id, role, displayName: user.display_name });
+    await context.db.insert(schema.devices).values({ principal_id: user.id, device_name: 'Platform test', credential_hash: createHash('sha256').update(user.code).digest('hex'), created_at: '2026-11-12T00:00:00Z' });
+  }
+  const workspace = path.join(context.tmp, 'clean-member-workspace');
+  mkdirSync(workspace);
+  async function cli(user, args) {
+    const r = await context.runCli(args, { ACP_DEVICE_TOKEN: user.code, ACP_PRINCIPAL_CODE: '', ACP_PRINCIPAL_ID: '' }, { cwd:workspace });
+    return JSON.parse(r.out);
+  }
+  const catalog = await cli(owner, ['skill','search',release.name,'--project',project.code]);
+  assert.equal(catalog.data[0].scope_type,'platform');
+  assert.equal(catalog.data[0].can_edit,false);
+  assert.equal(catalog.data[0].release_version,published.release_version);
+  assert.equal((await cli(member,['skill','enable',published.skill_code,'--project',project.code,'--revision','1'])).ok,false);
+  assert.equal((await cli(owner,['skill','enable',published.skill_code,'--project',project.code,'--revision','1'])).ok,true);
+  const synced = await cli(member,['skill','sync','--project',project.code]);
+  assert.equal(synced.ok,true);
+  for (const file of release.files) {
+    const bytes = readFileSync(path.join(synced.data.skills_directory,release.name,file.path));
+    assert.equal(createHash('sha256').update(bytes).digest('hex'),file.sha256);
+  }
+  for(const required of ['SKILL.md','scripts/check_dossier.py','references/team-synergy.md','agents/openai.yaml']) assert(release.files.some(file=>file.path===required), required);
+  const edited = path.join(synced.data.skills_directory,release.name,'SKILL.md');
+  writeFileSync(edited,'Member made a local change');
+  const conflict = await cli(member,['skill','sync','--project',project.code]);
+  assert.equal(conflict.error.code,'skill_local_modified');
+  assert.equal(readFileSync(edited,'utf8'),'Member made a local change');
+});
 
 test('real tsp/API cross-team skills preserve exact adopted bytes and enforce source, project and revoked-grant permissions', async t => {
   const context = await createHttpTestContext(import.meta.url);

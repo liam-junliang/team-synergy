@@ -1,4 +1,5 @@
 const messages: Record<string, string> = {
+  '退出失败，请检查网络并刷新后重试。': 'Sign-out failed. Check your connection, refresh and try again.',
   "项目协作工作台": "Project workspace",
   "语言": "Language",
   "通过评审": "Approve",

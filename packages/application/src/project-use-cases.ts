@@ -1,6 +1,7 @@
+import { lockAggregate } from './aggregate-lock.js';
 import { writeFeature } from './intake-entity-writers.js';
 import type { EvidenceType, Profile, TaskSource } from '@team-synergy/contracts';
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import type { Db } from '@team-synergy/persistence';
 import { schema } from '@team-synergy/persistence';
 import { DomainError, assertAuditedChange, toAuditEvent, transitionOrThrow } from '@team-synergy/domain';
@@ -450,7 +451,7 @@ export function createProjectUseCases(db: Db) {
         await assertProjectAccess(tx, feature.project_id, principal.id, cmd.source === 'ad-hoc' ? 'write' : 'manage');
         let requirementBaselineId: bigint | null = null;
         if (cmd.requirementBaselineCode) {
-          await tx.execute(sql`select pg_advisory_xact_lock_shared(1094930512)`);
+          await lockAggregate(tx, 'project', feature.project_id, true);
           const [project] = await tx.select().from(schema.projects).where(eq(schema.projects.id, feature.project_id)).for('share').limit(1);
           const [activePrincipal] = await tx.select().from(schema.users).where(eq(schema.users.id, principal.id)).for('share').limit(1);
           const member = await effectiveProjectMember(tx, feature.project_id, principal.id);

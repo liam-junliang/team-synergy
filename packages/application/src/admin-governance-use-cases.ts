@@ -1,3 +1,4 @@
+import { lockProjectByCode } from './aggregate-lock.js';
 import { and, asc, count, eq, gt, ilike, inArray, or, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { schema, type Db } from '@team-synergy/persistence';
@@ -124,6 +125,7 @@ export function createAdminGovernanceUseCases(db: Db) {
   async function updateProject(cmd: { principalCode: string; projectCode: string; baseSnapshot: number; name?: string; description?: string | null; status?: string; reason: string }) {
     try {
       return await db.transaction(async tx => {
+        await lockProjectByCode(tx, cmd.projectCode);
         const actor = await requireAdmin(tx, cmd.principalCode);
         const reason = requiredText(cmd.reason, '管理原因', 1000);
         if (!Number.isSafeInteger(cmd.baseSnapshot) || cmd.baseSnapshot < 0) throw new DomainError('admin_input_invalid', '必须提供有效项目版本');

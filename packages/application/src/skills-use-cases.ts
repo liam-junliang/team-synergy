@@ -24,25 +24,26 @@ export function createSkillsUseCases(db: Db) {
   }
   async function locked(tx: AccessDb, code: string, principalId: bigint, manage = false) {
     const initial = await skillByCode(tx, code);
+    if (initial.scope_type === 'platform' || initial.scope_id === null) throw new DomainError('skill_forbidden', '平台内置技能由发布包维护');
     await lockSkillScope(tx, initial.scope_type, initial.scope_id, principalId);
     const [skill] = await tx.select().from(schema.skills).where(eq(schema.skills.id, initial.id)).for('update');
     if (!skill) throw new DomainError('skill_not_found', '技能不存在');
     await author(tx, skill, principalId, manage); return skill;
   }
   async function revisionDto(tx: AccessDb, revision: SkillRevisionRow): Promise<SkillRevision> {
-    const [user] = await tx.select({ code: schema.users.code }).from(schema.users).where(eq(schema.users.id, revision.created_by)).limit(1);
+    const [user] = revision.created_by === null ? [] : await tx.select({ code: schema.users.code }).from(schema.users).where(eq(schema.users.id, revision.created_by)).limit(1);
     return { ...JSON.parse(revision.package_json) as SkillPackage, revision: revision.revision, change_summary: revision.change_summary,
-      created_at: revision.created_at, created_by_user_code: user?.code ?? '', published_at: revision.published_at };
+      created_at: revision.created_at, created_by_user_code: user?.code ?? null, published_at: revision.published_at, release_version: revision.release_version };
   }
   async function summary(tx: AccessDb, skill: SkillRow, principalId: bigint, visible: SkillRevisionRow[]): Promise<SkillSummary> {
     const ordered = visible.slice().sort((a, b) => b.revision - a.revision); const latest = ordered[0];
     if (!latest) throw new DomainError('skill_forbidden', '当前范围没有可访问的技能版本');
     const content = JSON.parse(latest.package_json) as SkillPackage;
     const source = await skillSourceAccess(tx, skill, principalId);
-    const [owner] = await tx.select({ code: schema.users.code }).from(schema.users).where(eq(schema.users.id, skill.owner_principal_id)).limit(1);
+    const [owner] = skill.owner_principal_id === null ? [] : await tx.select({ code: schema.users.code }).from(schema.users).where(eq(schema.users.id, skill.owner_principal_id)).limit(1);
     return { code: skill.code, scope_type: skill.scope_type, scope_code: source.code, name: content.name, description: content.description,
       current_revision: latest.revision, published_revision: ordered.find(row => row.published_at)?.revision ?? null,
-      archived: skill.archived, updated_at: latest.created_at, owner_user_code: owner?.code ?? '',
+      archived: skill.archived, updated_at: latest.created_at, owner_user_code: owner?.code ?? null, release_version: latest.release_version,
       can_edit: !skill.archived && source.write && (source.manage || skill.owner_principal_id === principalId), can_manage: source.manage,
       available_revisions: ordered.filter(row => !!row.published_at).map(row => row.revision) };
   }
@@ -86,6 +87,7 @@ export function createSkillsUseCases(db: Db) {
       const [project] = type === 'project' ? await db.select().from(schema.projects).where(eq(schema.projects.id, scope.id)).limit(1) : [];
       for (const skill of skills) {
         const own = skill.scope_type === type && skill.scope_id === scope.id;
+        if (skill.scope_type === 'platform' && view !== 'available') continue;
         if ((view === 'owned' && !own) || (view === 'shared' && own)) continue;
         let visible = await skillVisibleRevisions(db, skill, principal.id, cmd.projectCode);
         if (!own) {
@@ -95,7 +97,7 @@ export function createSkillsUseCases(db: Db) {
             const eligible: SkillRevisionRow[] = [];
             for (const rev of visible) if ((isProjectManager(access.role) || install?.revision === rev.revision) && await skillProjectGrant(db, skill, rev, project)) eligible.push(rev);
             visible = eligible;
-          } else {
+          } else if (skill.scope_type !== 'platform') {
             const shares = await db.select().from(schema.skillShares).where(and(eq(schema.skillShares.skill_id, skill.id), eq(schema.skillShares.target_type, type), eq(schema.skillShares.target_id, scope.id), isNull(schema.skillShares.revoked_at)));
             const allowed = new Set(shares.flatMap(row => JSON.parse(row.revisions_json) as number[]));
             visible = visible.filter(rev => !skill.archived && !!rev.published_at && allowed.has(rev.revision));
@@ -229,7 +231,7 @@ export function createSkillsUseCases(db: Db) {
         for (const rev of revisions) if (await skillProjectGrant(tx, skill, rev, project)) available.push(rev.revision);
       } else if (allowed) available.push(revision.revision);
       output.push({ skill_code: skill.code, revision: revision.revision, alias: install.alias, enabled: install.enabled,
-        name: install.alias, description: allowed ? pack.description : '', scope_type: skill.scope_type, scope_code: source.code,
+        name: install.alias, description: allowed ? pack.description : '', scope_type: skill.scope_type, scope_code: source.code, release_version: revision.release_version,
         package_sha256: pack.package_sha256, available_revisions: available.sort((a, b) => b - a), blocked: !allowed,
         blocked_reason: allowed ? null : '技能已归档、共享已撤销或项目包含未授权的外部成员' });
     }

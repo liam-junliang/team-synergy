@@ -82,23 +82,23 @@ Prerequisites: Node.js 22+, pnpm 10.33+, PostgreSQL 16.
 
 ```bash
 # 1. Prepare the databases
-psql -U postgres -c "CREATE DATABASE acp;"
-psql -U postgres -c "CREATE DATABASE acp_test;"
+psql -U postgres -c "CREATE DATABASE team_synergy;"
+psql -U postgres -c "CREATE DATABASE team_synergy_test;"
 
 # 2. Install dependencies
 pnpm install
 
 # 3. Point Core API at PostgreSQL (local default)
-export ACP_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/acp'
+export TSP_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/team_synergy'
 
 # 4. Start the control plane and the web workspace
 pnpm --filter @team-synergy/core-api dev   # http://127.0.0.1:8080
 pnpm --filter @team-synergy/web dev        # http://127.0.0.1:5173
 ```
 
-On Windows, set the variable with `$env:ACP_DATABASE_URL='...'`, or run `pnpm dev` from the repository root to start both services.
+On Windows, set the variable with `$env:TSP_DATABASE_URL='...'`, or run `pnpm dev` from the repository root to start both services.
 
-The database name `acp` and the `ACP_` environment prefix are historical names and are kept for compatibility.
+Existing installations can keep their current database name by pointing `TSP_DATABASE_URL` at it.
 
 ## CLI
 
@@ -113,6 +113,18 @@ tsp task list --assigned-to me
 
 CLI release packages are built by `.github/workflows/cli-release.yml` when a `cli-v*` tag is pushed. Each platform receives a self-contained archive with its own Node runtime.
 
+`tsp workspace init` also generates `AGENTS.md` / `CLAUDE.md` from the project standards. Run `tsp workspace guidance` after changing standards, and `tsp workspace guidance --check` to detect stale snapshots.
+
+## System Agent (V1)
+
+The floating project panel turns annotations on native project documents into persistent drafting jobs. Users review title, summary and body differences before explicitly adopting a new revision. Adoption checks current permissions, the base revision and the exact proposal hash; retries do not create duplicate revisions. Linked requirements, architecture and testing documents are outside this first editing adapter.
+
+The engine requires the separately installed official `@deepseek-ai/dsh@0.2.1-rc.2`. Use the environment variables in `.env.example`: point `TSP_SYSTEM_AGENT_DSH_BIN` at its absolute `lib/bin.js`, set an independent `TSP_SYSTEM_AGENT_WORKSPACE_ROOT`, and configure a provider credential file. An explicitly selected `TSP_SYSTEM_AGENT_DSH_CREDENTIALS_FILE` can read `DEEPSEEK_API_KEY` from an existing DSH managed credential store. Never commit secrets.
+
+The Windows launcher reads `TSP_SYSTEM_AGENT_CONFIG_FILE`, or `system-agent.config.json` beside the source/service directory. This JSON accepts only deployment settings and credential paths. An unconfigured engine rejects new jobs with an explanation. The build bundles pinned `spec-production` guidance; each job records the engine, model and Skill version/hash.
+
+V1 supplies authorized snapshots with no file, shell or MCP tools. Candidate previews do not automatically load images or render diagrams. Cancellation, timeout and expired leases produce explicit terminal states without automatic paid retries. Deployment operators manage retained runtime records. Deterministic checks and author explanations do not constitute independent review or standards certification.
+
 ## Testing
 
 ```bash
@@ -121,7 +133,7 @@ pnpm -r typecheck
 pnpm -r --workspace-concurrency=1 test
 ```
 
-`typecheck` needs the generated `dist` type declarations, so build first. Tests use the separate `acp_test` database and must run serially so packages do not clean or migrate the same test database concurrently.
+`typecheck` needs the generated `dist` type declarations, so build first. Tests use the separate `team_synergy_test` database and must run serially so packages do not clean or migrate the same test database concurrently.
 
 ## Status
 

@@ -37,11 +37,12 @@ test('Agent routes survive direct loading, login and project switching without l
   for (const unsafe of ['//example.com', '/\\example.com', 'https://example.com', '/api/skills', '/agent/connect?return=/agent/skills', '/projects/Q/documents']) assert.equal(routing.safeAgentReturnPath(unsafe, 'P'), '/projects/P/overview');
 });
 
-test('robot entry is accessible and original navigation retains Testing before Defects', () => {
+test('Agent integration entry is visibly named and original navigation retains Testing before Defects', () => {
   const source = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
-  assert.match(source, /aria-label=\{t\('Agent 工作台'\)\}/);
+  assert.match(source, /aria-label=\{t\('Agent 集成'\)\}/);
   assert.match(source, /aria-current=\{view === 'agent' \? 'page' : undefined\}/);
-  assert.ok(source.indexOf("aria-label={t('Agent 工作台')}") < source.indexOf('<ProjectSwitcher route='));
+  assert.ok(source.indexOf("aria-label={t('Agent 集成')}") < source.indexOf('<ProjectSwitcher route='));
+  assert.doesNotMatch(source, />← \{t\(session\.is_system_admin/);
   assert.equal(routing.PROJECT_SECTIONS.at(-3), 'testing'); assert.equal(routing.PROJECT_SECTIONS.at(-2), 'defects'); assert.equal(routing.PROJECT_SECTIONS.at(-1), 'handovers');
 });
 
@@ -54,6 +55,13 @@ test('skill reader uses selected immutable revision, safe Markdown and manager-g
   assert.match(readonly, /Published content/); assert.doesNotMatch(readonly, /Current draft|修订技能包|发布此版本|共享版本|归档技能|采用到当前项目/);
   const installer = render(workbench.SkillContentReader, { ...props, skill: { ...detail, can_edit: false, can_manage: false }, projectSkills: installations });
   assert.match(installer, /采用到当前项目/); assert.doesNotMatch(installer, /修订技能包|共享版本/);
+  const released = render(workbench.SkillContentReader, { ...props, projectSkills: installations, skill: {
+    ...detail, scope_type: 'platform', scope_code: 'platform', can_edit: false, can_manage: false,
+    revisions: [{ ...detail.revisions[1], release_version: '1.1.0' }],
+  } });
+  assert.match(released, /平台内置技能 · 1\.1\.0/);
+  assert.match(released, /采用到当前项目/);
+  assert.doesNotMatch(released, /修订技能包|发布此版本|共享版本|归档技能/);
   assert.match(writable, /shrink-0 space-y-3 border-b/); assert.match(writable, /min-h-0 min-w-0 overflow-y-auto overscroll-contain/);
 });
 
@@ -78,6 +86,26 @@ test('revoked skill installation stays visible but never renders cached package 
   ]);
   assert.match(html, /授权不可用/); assert.match(html, /old-review/); assert.match(html, />停用</);
   assert.doesNotMatch(html, /Current draft|Published content|共享版本/);
+});
+
+test('skill catalog defaults to usable entries while history remains explicitly discoverable', () => {
+  const active = { ...skill, code: 'ACTIVE', name: 'Current package', description: 'Ready' };
+  const archived = { ...skill, code: 'ARCHIVED', name: 'Obsolete package', archived: true };
+  const disabled = { skill_code: 'DISABLED', revision: 1, alias: 'Stopped package', enabled: false, name: 'Stopped', description: 'Old summary', scope_type: 'project', scope_code: 'P', package_sha256: 'b'.repeat(64), available_revisions: [], blocked: true, blocked_reason: 'source unavailable' };
+  const html = render(workbench.SkillsWorkbench, { project }, [
+    [['skills', 'catalog', 'project', 'P', 'project'], [active, archived]],
+    [['skills', 'installed', 'P'], { ...installations, installations: [disabled] }],
+  ]);
+  assert.match(html, /Current package/);
+  assert.doesNotMatch(html, /Obsolete package|Stopped package/);
+  assert.match(html, /type="checkbox"/);
+  assert.match(html, /显示已停用\/归档/);
+  const entries = [{ ...active, skill: active }, { ...archived, skill: archived }, { code: 'DISABLED', name: 'Stopped', description: '', scope_type: 'project', scope_code: 'P', installation: disabled }];
+  assert.deepEqual(workbench.filterSkillEntries(entries, '', false).map(item => item.code), ['ACTIVE']);
+  assert.deepEqual(workbench.filterSkillEntries(entries, '', true).map(item => item.code), ['ACTIVE', 'ARCHIVED', 'DISABLED']);
+  assert.deepEqual(workbench.filterSkillEntries(entries, 'STOPPED', true).map(item => item.code), ['DISABLED']);
+  assert.equal(workbench.skillEntryStatus({ ...entries[1], installation: { ...disabled, enabled: true } }), '已归档');
+  assert.equal(workbench.skillEntryStatus(entries[2]), '已停用');
 });
 
 test('project scope changes do not use a cached detail from another project', () => {
@@ -117,7 +145,7 @@ test('sharing and adoption forms disclose exact revisions, scope and external-me
   assert.match(adopt, /r1 · Revision 1/); assert.doesNotMatch(adopt, /r2 · Revision 2/);
 });
 
-test('CLI guide uses supported commands and only the current user device records', () => {
+test('Agent connection guide supplies real CLI and MCP setup without exposing device records', () => {
   i18n.setLocale('en-US', false);
   const html = render(agent.CliConnectionGuide, { user: { code: 'U', account: 'liam', display_name: 'Liam' }, project }, [
     [['platform-client-config'], { public_web_url: null, public_api_url: null }],
@@ -125,8 +153,38 @@ test('CLI guide uses supported commands and only the current user device records
     [['devices', 'OTHER'], [{ code: 'OTHER', device_name: 'Private device', created_at: '' }]],
   ]);
   assert.doesNotMatch(html, /tsp auth login-password|BIND_TOKEN|npm link|pnpm -r build/); assert.match(html, /tsp auth login --api/); assert.match(html, /tsp project bind P/); assert.match(html, /tsp skill sync --project P --check/);
-  assert.match(html, /My laptop/); assert.doesNotMatch(html, /Private device|device_token|web-login|在线设备/);
-  assert.match(html, /do not indicate online status/);
+  assert.doesNotMatch(html, /My laptop|Private device|Devices &amp; sessions|device_token|web-login|在线设备/);
+  assert.match(html, /href="\/account"/);
+  assert.match(html, /MCP/);
+  const decode = value => value.replaceAll('&quot;', '"').replaceAll('&#x27;', "'").replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&');
+  const configurations = [...html.matchAll(/<code>([\s\S]*?)<\/code>/g)].map(match => decode(match[1])).filter(text => text.startsWith('{')).map(text => JSON.parse(text));
+  assert.deepEqual(configurations.map(config => config.mcpServers.team_synergy), [
+    { command: 'cmd', args: ['/d', '/c', 'tsp', 'mcp', '--project', 'P'] },
+    { command: 'tsp', args: ['mcp', '--project', 'P'] },
+  ]);
+  assert.match(html, /tsp tools call read_code_catalog --project P/);
+  assert.match(html, /get_connection_context/);
+  assert.match(html, /list_projects/);
+  assert.doesNotMatch(html, /Set the working directory to the project bound/);
+  assert.match(html, /list_project_materials/);
+  assert.match(html, /read_code_catalog/);
+});
+
+test('Agent connection guide never offers an unbound placeholder as an executable bind command', () => {
+  const html = render(agent.CliConnectionGuide, { user: { code: 'U', account: 'liam', display_name: 'Liam' } }, [
+    [['platform-client-config'], { public_web_url: 'https://workspace.example.com', public_api_url: 'https://api.example.com' }],
+  ]);
+  assert.match(html, /tsp auth login --api https:\/\/api.example.com --web https:\/\/workspace.example.com/);
+  assert.doesNotMatch(html, /tsp project bind (?:&lt;|<)PROJECT_CODE/);
+  assert.match(html, /get_connection_context/);
+  assert.match(html, /list_projects/);
+  assert.match(html, /projectCode/);
+  assert.match(html, /不设置工作目录或项目也能启动 MCP/);
+  const jsonCommands = [...html.matchAll(/<code>([\s\S]*?)<\/code>/g)].map(match => match[1].replaceAll('&quot;', '"')).filter(text => text.startsWith('{')).map(text => JSON.parse(text));
+  assert.deepEqual(jsonCommands.map(config => config.mcpServers.team_synergy.args), [
+    ['/d', '/c', 'tsp', 'mcp'], ['mcp'],
+  ]);
+  assert.ok(jsonCommands.every(config => !('cwd' in config.mcpServers.team_synergy)));
 });
 
 test('new UI messages have English translations and keep user-authored names unchanged', () => {

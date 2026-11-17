@@ -2,7 +2,9 @@ import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { Db } from '@team-synergy/persistence';
 import { schema } from '@team-synergy/persistence';
 import { DomainError, assertAuditedChange, toAuditEvent } from '@team-synergy/domain';
-import { fail, insertAudit, now } from './task-service.js';
+import type { DefectEvidence, DefectEvidenceInput } from '@team-synergy/contracts';
+import { fail, insertAudit, now, type TaskResult } from './task-service.js';
+import { normalizeDefectReport } from './defect-report.js';
 import { assertProjectAccess, effectiveProjectMember, isProjectManager, resolveProjectAccess } from './project-access.js';
 import { assertRequirementInProject } from './project-use-cases.js';
 import {
@@ -39,7 +41,11 @@ export function createDefectUseCases(db: Db) {
     featureCode: string;
     title: string;
     severity: DefectSeverity;
-    description: string;
+    description?: string;
+    actionSteps: string;
+    expectedResult: string;
+    actualResult: string;
+    evidence: DefectEvidenceInput[];
     foundIn?: string;
     relatedRequirementCode?: string;
     principalCode: string;
@@ -68,32 +74,24 @@ export function createDefectUseCases(db: Db) {
       }
 
       const defectCode = createPublicCode();
-      await db.insert(schema.defects).values({
-        code: defectCode,
-        feature_id: feature.id,
-        title: cmd.title.trim(),
-        severity: cmd.severity,
-        reported_by: principal.id,
-        found_in: cmd.foundIn?.trim() || null,
-        description: cmd.description.trim(),
-        status: 'reported',
-        related_requirement: relatedRequirementId,
+      const { facts, files } = normalizeDefectReport(cmd);
+      await db.transaction(async tx => {
+        const [defect] = await tx.insert(schema.defects).values({
+          ...facts, code: defectCode, feature_id: feature.id, severity: cmd.severity, reported_by: principal.id,
+          found_in: cmd.foundIn?.trim() || null, status: 'reported', related_requirement: relatedRequirementId,
+        }).returning({ id: schema.defects.id });
+        if (!defect) throw new DomainError('internal_error', '缺陷创建失败');
+        if (files.length) await tx.insert(schema.defectEvidenceFiles).values(files.map(file => ({ ...file, defect_id: defect.id })));
+        const audit = {
+          entity_type: 'defect', entity_id: defect.id, principal_id: principal.id, base_snapshot: 0, action: 'defect.reported',
+          payload: { severity: cmd.severity, feature_code: feature.code, related_requirement_code: relatedRequirementCode },
+        };
+        assertAuditedChange(audit);
+        await insertAudit(tx, toAuditEvent(audit, createPublicCode(), now()));
       });
-      const [defect] = await db.select().from(schema.defects).where(eq(schema.defects.code, defectCode)).limit(1);
-      if (!defect) return fail(new DomainError('internal_error', '缺陷创建失败'));
-      const audit = {
-        entity_type: 'defect',
-        entity_id: defect.id,
-        principal_id: principal.id,
-        base_snapshot: 0,
-        action: 'defect.reported',
-        payload: { severity: cmd.severity, feature_code: feature.code, related_requirement_code: relatedRequirementCode },
-      };
-      assertAuditedChange(audit);
-      await insertAudit(db, toAuditEvent(audit, createPublicCode(), now()));
       return {
         ok: true as const,
-        data: { defect_code: defect.code, status: 'reported' as const },
+        data: { defect_code: defectCode, status: 'reported' as const },
       };
     } catch (error) {
       return fail(error);
@@ -158,6 +156,10 @@ export function createDefectUseCases(db: Db) {
       status: defect.status,
       reported_by_user_code: users.get(defect.reported_by)?.code ?? '',
       description: defect.description,
+      action_steps: defect.action_steps,
+      expected_result: defect.expected_result,
+      actual_result: defect.actual_result,
+      evidence: JSON.parse(defect.evidence_json) as DefectEvidence[],
       found_in: defect.found_in,
       related_requirement_code: defect.related_requirement ? (requirementMap.get(defect.related_requirement)?.code ?? null) : null,
       reported_at: reportedAtMap.get(defect.id) ?? null,
@@ -169,6 +171,23 @@ export function createDefectUseCases(db: Db) {
         created_at: task.created_at,
       })),
     }));
+  }
+
+  async function getEvidenceFile(code: string, index: number, principalCode: string): Promise<TaskResult<{ file_name: string; bytes: Buffer }>> {
+    try {
+      const principal = await findUserByCode(db, principalCode);
+      const defect = await findDefectByCode(db, code);
+      if (!defect) throw new DomainError('defect_not_found', '缺陷不存在');
+      const [feature] = await db.select({ project_id: schema.features.project_id }).from(schema.features).where(eq(schema.features.id, defect.feature_id));
+      if (!principal || !feature) throw new DomainError('defect_forbidden', '无权读取此缺陷');
+      await assertProjectAccess(db, feature.project_id, principal.id);
+      const evidence = (JSON.parse(defect.evidence_json) as DefectEvidence[])[index];
+      if (!Number.isSafeInteger(index) || index < 0 || evidence?.kind !== 'file') throw new DomainError('defect_file_not_found', '证据文件不存在');
+      const [file] = await db.select({ content: schema.defectEvidenceFiles.content_base64 }).from(schema.defectEvidenceFiles)
+        .where(and(eq(schema.defectEvidenceFiles.defect_id, defect.id), eq(schema.defectEvidenceFiles.evidence_index, index)));
+      if (!file) throw new DomainError('defect_file_not_found', '证据文件不存在');
+      return { ok: true, data: { file_name: evidence.file_name, bytes: Buffer.from(file.content, 'base64') } };
+    } catch (error) { return fail(error); }
   }
 
   async function transitionDefect(cmd: {
@@ -193,7 +212,7 @@ export function createDefectUseCases(db: Db) {
         return fail(new DomainError('defect_transition_invalid', `非法流转：${defect.status} → ${cmd.to}`, { allowed }));
       }
       if (['triaged', 'closed', 'rejected'].includes(cmd.to) && !isProjectManager(member?.role)) {
-        return fail(new DomainError('defect_forbidden', `只有 Owner 可以执行 ${cmd.to}`, { principal_code: principal.code }));
+        return fail(new DomainError('defect_forbidden', `只有项目 Owner 或 Admin 可以执行 ${cmd.to}`, { principal_code: principal.code }));
       }
 
       let fixTaskCode: string | undefined;
@@ -247,7 +266,7 @@ export function createDefectUseCases(db: Db) {
     }
   }
 
-  return { reportDefect, listDefects, transitionDefect };
+  return { reportDefect, listDefects, getEvidenceFile, transitionDefect };
 }
 
 export type DefectUseCases = ReturnType<typeof createDefectUseCases>;

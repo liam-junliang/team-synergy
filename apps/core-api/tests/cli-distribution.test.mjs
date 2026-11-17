@@ -57,6 +57,18 @@ test('missing, duplicate and malformed releases fail closed', async (t) => {
   await rm(path.join(directory, 'manifest.json'));
   assert.equal((await app.inject('/cli/manifest.json')).json().error.code, 'cli_distribution_unavailable');
 });
+
+test('missing installation scripts return a service-unavailable JSON response', async (t) => {
+  const { app, directory } = await fixture(t);
+  for (const script of ['install.ps1', 'install.sh']) {
+    await rm(path.join(directory, script));
+    const response = await app.inject(`/cli/${script}`);
+    assert.equal(response.statusCode, 503);
+    assert.match(response.headers['content-type'], /^application\/json/);
+    assert.equal(response.json().error.code, 'cli_distribution_unavailable');
+    assert.equal(response.body.includes(directory), false, 'private server paths must not enter the public response');
+  }
+});
 test('release symlinks cannot expose files outside the distribution directory', async (t) => {
   const { app, directory, artifact } = await fixture(t);
   const outside = await mkdtemp(path.join(os.tmpdir(), 'tsp-outside-')); t.after(() => rm(outside, { recursive: true, force: true }));

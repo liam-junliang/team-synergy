@@ -126,7 +126,7 @@ test('设计原型：非项目成员不能读取，跨项目需求不能关联',
     account: 'outsider', display_name: '局外人', status: 'active', created_at: 't0',
   }).returning();
   const [otherProject] = await ctx.db.insert(schema.projects).values({
-    team_id: outsiderTeam[0].id, name: 'Other Project', current_snapshot: 0, created_at: 't0',
+    team_id: outsiderTeam[0].id, name: 'Other Project', current_snapshot: 0, created_at: '2026-01-01T00:00:00.000Z',
   }).returning();
   const otherFeature = await insertFeature(ctx.db, { projectId: otherProject.id, title: '其他功能' });
   const otherRequirement = await insertRequirement(ctx.db, {

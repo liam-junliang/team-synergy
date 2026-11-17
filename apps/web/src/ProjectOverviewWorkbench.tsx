@@ -93,7 +93,7 @@ export function ProjectOverviewWorkbench({ projectCode }: { projectCode: string 
           </aside>
         </div>
       </div>
-      {dialog && home?.can_edit && <HomeSectionDialog key={`${projectCode}-${dialog.slot}-${dialog.mode}-${dialog.document?.document_code ?? 'new'}`} projectCode={projectCode} dialog={dialog} onClose={() => setDialog(null)} onSaved={saved} />}
+      {dialog && home?.can_edit && <HomeSectionDialog key={`${projectCode}-${dialog.slot}-${dialog.mode}-${dialog.document?.document_code ?? 'new'}`} projectCode={projectCode} overviewFolderCode={home.overview_folder_code} dialog={dialog} onClose={() => setDialog(null)} onSaved={saved} />}
       {membersOpen && project && <ProjectMemberManagement project={project} onClose={() => setMembersOpen(false)} />}
     </main>
   );
@@ -118,20 +118,22 @@ function ProjectStandardsSection({ projectCode, home }: { projectCode: string; h
   </section>;
 }
 
-function HomeSectionDialog({ projectCode, dialog, onClose, onSaved }: { projectCode: string; dialog: HomeDialog; onClose: () => void; onSaved: (home?: ProjectHome) => Promise<void> }) {
+function HomeSectionDialog({ projectCode, overviewFolderCode, dialog, onClose, onSaved }: { projectCode: string; overviewFolderCode?: string; dialog: HomeDialog; onClose: () => void; onSaved: (home?: ProjectHome) => Promise<void> }) {
   useLocale();
   const section = HOME_SECTIONS.find((item) => item.slot === dialog.slot) ?? HOME_SECTIONS[0];
   const [pending, setPending] = useState(false);
   return <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-3 sm:p-5" role="presentation" onMouseDown={(event) => { if (!pending && event.currentTarget === event.target) onClose(); }}><section role="dialog" aria-modal="true" aria-labelledby="home-dialog-title" className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl"><header className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 p-5"><div><h2 id="home-dialog-title" className="text-lg font-bold text-slate-900">{section.title} · {dialog.mode === 'bind' ? t("绑定文档") : dialog.mode === 'create' ? t("新建文档") : t("编辑正文")}</h2><p className="mt-1 text-xs leading-5 text-slate-500">{t("首页直接引用文档库中的文档，正文更新会同步展示。")}</p></div><button type="button" disabled={pending} onClick={onClose} className="ui-button ui-button-secondary">{t("关闭")}</button></header><div className="min-h-0 overflow-y-auto p-5">
-    {dialog.mode === 'bind' ? <HomeBindingForm projectCode={projectCode} slot={dialog.slot} current={dialog.document} onSaved={onSaved} onPending={setPending} /> : dialog.mode === 'edit' && dialog.document ? <ExistingHomeDocumentEditor projectCode={projectCode} documentCode={dialog.document.document_code} onSaved={onSaved} onPending={setPending} /> : <HomeDocumentForm projectCode={projectCode} slot={dialog.slot} title={section.title} placeholder={section.placeholder} onSaved={onSaved} onPending={setPending} />}
+    {dialog.mode === 'bind' ? <HomeBindingForm projectCode={projectCode} slot={dialog.slot} current={dialog.document} overviewFolderCode={overviewFolderCode} onSaved={onSaved} onPending={setPending} /> : dialog.mode === 'edit' && dialog.document ? <ExistingHomeDocumentEditor projectCode={projectCode} documentCode={dialog.document.document_code} onSaved={onSaved} onPending={setPending} /> : <HomeDocumentForm projectCode={projectCode} slot={dialog.slot} folderCode={overviewFolderCode} title={section.title} placeholder={section.placeholder} onSaved={onSaved} onPending={setPending} />}
   </div></section></div>;
 }
 
-function HomeBindingForm({ projectCode, slot, current, onSaved, onPending }: { projectCode: string; slot: ProjectHomeSlot; current: ProjectHomeDocument | null; onSaved: (home?: ProjectHome) => Promise<void>; onPending: (pending: boolean) => void }) {
+function HomeBindingForm({ projectCode, slot, current, overviewFolderCode, onSaved, onPending }: { projectCode: string; slot: ProjectHomeSlot; current: ProjectHomeDocument | null; overviewFolderCode?: string; onSaved: (home?: ProjectHome) => Promise<void>; onPending: (pending: boolean) => void }) {
   useLocale();
   const [documentCode, setDocumentCode] = useState(current?.document_code ?? '');
   const libraryQuery = useQuery({ queryKey: ['handoff-library', projectCode, ''], queryFn: () => listHandoffLibrary(projectCode) });
-  const documents = activeHomeDocuments(libraryQuery.data?.documents ?? []);
+  const documents = activeHomeDocuments(libraryQuery.data?.documents ?? []).filter((document) => (
+    !overviewFolderCode || document.folder_code === overviewFolderCode
+  ));
   const mutation = useMutation({
     mutationFn: () => bindProjectHomeDocument(projectCode, slot, documentCode || null),
     onMutate: () => onPending(true),
@@ -152,7 +154,7 @@ function ExistingHomeDocumentEditor({ projectCode, documentCode, onSaved, onPend
   return <HomeDocumentForm projectCode={projectCode} existing={documentQuery.data} title={documentQuery.data.title} placeholder="" onSaved={onSaved} onPending={onPending} />;
 }
 
-function HomeDocumentForm({ projectCode, slot, existing, title: initialTitle, placeholder, onSaved, onPending }: { projectCode: string; slot?: ProjectHomeSlot; existing?: HandoffDocumentDetail; title: string; placeholder: string; onSaved: (home?: ProjectHome) => Promise<void>; onPending: (pending: boolean) => void }) {
+function HomeDocumentForm({ projectCode, slot, existing, folderCode, title: initialTitle, placeholder, onSaved, onPending }: { projectCode: string; slot?: ProjectHomeSlot; existing?: HandoffDocumentDetail; folderCode?: string; title: string; placeholder: string; onSaved: (home?: ProjectHome) => Promise<void>; onPending: (pending: boolean) => void }) {
   useLocale();
   const [title, setTitle] = useState(initialTitle);
   const [summary, setSummary] = useState(existing?.summary ?? '');
@@ -170,7 +172,7 @@ function HomeDocumentForm({ projectCode, slot, existing, title: initialTitle, pl
       }
       if (!slot) throw new Error(t("请选择首页栏目"));
       if (!createdDocument.current) {
-        const saved = await createHandoffDocument(projectCode, { kind: 'doc', folder_code: null, title: title.trim(), summary: summary.trim(), content });
+        const saved = await createHandoffDocument(projectCode, { kind: 'doc', folder_code: folderCode ?? null, title: title.trim(), summary: summary.trim(), content });
         createdDocument.current = saved.document_code;
         setCreatedDocumentCode(saved.document_code);
       }
@@ -188,7 +190,7 @@ function HomeDocumentForm({ projectCode, slot, existing, title: initialTitle, pl
 }
 
 export function homeDocumentRevision(document: HandoffDocumentDetail, draft: Pick<HandoffDocumentInput, 'title' | 'summary' | 'content' | 'change_summary'>): HandoffDocumentInput {
-  return { ...draft, title: draft.title.trim(), summary: draft.summary?.trim(), folder_code: document.folder_code, status: document.status };
+  return { ...draft, base_revision: document.current_revision, title: draft.title.trim(), summary: draft.summary?.trim(), folder_code: document.folder_code, status: document.status };
 }
 
 function HomeField({ label, children }: { label: string; children: ReactNode }) {

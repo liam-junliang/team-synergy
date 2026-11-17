@@ -82,23 +82,23 @@ flowchart LR
 
 ```bash
 # 1. 准备数据库
-psql -U postgres -c "CREATE DATABASE acp;"
-psql -U postgres -c "CREATE DATABASE acp_test;"
+psql -U postgres -c "CREATE DATABASE team_synergy;"
+psql -U postgres -c "CREATE DATABASE team_synergy_test;"
 
 # 2. 安装依赖
 pnpm install
 
 # 3. 配置数据库连接（本地默认值）
-export ACP_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/acp'
+export TSP_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/team_synergy'
 
 # 4. 启动控制面与 Web 工作台
 pnpm --filter @team-synergy/core-api dev   # http://127.0.0.1:8080
 pnpm --filter @team-synergy/web dev        # http://127.0.0.1:5173
 ```
 
-Windows 下用 `$env:ACP_DATABASE_URL='...'` 设置变量，或在仓库根目录执行 `pnpm dev` 同时启动两个服务。
+Windows 下用 `$env:TSP_DATABASE_URL='...'` 设置变量，或在仓库根目录执行 `pnpm dev` 同时启动两个服务。
 
-数据库名 `acp` 和 `ACP_` 环境变量前缀是历史命名，暂时保留以保持兼容。
+已有安装可以继续使用原来的数据库名，只需把 `TSP_DATABASE_URL` 指向它。
 
 ## CLI
 
@@ -113,6 +113,18 @@ tsp task list --assigned-to me
 
 推送 `cli-v*` tag 时，`.github/workflows/cli-release.yml` 会构建各平台的自包含安装包，每个包自带 Node 运行时。
 
+`tsp workspace init` 会同时从项目规范生成 `AGENTS.md` / `CLAUDE.md`。规范变更后执行 `tsp workspace guidance` 刷新，`tsp workspace guidance --check` 用于检查快照是否过期。
+
+## 系统 Agent（V1）
+
+项目页面提供悬浮入口；可对原生项目文档批注，自动生成修改草稿，比较标题、摘要与正文后明确采用。正式文档在确认前不改变。采用核对基准修订、候选摘要与当前权限，重复请求不会重复创建修订。关联的需求、架构、测试资料暂不支持此编辑入口。
+
+执行器固定为官方 `@deepseek-ai/dsh@0.2.1-rc.2`，单独安装并通过 `.env.example` 的环境变量启用。`TSP_SYSTEM_AGENT_DSH_BIN` 指向安装包的绝对 `lib/bin.js` 路径；设置独立的 `TSP_SYSTEM_AGENT_WORKSPACE_ROOT`，以及模型凭据文件路径。可显式使用 `TSP_SYSTEM_AGENT_DSH_CREDENTIALS_FILE` 读取已有 DSH 管理凭据中的 `DEEPSEEK_API_KEY`。不得把密钥提交到仓库。
+
+Windows 启动器支持 `TSP_SYSTEM_AGENT_CONFIG_FILE` 指定的 JSON；默认查找源码/服务目录上级的 `system-agent.config.json`，仅接受路径、模型、启用与限额设置。未配置时面板显示原因并拒绝排队。构建会打包 `spec-production` 指导及其摘要，每个任务记录实际引擎、模型、Skill 版本和摘要。
+
+V1 仅向模型提供授权资料快照，禁用文件、Shell、MCP 等工具；候选预览不自动加载图片或执行图表。取消、超时、失效租约明确失败，不自动重跑付费任务。工作目录保留运行记录，留存与清理由部署者管理。自动规则检查与生成者解释不代表独立复核或企业标准认证。
+
 ## 测试
 
 ```bash
@@ -121,7 +133,7 @@ pnpm -r typecheck
 pnpm -r --workspace-concurrency=1 test
 ```
 
-`typecheck` 依赖各包生成的 `dist` 类型声明，因此先执行 build。测试使用独立的 `acp_test` 数据库，必须串行执行，避免多个包同时清理或迁移同一测试库。
+`typecheck` 依赖各包生成的 `dist` 类型声明，因此先执行 build。测试使用独立的 `team_synergy_test` 数据库，必须串行执行，避免多个包同时清理或迁移同一测试库。
 
 ## 状态
 

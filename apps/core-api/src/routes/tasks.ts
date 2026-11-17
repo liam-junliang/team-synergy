@@ -1,14 +1,14 @@
 import type { FastifyInstance } from 'fastify';
-import { inArray } from 'drizzle-orm';
 import {
   FEATURE_STATUSES,
+  fail,
   createMemberUseCases,
   createProjectUseCases,
   createTaskService,
   createTaskBaselineUseCases,
   createVerificationUseCases,
 } from '@team-synergy/application';
-import { schema, type Db } from '@team-synergy/persistence';
+import type { Db } from '@team-synergy/persistence';
 import {
   ArtifactKindSchema,
   EvidenceResultSchema,
@@ -18,7 +18,7 @@ import {
   TaskStatusSchema,
   PublicCodeSchema,
 } from '@team-synergy/contracts';
-import { unauthorized } from '../auth.js';
+import { hasAuthenticatedSession, unauthorized } from '../auth.js';
 import { executionIdentity } from './handovers.js';
 
 interface StringEnumSchema<T extends string> {
@@ -62,7 +62,7 @@ export function registerTaskRoutes(app: FastifyInstance, db: Db): void {
   const memberUc = createMemberUseCases(db);
 
   app.post<{ Params: { task_code: string }; Body: Record<string, unknown> }>('/tasks/:task_code/baseline', async (request, reply) => {
-    if (request.authKind !== 'bearer') return unauthorized(reply);
+    if (!hasAuthenticatedSession(request)) return unauthorized(reply);
     const body = request.body;
     if (!body || Array.isArray(body) || typeof body !== 'object'
       || Object.keys(body).some(key => !['baseline_code', 'base_snapshot'].includes(key))
@@ -74,7 +74,7 @@ export function registerTaskRoutes(app: FastifyInstance, db: Db): void {
       baseSnapshot: body.base_snapshot, principalCode: (request.principal ?? '') });
   });
 
-  app.get<{ Querystring: { status?: string; assignee_principal_code?: string; project_code?: string } }>('/tasks', async (request) => {
+  app.get<{ Querystring: { status?: string; assignee_principal_code?: string; project_code?: string; limit?: string; offset?: string } }>('/tasks', async (request) => {
     const statusRaw = request.query.status;
     const status = statusRaw === undefined ? undefined : parseEnum(TaskStatusSchema, statusRaw);
     if (statusRaw !== undefined && !status) {
@@ -83,49 +83,21 @@ export function registerTaskRoutes(app: FastifyInstance, db: Db): void {
     const assignedTo = request.query.assignee_principal_code === 'me'
       ? (request.principal ?? '')
       : request.query.assignee_principal_code;
-    return {
-      ok: true as const,
-      data: await taskService.listTasks({
-        status: status ?? undefined,
-        assignedTo: assignedTo || undefined,
-        projectCode: request.query.project_code,
-        principalCode: request.principal ?? '',
-      }),
-    };
+    try {
+      const integer = (raw: string | undefined, fallback: number) => raw === undefined ? fallback : /^\d+$/.test(raw) ? Number(raw) : NaN;
+      const result = await taskService.listTaskPage({
+        status: status ?? undefined, assignedTo: assignedTo || undefined,
+        projectCode: request.query.project_code, principalCode: request.principal ?? '',
+        limit: integer(request.query.limit, 50), offset: integer(request.query.offset, 0),
+      });
+      return { ok: true as const, ...result };
+    } catch (error) { return fail(error); }
   });
 
-  app.get<{ Querystring: { project_code?: string } }>('/tasks/graph', async (request) => {
-    const visibleTasks = await taskService.listTasks({ projectCode: request.query.project_code, principalCode: request.principal ?? '' });
-    if (visibleTasks.length === 0) {
-      return { ok: true as const, data: { nodes: [], edges: [] } };
-    }
-
-    const codes = visibleTasks.map((task) => task.task_code);
-    const rows = await db.select({ id: schema.tasks.id, code: schema.tasks.code })
-      .from(schema.tasks)
-      .where(inArray(schema.tasks.code, codes));
-    const taskIdToCode = new Map(rows.map((row) => [row.id, row.code]));
-    const taskIds = rows.map((row) => row.id);
-    const dependencies = taskIds.length === 0
-      ? []
-      : await db.select().from(schema.taskDependencies).where(inArray(schema.taskDependencies.task_id, taskIds));
-
-    return {
-      ok: true as const,
-      data: {
-        nodes: visibleTasks.map((task) => ({
-          task_code: task.task_code,
-          title: task.title,
-          status: task.status,
-        })),
-        edges: dependencies.flatMap((dependency) => {
-          const from = taskIdToCode.get(dependency.task_id);
-          const to = taskIdToCode.get(dependency.depends_on_task_id);
-          return from && to ? [{ from, to }] : [];
-        }),
-      },
-    };
-  });
+  app.get<{ Querystring: { project_code?: string } }>('/tasks/graph', async (request) => ({
+    ok: true as const,
+    data: await taskService.taskGraph({ projectCode: request.query.project_code, principalCode: request.principal ?? '' }),
+  }));
 
   app.get<{ Params: { task_code: string } }>('/tasks/:task_code/evidences', async (request) => {
     const result = await taskService.getTaskStatus(request.params.task_code, request.principal ?? '');
@@ -137,7 +109,7 @@ export function registerTaskRoutes(app: FastifyInstance, db: Db): void {
   app.get<{ Params: { task_code: string } }>('/tasks/:task_code', async (request, reply) => {
     const result = await taskService.getTaskStatus(request.params.task_code, request.principal ?? '');
     if (result.ok && result.data.requirement_baseline_code) {
-      if (request.authKind !== 'bearer') return unauthorized(reply);
+      if (!hasAuthenticatedSession(request)) return unauthorized(reply);
     }
     return result;
   });
@@ -150,7 +122,7 @@ export function registerTaskRoutes(app: FastifyInstance, db: Db): void {
   app.post<{ Body: Record<string, unknown> }>('/tasks', async (request, reply) => {
     const body = request.body ?? {};
     if (body.baseline_code !== undefined) {
-      if (request.authKind !== 'bearer') return unauthorized(reply);
+      if (!hasAuthenticatedSession(request)) return unauthorized(reply);
       if (!PublicCodeSchema.safeParse(body.baseline_code).success) return {
         ok: false as const, error: { code: 'validation_failed', message: '需求基线编码无效' },
       };

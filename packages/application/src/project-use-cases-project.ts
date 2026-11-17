@@ -1,4 +1,5 @@
-import { and, asc, eq, inArray, max, or, sql } from 'drizzle-orm';
+import { lockAggregate } from './aggregate-lock.js';
+import { and, asc, eq, inArray, max, or } from 'drizzle-orm';
 import type { Db } from '@team-synergy/persistence';
 import { schema } from '@team-synergy/persistence';
 import { DomainError, assertAuditedChange, toAuditEvent } from '@team-synergy/domain';
@@ -8,6 +9,7 @@ import { createPublicCode, findProjectByCode, findTeamByCode, findUserByCode } f
 import { ensureProjectSystemFolders } from './project-document-folders.js';
 import { assertProjectAccess, effectiveProjectMember, isProjectManager, projectCapabilities, resolveProjectAccess, resolveTeamRole } from './project-access.js';
 import { createMemberUseCases } from './member-use-cases.js';
+import { enqueueProjectDocumentMemory } from './project-document-memory.js';
 
 async function usersByIds(db: Db, ids: bigint[]) {
   if (ids.length === 0) return new Map<bigint, typeof schema.users.$inferSelect>();
@@ -199,6 +201,7 @@ export function createProjectUseCasesProject(db: Db) {
       const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, project.team_id)).limit(1);
       const changedAt = now();
       const result = await db.transaction(async (tx) => {
+        await lockAggregate(tx, 'project', project.id);
         await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, principal.id)).for('share');
         await tx.select({ id: schema.teams.id }).from(schema.teams).where(eq(schema.teams.id, project.team_id)).for('share');
         const [current] = await tx.select().from(schema.projects).where(eq(schema.projects.id, project.id)).for('update');
@@ -264,6 +267,7 @@ export function createProjectUseCasesProject(db: Db) {
       }
       const changedAt = now();
       const result = await db.transaction(async (tx) => {
+        await lockAggregate(tx, 'project', project.id);
         await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, principal.id)).for('share');
         await tx.select({ id: schema.teams.id }).from(schema.teams).where(eq(schema.teams.id, project.team_id)).for('share');
         const [current] = await tx.select().from(schema.projects).where(eq(schema.projects.id, project.id)).for('update');
@@ -375,7 +379,7 @@ export function createProjectUseCasesProject(db: Db) {
 
       const updatedAt = now();
       const result = await db.transaction(async (tx) => {
-        await tx.execute(sql`select pg_advisory_xact_lock(1094930512::bigint)`);
+        await lockAggregate(tx, 'project', project.id);
         const [currentProject] = await tx.select().from(schema.projects).where(eq(schema.projects.id, project.id)).for('update').limit(1);
         await assertProjectAccess(tx, project.id, principal.id, 'manage');
         if (!currentProject) throw new DomainError('project_document_forbidden', '项目不存在');
@@ -385,18 +389,21 @@ export function createProjectUseCasesProject(db: Db) {
         )).for('update').limit(1);
         if (currentProject.overview_document_id !== null && !existing) throw new DomainError('project_home_document_invalid', '项目首页说明关联无效，请重新关联文档');
         if (existing?.status === 'archived') throw new DomainError('project_home_document_archived', '项目说明文档已归档，请先解除或重新关联首页文档');
+        const folders = await ensureProjectSystemFolders(tx, project.id);
         const revision = (existing?.revision ?? 0) + 1;
         const [document] = existing
           ? await tx.update(schema.projectDocuments).set({
             title,
             content,
             revision,
+            folder_id: folders.overview.id,
             updated_by: principal.id,
             updated_at: updatedAt,
           }).where(eq(schema.projectDocuments.id, existing.id)).returning()
           : await tx.insert(schema.projectDocuments).values({
             code: createPublicCode(),
             project_id: project.id,
+            folder_id: folders.overview.id,
             title,
             content,
             revision,
@@ -407,7 +414,7 @@ export function createProjectUseCasesProject(db: Db) {
           }).returning();
         if (!document) throw new DomainError('internal_error', '项目文档保存失败');
         if (!existing) await tx.update(schema.projects).set({ overview_document_id: document.id }).where(eq(schema.projects.id, project.id));
-        await tx.insert(schema.projectDocumentRevisions).values({
+        const [storedRevision] = await tx.insert(schema.projectDocumentRevisions).values({
           code: createPublicCode(),
           document_id: document.id,
           revision,
@@ -417,7 +424,9 @@ export function createProjectUseCasesProject(db: Db) {
           change_summary: existing ? '通过兼容接口更新交接文档' : '通过兼容接口创建交接文档',
           created_by: principal.id,
           created_at: updatedAt,
-        });
+        }).returning({ id: schema.projectDocumentRevisions.id });
+        if (!storedRevision) throw new DomainError('internal_error', '文档修订创建失败');
+        await enqueueProjectDocumentMemory(tx, storedRevision.id);
         const audit = {
           entity_type: 'project',
           entity_id: project.id,
@@ -593,6 +602,7 @@ export function createProjectUseCasesProject(db: Db) {
       }
       const changedAt = now();
       const result = await db.transaction(async (tx) => {
+        await lockAggregate(tx, 'project', project.id);
         await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, principal.id)).for('share');
         await tx.select({ id: schema.teams.id }).from(schema.teams).where(eq(schema.teams.id, project.team_id)).for('share');
         const [current] = await tx.select().from(schema.projects).where(eq(schema.projects.id, project.id)).for('update');
@@ -682,6 +692,7 @@ export function createProjectUseCasesProject(db: Db) {
       }
       const changedAt = now();
       await db.transaction(async (tx) => {
+        await lockAggregate(tx, 'project', project.id);
         await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, principal.id)).for('share');
         await tx.select({ id: schema.teams.id }).from(schema.teams).where(eq(schema.teams.id, project.team_id)).for('share');
         const [current] = await tx.select().from(schema.projects).where(eq(schema.projects.id, project.id)).for('update');

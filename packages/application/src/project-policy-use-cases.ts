@@ -6,6 +6,7 @@ import { assertProjectAccess, resolveProjectAccess } from './project-access.js';
 import { assertWorkHandedOff } from './member-use-cases.js';
 import { createPublicCode, findProjectByCode, findUserByCode } from './public-code.js';
 import { fail, insertAudit, now } from './task-service.js';
+import { lockAggregate } from './aggregate-lock.js';
 
 export function createProjectPolicyUseCases(db: Db) {
   async function context(projectCode: string, principalCode: string) {
@@ -46,6 +47,7 @@ export function createProjectPolicyUseCases(db: Db) {
       const policy = ProjectMemberPolicySchema.parse(cmd.memberPolicy);
       const { project, principal } = await context(cmd.projectCode, cmd.principalCode);
       await db.transaction(async tx => {
+        await lockAggregate(tx, 'project', project.id);
         await tx.select().from(schema.users).where(eq(schema.users.id, principal.id)).for('update');
         await tx.select().from(schema.teams).where(eq(schema.teams.id, project.team_id)).for('update');
         const [locked] = await tx.select().from(schema.projects).where(eq(schema.projects.id, project.id)).for('update');

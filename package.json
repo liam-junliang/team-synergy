@@ -17,9 +17,13 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint . --max-warnings=80",
-    "test": "pnpm -r --workspace-concurrency=1 test",
+    "test": "node scripts/run-tests.mjs -- pnpm -r --workspace-concurrency=1 test",
     "commit:check": "node scripts/check-commit-message.mjs --rev HEAD",
-    "hooks:install": "git config core.hooksPath .githooks"
+    "hooks:install": "git config core.hooksPath .githooks",
+    "migration:check": "node scripts/check-migrations.mjs && node --test tests/migration-policy.test.mjs",
+    "test:isolated": "node scripts/run-tests.mjs",
+    "test:db:provision": "node scripts/provision-test-postgres.mjs",
+    "test:db:check": "node scripts/run-tests.mjs -- node --test tests/test-database-guard.test.mjs tests/test-postgres-isolation.test.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

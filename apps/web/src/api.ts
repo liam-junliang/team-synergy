@@ -1,6 +1,7 @@
 import { t, getLocale } from './i18n.ts';
 import { ApiError } from './apiError.ts';
 import { webClientIdentity } from './clientIdentity';
+import type { DefectEvidence, DefectReportInput } from '../../../packages/contracts/src/schemas';
 
 /**
  * core-api 客户端（看板数据源）：任务列表/详情/审计流、成员。
@@ -220,6 +221,7 @@ export interface ProjectHome {
   overview: ProjectHomeDocument | null;
   guide: ProjectHomeDocument | null;
   standards: ProjectHomeDocument[];
+  overview_folder_code: string;
   standards_folder_code: string;
 }
 
@@ -642,7 +644,7 @@ export interface HandoffFolder {
   name: string;
   sort_order: number;
   status: HandoffDocumentStatus;
-  system_role: 'standards' | 'requirements' | 'architecture' | 'testing' | null;
+  system_role: 'root' | 'overview' | 'standards' | 'requirements' | 'architecture' | 'testing' | null;
   can_create_folder?: boolean;
   can_edit: boolean;
   created_at: string;
@@ -694,6 +696,7 @@ export interface HandoffLibrary {
 }
 
 export interface HandoffDocumentInput {
+  base_revision?: number;
   folder_code?: string | null;
   kind?: HandoffDocumentKind;
   title: string;
@@ -719,6 +722,10 @@ export interface DefectSummary {
   status: string;
   reported_by: string;
   description: string;
+  action_steps: string | null;
+  expected_result: string | null;
+  actual_result: string | null;
+  evidence: DefectEvidence[];
   found_in: string | null;
   related_requirement_code: string | null;
   reported_at: string | null;
@@ -731,14 +738,7 @@ export interface DefectSummary {
   }>;
 }
 
-export interface CreateDefectInput {
-  feature_code: string;
-  title: string;
-  severity: 'critical' | 'high' | 'medium' | 'low';
-  description: string;
-  found_in?: string;
-  related_requirement_code?: string;
-}
+export type CreateDefectInput = DefectReportInput;
 
 export interface Feature {
   code: string;
@@ -1196,22 +1196,16 @@ export interface AuthUser {
   must_change_password: boolean;
 }
 
-interface WebLoginResult {
-  device_code: string;
-  device_token: string;
-  user_code: string;
-  device_name: string;
+interface WebSessionResult {
+  user: RawAuthUser;
+  csrf_token: string;
 }
 
-const AUTH_TOKEN_KEY = 'acp.device_token';
 const AUTH_USER_KEY = 'acp.auth_user';
-
-function authToken(): string | null {
-  return typeof window === 'undefined' ? null : window.localStorage.getItem(AUTH_TOKEN_KEY);
-}
+let webCsrfToken: string | null = null;
 
 export function storedAuthUser(): AuthUser | null {
-  if (typeof window === 'undefined' || !authToken()) return null;
+  if (typeof window === 'undefined') return null;
   const raw = window.localStorage.getItem(AUTH_USER_KEY);
   if (!raw) return null;
   try {
@@ -1225,29 +1219,28 @@ export function storedAuthUser(): AuthUser | null {
   }
 }
 
-export function hasWebAuthToken(): boolean {
-  return Boolean(authToken());
-}
-
 export function clearWebSession(): void {
+  webCsrfToken = null;
   if (typeof window === 'undefined') return;
-  window.localStorage.removeItem(AUTH_TOKEN_KEY);
+  // Remove credentials left by earlier versions; never read or migrate them.
+  window.localStorage.removeItem('acp.device_token');
+  window.localStorage.removeItem('tsp:web:client-identity:v1');
   window.localStorage.removeItem(AUTH_USER_KEY);
 }
 
-export async function fetchEnvelope<T>(path: string, init?: RequestInit): Promise<T> {
+async function fetchResponseEnvelope<T>(path: string, init?: RequestInit): Promise<{ data: T; has_more?: boolean }> {
   const headers = new Headers(init?.headers);
-  const token = authToken();
-  if (token && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`);
+  const method = (init?.method ?? 'GET').toUpperCase();
+  if (webCsrfToken && !['GET', 'HEAD', 'OPTIONS'].includes(method)) headers.set('X-CSRF-Token', webCsrfToken);
   if (init?.body) headers.set('Content-Type', 'application/json');
-  const res = await fetch(`/api${path}`, { ...init, headers });
+  const res = await fetch(`/api${path}`, { ...init, headers, credentials: 'same-origin' });
   let body: unknown = null;
   try {
     body = await res.json();
   } catch {
     body = null;
   }
-  const envelope = body as { ok: boolean; data: T; error?: { code: string; message: string } } | null;
+  const envelope = body as { ok: boolean; data: T; has_more?: boolean; error?: { code: string; message: string } } | null;
   if (res.status === 401 && envelope?.ok !== true && !path.startsWith('/auth/')) {
     // 未认证/凭据失效：清会话并广播，由 App 回到登录页。
     // /auth/* 路径豁免（password-login 失败返回 401 是正常业务结果，
@@ -1259,7 +1252,11 @@ export async function fetchEnvelope<T>(path: string, init?: RequestInit): Promis
     const detail = envelope?.error;
     throw detail ? new ApiError(detail.code, detail.message, res.status) : new Error(`HTTP ${res.status}: ${path}`);
   }
-  return envelope.data;
+  return envelope;
+}
+
+export async function fetchEnvelope<T>(path: string, init?: RequestInit): Promise<T> {
+  return (await fetchResponseEnvelope<T>(path, init)).data;
 }
 
 function appendQueryParam(query: string, key: string, value?: string): string {
@@ -1764,6 +1761,10 @@ function normalizeDefect(defect: RawDefectSummary): DefectSummary {
     status: defect.status ?? 'reported',
     reported_by: codeFrom(defect.reported_by, defect.reported_by_user_code),
     description: defect.description ?? '',
+    action_steps: defect.action_steps ?? null,
+    expected_result: defect.expected_result ?? null,
+    actual_result: defect.actual_result ?? null,
+    evidence: defect.evidence ?? [],
     found_in: defect.found_in ?? null,
     related_requirement_code: optionalCode(defect.related_requirement_code, defect.related_requirement),
     reported_at: defect.reported_at ?? null,
@@ -1833,8 +1834,22 @@ function normalizeProjectArtifact(artifact: RawProjectArtifact): ProjectArtifact
   };
 }
 
-export function listTasks(query = '', projectCode?: string): Promise<TaskSummary[]> {
-  return fetchEnvelope<RawTaskSummary[]>(`/tasks${appendQueryParam(query, 'project_code', projectCode)}`).then((items) => items.map((item) => normalizeTask(item)));
+export async function listTasks(query = '', projectCode?: string): Promise<TaskSummary[]> {
+  const params = new URLSearchParams(appendQueryParam(query, 'project_code', projectCode).replace(/^\?/, ''));
+  const tasks: TaskSummary[] = [];
+  let offset = Number(params.get('offset') ?? 0);
+  // Array consumers need every task for board counts and selection workflows.
+  // Fetch bounded project pages rather than the cross-project task table.
+  const limit = Number(params.get('limit') ?? 500);
+  for (;;) {
+    params.set('limit', String(limit));
+    params.set('offset', String(offset));
+    const result = await fetchResponseEnvelope<RawTaskSummary[]>(`/tasks?${params}`);
+    tasks.push(...result.data.map(normalizeTask));
+    if (!result.has_more) return tasks;
+    if (!result.data.length) throw new ApiError('api_bad_response', '任务分页未前进', 502);
+    offset += result.data.length;
+  }
 }
 
 export function getTask(taskCode: string): Promise<TaskDetail> {
@@ -2647,12 +2662,17 @@ export function reviseDesignPrototype(prototypeCode: string, input: DesignProtot
 
 export async function getDesignPrototypeFile(prototypeCode: string, revision: number): Promise<Blob> {
   if (!Number.isSafeInteger(revision) || revision < 1) throw new Error(t('设计资料版本无效'));
-  const path = `/design-prototypes/${encodeURIComponent(prototypeCode)}/file?revision=${revision}`;
+  return fetchLocalFile(`/design-prototypes/${encodeURIComponent(prototypeCode)}/file?revision=${revision}`);
+}
+
+export function getDefectEvidenceFile(defectCode: string, index: number): Promise<Blob> {
+  return fetchLocalFile(`/defects/${encodeURIComponent(defectCode)}/evidence/${index}/file`);
+}
+
+async function fetchLocalFile(path: string): Promise<Blob> {
   const headers = new Headers({ 'X-Principal-Code': currentPrincipalCode() });
-  const token = authToken();
-  if (token) headers.set('Authorization', `Bearer ${token}`);
-  // Never use a server-provided download URL with the user's bearer credential.
-  const response = await fetch(`/api${path}`, { headers, redirect: 'error' });
+  // Fixed same-origin paths keep the HttpOnly session away from external URLs.
+  const response = await fetch(`/api${path}`, { headers, credentials: 'same-origin', redirect: 'error' });
   if (!response.ok) {
     if (response.status === 401) {
       clearWebSession();
@@ -2746,25 +2766,22 @@ export function currentPrincipalCode(): string {
 
 const accountPrincipalCode = currentPrincipalCode;
 
-async function persistWebLogin(login: WebLoginResult): Promise<AuthUser> {
-  window.localStorage.setItem(AUTH_TOKEN_KEY, login.device_token);
-  try {
-    const user = normalizeAuthUser(await fetchEnvelope<RawAuthUser>('/auth/whoami'));
-    window.localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
-    return user;
-  } catch (error) {
-    clearWebSession();
-    throw error;
-  }
+function persistWebSession(session: WebSessionResult): AuthUser {
+  webCsrfToken = session.csrf_token;
+  const user = normalizeAuthUser(session.user);
+  window.localStorage.removeItem('acp.device_token');
+  window.localStorage.removeItem('tsp:web:client-identity:v1');
+  window.localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
+  return user;
 }
 
 export async function loginWebSession(input: { account: string; password: string; device_name: string }): Promise<AuthUser> {
   clearWebSession();
-  const login = await fetchEnvelope<WebLoginResult>('/auth/password-login', {
+  const login = await fetchEnvelope<WebSessionResult>('/auth/web/login', {
     method: 'POST',
     body: JSON.stringify({ ...input, device_identity: webClientIdentity() }),
   });
-  return persistWebLogin(login);
+  return persistWebSession(login);
 }
 
 export async function changeWebPassword(newPassword: string, currentPassword?: string): Promise<AuthUser> {
@@ -2776,22 +2793,17 @@ export async function changeWebPassword(newPassword: string, currentPassword?: s
 }
 
 export async function restoreWebSession(): Promise<AuthUser> {
-  const user = normalizeAuthUser(await fetchEnvelope<RawAuthUser>('/auth/whoami'));
-  window.localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
-  if (!user.must_change_password) {
-    // Legacy credentials may not yet have an installation identity. Binding is authenticated,
-    // and a collision must never merge devices or invalidate an otherwise usable login.
-    await fetchEnvelope('/auth/device-identity', { method: 'POST', body: JSON.stringify({ device_identity: webClientIdentity() }) }).catch(() => undefined);
+  try {
+    return persistWebSession(await fetchEnvelope<WebSessionResult>('/auth/web/session'));
+  } catch (error) {
+    clearWebSession();
+    throw error;
   }
-  return user;
 }
 
 export async function logoutWebSession(): Promise<void> {
-  try {
-    await fetchEnvelope('/auth/logout', { method: 'POST', body: JSON.stringify({}) });
-  } finally {
-    clearWebSession();
-  }
+  await fetchEnvelope('/auth/web/logout', { method: 'POST', body: JSON.stringify({}) });
+  clearWebSession();
 }
 
 export function listTeams(): Promise<TeamSummary[]> {

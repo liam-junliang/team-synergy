@@ -102,5 +102,5 @@ test('document sidebars stick only in desktop columns and bound their height to 
 });
 
 test('Markdown anchor offsets include the actual reader header height', () => {
-  assert.match(valueOf(ruleFor('.markdown-document :where([id])'), 'scroll-margin-top'), /var\(--document-reader-header-height,\s*0px\)\s*\+\s*1\.5rem/);
+  assert.match(valueOf(ruleFor('.markdown-document :where([id], [data-source-line])'), 'scroll-margin-top'), /var\(--document-reader-header-height,\s*0px\)\s*\+\s*1\.5rem/);
 });

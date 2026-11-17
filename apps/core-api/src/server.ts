@@ -1,21 +1,32 @@
-import { existsSync } from 'node:fs';
+import { registerMetrics } from './metrics.js';
+import { registerSecurityHeaders } from './security-headers.js';
+import { registerAuditRoutes } from './routes/audit.js';
+import { registerLoginSecurityRoutes } from './routes/login-security.js';
 import path from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import Fastify, { type FastifyInstance } from 'fastify';
 import swagger from '@fastify/swagger';
-import { ProfileSchema, TaskStatusSchema } from '@team-synergy/contracts';
+import { ProfileSchema, TaskStatusSchema, type SkillPackage } from '@team-synergy/contracts';
 import { canTransition } from '@team-synergy/domain';
-import { ensureSystemAdmin } from '@team-synergy/application';
-import { closeDb, openDb, type Db } from '@team-synergy/persistence';
+import { createHostedCodeAnalysisUseCases, createSystemAgentUseCases, ensurePlatformSkillRelease, ensureSystemAdmin } from '@team-synergy/application';
+import { closeDb, openDb, databaseReady, resolveMigrationsFolder, type Db } from '@team-synergy/persistence';
 import { registerTaskRoutes } from './routes/tasks.js';
 import { registerDefectRoutes } from './routes/defects.js';
 import { registerUserRoutes } from './routes/users.js';
 import { registerRequirementRoutes } from './routes/requirements.js';
+import { registerMemoryRoutes } from './routes/memory.js';
+import { registerPersonalMemoryRoutes } from './routes/personal-memory.js';
+import { processNextMemoryCapture } from './memory-capture-queue.js';
+import { registerMemoryManagementRoutes } from './routes/memory-management.js';
+import { loadMemoryEngines, projectNextMemory } from './memory-engines.js';
+import { maintainProjectMaterialIndexes } from './memory-material-runtime.js';
 import { registerRequirementDocumentRoutes } from './routes/requirement-documents.js';
 import { registerRequirementCollaborationRoutes } from './routes/requirement-collaboration.js';
 import { registerDesignPrototypeRoutes } from './routes/design-prototypes.js';
 import { registerArchitectureDocumentRoutes } from './routes/architecture-documents.js';
 import { registerProjectDocumentRoutes } from './routes/project-documents.js';
+import { registerDocumentQualityRoutes } from './routes/document-quality.js';
 import { registerAuthMiddleware } from './auth.js';
 import { httpStatusForError } from './error-status.js';
 import { registerAuthRoutes } from './routes/auth.js';
@@ -31,41 +42,61 @@ import { registerCliDistributionRoutes } from './routes/cli-distribution.js';
 import { registerSystemSettingsRoutes } from './routes/system-settings.js';
 import { registerAdminGovernanceRoutes } from './routes/admin-governance.js';
 import { registerIntakeRoutes } from './routes/intake.js';
+import { registerCodeUnderstandingRoutes } from './routes/code-understanding.js';
+import { registerSystemAgentRoutes } from './routes/system-agent.js';
+import { createSystemAgentRuntime } from './system-agent-runtime.js';
+import { loadSystemAgentGuidance } from './system-agent-guidance.js';
+import { createSystemAgentWorker } from './system-agent-worker.js';
+import { createCodeAnalysisRuntime } from './code-analysis-runtime.js';
+import { createCodeAnalysisWorker } from './code-analysis-worker.js';
 
 export interface BuildServerOptions {
   /** Borrow an existing handle. The caller remains responsible for closing it. */
   db?: Db;
-  /** Override the default ACP_DATABASE_URL value when the server owns the database. */
+  /** Override the default TSP_DATABASE_URL value when the server owns the database. */
   databaseUrl?: string;
+  memoryEnginesFile?: string;
   logger?: boolean;
+  migrate?: boolean;
 }
 
 function bundledMigrationsFolder(): string {
-  const currentDir = path.dirname(fileURLToPath(import.meta.url));
-  const bundledFolder = path.join(currentDir, 'migrations');
-  if (existsSync(path.join(bundledFolder, 'meta', '_journal.json'))) {
-    return bundledFolder;
-  }
-
-  // `tsx watch` executes this file from src/, while production runs from dist/.
-  // Development therefore falls back to the persistence package's source migrations.
-  return path.resolve(currentDir, '../../../packages/persistence/drizzle');
+  return resolveMigrationsFolder(path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrations'));
 }
 
 /** Build the modular Fastify server shared by production and inject-based tests. */
 export async function buildServer(options: BuildServerOptions = {}): Promise<FastifyInstance> {
+  const memoryEnabled = process.env.TSP_MEMORY_ENABLED === '1';
+  const memoryFile = options.memoryEnginesFile ?? process.env.TSP_MEMORY_ENGINES_FILE;
+  const memoryEngines = memoryEnabled && memoryFile ? await loadMemoryEngines(memoryFile) : undefined;
   const ownsDb = options.db === undefined;
   const db =
     options.db ??
     await openDb({
       databaseUrl: options.databaseUrl,
       migrationsFolder: bundledMigrationsFolder(),
+      migrate: options.migrate ?? process.env.TSP_AUTO_MIGRATE !== 'false',
     });
-  // Self-contained image prototypes are posted as data URLs inside JSON.
-  const app = Fastify({ logger: options.logger ?? true, bodyLimit: 8 * 1024 * 1024 });
+  // Large document payloads must opt in at the route boundary.
+  const app = Fastify({ logger: options.logger ?? true, bodyLimit: 1024 * 1024 });
+  app.setErrorHandler((error, _request, reply) => {
+    if ((error as { code?: string }).code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
+      return reply.code(413).send({ ok: false, error: { code: 'request_body_too_large', message: 'Request body exceeds the allowed size' } });
+    }
+    // Preserve Fastify's existing validation and unexpected-error semantics.
+    return reply.send(error);
+  });
 
   if (ownsDb) {
-    const bootstrap = await ensureSystemAdmin(db);
+    try {
+      const besideServer = new URL('./platform-skill-release.json', import.meta.url);
+      const artifact = existsSync(besideServer) ? besideServer : new URL('../dist/platform-skill-release.json', import.meta.url);
+      await ensurePlatformSkillRelease(db, JSON.parse(readFileSync(artifact, 'utf8')) as SkillPackage);
+    } catch (error) {
+      await closeDb(db);
+      throw error;
+    }
+    const bootstrap = await ensureSystemAdmin(db).catch(async error => { await closeDb(db); throw error; });
     if (bootstrap.initial_password) {
       // 初始密码是敏感凭据，不能进入结构化日志（会被采集聚合）。
       // 只输出到 stderr 一次，由部署者当场抄走；日志里仅保留账号与过期时间。
@@ -104,8 +135,12 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
     },
   });
 
+  await registerSecurityHeaders(app);
+  registerMetrics(app, db);
   registerAuthMiddleware(app, db);
   registerAuthRoutes(app, db);
+  registerAuditRoutes(app, db);
+  registerLoginSecurityRoutes(app, db);
   registerOwnershipRoutes(app, db);
   registerTestingRoutes(app, db);
   registerSkillRoutes(app, db);
@@ -113,6 +148,43 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   registerSystemSettingsRoutes(app, db);
   registerAdminGovernanceRoutes(app, db);
   registerIntakeRoutes(app, db);
+  // Owned test databases also run native HTTP suites. Never inherit paid engine settings there.
+  const codeAnalysisRuntime = createCodeAnalysisRuntime(ownsDb && !process.env.TSP_TEST_RUN_FILE
+    ? process.env : { TSP_CODE_ANALYSIS_ENABLED: '0' });
+  const codeAnalysisStatus = () => {
+    const { configured, model, message } = codeAnalysisRuntime.status();
+    return { configured, model, message };
+  };
+  registerCodeUnderstandingRoutes(app, db, { isConfigured: () => codeAnalysisStatus().configured, status: codeAnalysisStatus });
+  if (ownsDb && codeAnalysisStatus().configured) {
+    const worker = createCodeAnalysisWorker({ store: createHostedCodeAnalysisUseCases(db), runtime: codeAnalysisRuntime,
+      onError: code => app.log.warn({ code }, 'Hosted code analysis worker event') });
+    app.addHook('onReady', async () => { worker.start(); });
+    app.addHook('onClose', async () => { await worker.stop(); });
+  }
+
+  const systemAgentRuntime = createSystemAgentRuntime();
+  if (ownsDb) app.addHook('onReady', async () => { await systemAgentRuntime.cleanup(); });
+  let systemAgentGuidance: ReturnType<typeof loadSystemAgentGuidance> | null = null;
+  try { systemAgentGuidance = loadSystemAgentGuidance(); } catch { /* Explicitly unavailable until the packaged Skill is restored. */ }
+  const systemAgentStatus = () => {
+    const status = systemAgentRuntime.status();
+    return systemAgentGuidance ? status : { ...status, configured: false, message: '系统 Agent 的 Skill 包缺失或校验失败，请重新构建服务' };
+  };
+  app.get('/system-agent/status', async () => ({ ok: true, data: systemAgentStatus() }));
+  registerSystemAgentRoutes(app, db, { isConfigured: () => systemAgentStatus().configured });
+  // Inject-based tests borrow a DB and never start a paid inference/background worker.
+  if (ownsDb && systemAgentStatus().configured && systemAgentGuidance) {
+    const status = systemAgentRuntime.status();
+    const worker = createSystemAgentWorker({
+      store: createSystemAgentUseCases(db), runtime: systemAgentRuntime, guidance: systemAgentGuidance.guidance,
+      executionMetadata: { engine: status.engine, engine_version: status.version, model: status.model,
+        skill_version: systemAgentGuidance.version, skill_sha256: systemAgentGuidance.sha256 },
+      onError: code => app.log.warn({ code }, 'System Agent worker event'),
+    });
+    app.addHook('onReady', async () => { worker.start(); });
+    app.addHook('onClose', async () => { await worker.stop(); });
+  }
 
   // 统一错误状态码映射：业务拒绝（ok:false）不再一律 HTTP 200。
   // envelope 结构不变，仅按 error.code 提升状态码（docs/30 工程化缺漏 #2）。
@@ -127,6 +199,13 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
       }
     }
     return payload;
+  });
+
+  app.get('/ready', async (_request, reply) => {
+    try {
+      if (await databaseReady(db, bundledMigrationsFolder())) return { status: 'ready' };
+    } catch { /* Dependency failures are readiness failures, never credential-bearing responses. */ }
+    return reply.code(503).send({ status: 'not_ready' });
   });
 
   app.get('/health', async () => ({
@@ -146,6 +225,51 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   registerTaskRoutes(app, db);
   // 需求录入与当前 Revision/关联任务事实投影
   registerRequirementRoutes(app, db);
+  registerMemoryManagementRoutes(app, db, memoryEngines);
+  // Native materials are automatically catalogued even without capture or an
+  // engine configuration. Absence/pause/failures remain explicit status.
+  if (ownsDb) {
+    let maintenance: Promise<unknown> | undefined;
+    let indexTimer: ReturnType<typeof setInterval>;
+    app.addHook('onReady', async () => {
+      indexTimer = setInterval(() => {
+        if (!maintenance) maintenance = maintainProjectMaterialIndexes(db, memoryEngines)
+          .catch(() => app.log.warn('Project material index maintenance unavailable'))
+          .finally(() => { maintenance = undefined; });
+      }, 3000);
+      indexTimer.unref();
+    });
+    app.addHook('onClose', async () => { clearInterval(indexTimer); await maintenance; });
+  }
+  if (memoryEnabled) {
+    registerMemoryRoutes(app, db, memoryEngines);
+    registerPersonalMemoryRoutes(app, db);
+    if (ownsDb) {
+      let capture: Promise<unknown> | undefined;
+      let captureTimer: ReturnType<typeof setInterval>;
+      app.addHook('onReady', async () => {
+        captureTimer = setInterval(() => {
+          if (!capture) capture = processNextMemoryCapture(db).catch(() => app.log.warn('Memory capture worker unavailable'))
+            .finally(() => { capture = undefined; });
+        }, 500);
+        captureTimer.unref();
+      });
+      app.addHook('onClose', async () => { clearInterval(captureTimer); await capture; });
+    }
+    if (memoryEngines && ownsDb) {
+      let running: Promise<unknown> | undefined;
+      let timer: ReturnType<typeof setInterval>;
+      app.addHook('onReady', async () => {
+        timer = setInterval(() => {
+          if (!running) running = projectNextMemory(db, memoryEngines)
+            .catch(() => app.log.warn('Memory projection worker unavailable'))
+            .finally(() => { running = undefined; });
+        }, 1000);
+        timer.unref();
+      });
+      app.addHook('onClose', async () => { clearInterval(timer); await running; });
+    }
+  }
   registerRequirementBaselineRoutes(app, db);
   // 多份模块化需求文档与不可变 Revision 历史
   registerRequirementDocumentRoutes(app, db);
@@ -156,6 +280,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   registerArchitectureDocumentRoutes(app, db);
   // 项目交接文档库：多级文件夹、多份文档及不可变 Revision
   registerProjectDocumentRoutes(app, db);
+  registerDocumentQualityRoutes(app, db);
   // Defect 闭环（docs/19）
   registerDefectRoutes(app, db);
   // 用户账号（docs/23）

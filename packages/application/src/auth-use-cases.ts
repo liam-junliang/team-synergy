@@ -1,10 +1,11 @@
+import { auditLoginFailure, auditLoginState, auditLoginUnlock, recordLoginSecurityEvent, type LoginSecurityContext } from './login-security.js';
 import { and, eq, ne, isNull } from 'drizzle-orm';
 import type { Db } from '@team-synergy/persistence';
 import { schema } from '@team-synergy/persistence';
 import { DomainError, assertAuditedChange, toAuditEvent } from '@team-synergy/domain';
 import { createPublicCode, findDeviceByCode, findUserByCode } from './public-code.js';
 import { hashToken, normalizeAccount } from './user-use-cases.js';
-import { hashPassword, verifyPassword } from './password-auth.js';
+import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from './password-auth.js';
 import { fail, insertAudit, now, type TaskResult } from './task-service.js';
 import { createDeviceLogin, parseDeviceIdentity, resolveSessionToken, revokeStableDevice } from './auth-device.js';
 export { MAX_DEVICES_PER_USER } from './auth-device.js';
@@ -15,6 +16,12 @@ export interface ResolveTokenResult { principal_code: string; password_change_re
 export interface RevokeDeviceResult { device_code: string; principal_code: string }
 
 export function createAuthUseCases(db: Db) {
+  const positiveSetting = (name: string, fallback: number) => {
+    const value = Number(process.env[name]);
+    return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+  };
+  const failureLimit = positiveSetting('TSP_AUTH_FAILURE_LIMIT', 5);
+  const lockSeconds = positiveSetting('TSP_AUTH_LOCK_SECONDS', 900);
   async function bindDevice(bindToken: string, deviceName: string, principalCode?: string, identityInput?: unknown): Promise<TaskResult<BindDeviceResult>> {
     try {
       if (!bindToken) throw new DomainError('auth_bind_token_invalid', '绑定 token 无效');
@@ -34,23 +41,49 @@ export function createAuthUseCases(db: Db) {
     } catch (error) { return fail(error); }
   }
 
-  async function loginWithPassword(account: string, password: string, deviceName: string, identityInput?: unknown): Promise<TaskResult<BindDeviceResult>> {
+  async function loginWithPassword(account: string, password: string, deviceName: string, identityInput?: unknown, context: LoginSecurityContext = {}): Promise<TaskResult<BindDeviceResult>> {
     try {
       const normalizedAccount = normalizeAccount(account);
-      if (!normalizedAccount || !password || password.length > 128) throw new DomainError('auth_credentials_invalid', '账号或密码错误');
+      if (!normalizedAccount || !password || password.length > 128) {
+        await recordLoginSecurityEvent(db, { account: normalizedAccount, context, kind: 'login_failed', reason: 'invalid_credentials' });
+        throw new DomainError('auth_credentials_invalid', '账号或密码错误');
+      }
       const identity = parseDeviceIdentity(identityInput);
       const [candidate] = await db.select().from(schema.users).where(eq(schema.users.account, normalizedAccount)).limit(1);
-      if (!candidate?.password_hash || candidate.status !== 'active' || !(await verifyPassword(password, candidate.password_hash))) throw new DomainError('auth_credentials_invalid', '账号或密码错误');
-      const data = await db.transaction(async tx => {
+      const matches = await verifyPassword(password, candidate?.password_hash ?? DUMMY_PASSWORD_HASH);
+      if (!candidate) {
+        await recordLoginSecurityEvent(db, { account: normalizedAccount, context, kind: 'login_failed', reason: 'invalid_credentials' });
+        throw new DomainError('auth_credentials_invalid', '账号或密码错误');
+      }
+      return await db.transaction(async tx => {
         const [user] = await tx.select().from(schema.users).where(eq(schema.users.id, candidate.id)).for('update').limit(1);
         if (!user || user.password_hash !== candidate.password_hash) throw new DomainError('auth_credentials_invalid', '账号或密码错误');
+        if (user.login_locked_until && user.login_locked_until.getTime() > Date.now()) {
+          await auditLoginFailure(tx, user, 'locked', user.login_failure_count, true, context);
+          return fail<BindDeviceResult>(new DomainError('slow_down', '请求过多，请稍后重试', { retry_after: Math.ceil((user.login_locked_until.getTime() - Date.now()) / 1000) }));
+        }
+        const expiredLock = user.login_locked_until !== null;
+        if (expiredLock) {
+          await auditLoginUnlock(tx, user, 'expired', context);
+          await tx.update(schema.users).set({ login_failure_count: 0, login_locked_until: null }).where(eq(schema.users.id, user.id));
+        }
+        if (!matches || user.status !== 'active' || !user.password_hash) {
+          const failures = (user.login_locked_until ? 0 : user.login_failure_count) + 1;
+          const lockedUntil = failures >= failureLimit ? new Date(Date.now() + lockSeconds * 1000) : null;
+          await tx.update(schema.users).set({ login_failure_count: failures, login_locked_until: lockedUntil }).where(eq(schema.users.id, user.id));
+          await auditLoginFailure(tx, user, 'invalid_credentials', failures, lockedUntil !== null, context);
+          if (lockedUntil) await auditLoginState(tx, user, 'locked', 'failure_limit', context);
+          // Return the refusal so the transaction commits the failure and its audit.
+          return fail<BindDeviceResult>(new DomainError('auth_credentials_invalid', '账号或密码错误'));
+        }
         if (user.must_change_password) {
           const expiry = user.password_expires_at ? Date.parse(user.password_expires_at) : NaN;
-          if (!Number.isFinite(expiry) || expiry <= Date.now()) throw new DomainError('auth_initial_password_expired', '初始密码已过期');
+          if (!Number.isFinite(expiry) || expiry <= Date.now()) return fail<BindDeviceResult>(new DomainError('auth_initial_password_expired', '初始密码已过期'));
         }
-        return createDeviceLogin(tx, user, deviceName, identity);
+        const data = await createDeviceLogin(tx, user, deviceName, identity);
+        await tx.update(schema.users).set({ login_failure_count: 0, login_locked_until: null }).where(eq(schema.users.id, user.id));
+        return { ok: true as const, data };
       });
-      return { ok: true, data };
     } catch (error) { return fail(error); }
   }
 
@@ -61,6 +94,7 @@ export function createAuthUseCases(db: Db) {
       const user = await findUserByCode(db, principalCode);
       if (!user || user.status !== 'active') throw new DomainError('auth_user_disabled', '用户不存在或已禁用');
       if (!options.currentPassword) throw new DomainError('auth_current_password_required', '修改密码必须提供当前密码');
+      if (options.currentPassword.length > 128) throw new DomainError('auth_credentials_invalid', '当前密码错误');
       if (!user.password_hash || !(await verifyPassword(options.currentPassword, user.password_hash))) throw new DomainError('auth_credentials_invalid', '当前密码错误');
       const passwordHash = await hashPassword(newPassword);
       const data = await db.transaction(async tx => {
@@ -68,7 +102,8 @@ export function createAuthUseCases(db: Db) {
         if (!fresh || fresh.password_hash !== user.password_hash) throw new DomainError('auth_credentials_invalid', '当前密码错误');
         const current = options.currentDeviceToken ? await resolveSessionToken(tx, options.currentDeviceToken) : undefined;
         if (options.currentDeviceToken && (!current || current.user.id !== user.id)) throw new DomainError('auth_token_invalid', '认证失败');
-        await tx.update(schema.users).set({ password_hash: passwordHash, must_change_password: false, password_expires_at: null }).where(eq(schema.users.id, user.id));
+        await auditLoginUnlock(tx, fresh, 'password_changed');
+        await tx.update(schema.users).set({ password_hash: passwordHash, must_change_password: false, password_expires_at: null, login_failure_count: 0, login_locked_until: null }).where(eq(schema.users.id, user.id));
         const otherDevices = await tx.select().from(schema.devices).where(and(eq(schema.devices.principal_id, user.id), isNull(schema.devices.revoked_at), current ? ne(schema.devices.id, current.device.id) : undefined));
         for (const device of otherDevices) await revokeStableDevice(tx, device.id);
         // Keep only the session that proved the current password, even on the same installation.

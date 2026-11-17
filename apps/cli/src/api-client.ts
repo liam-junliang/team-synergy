@@ -9,12 +9,15 @@ import { authDirectory, matchesLocalDeviceFingerprint, readAuthConfig } from './
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
+export interface AuditExportPage { items: Array<Record<string, unknown>>; snapshot: string; next_cursor: string | null }
+
 export interface ApiClientOptions {
   baseUrl?: string;
   principalCode?: string;
   deviceToken?: string;
   skipAuth?: boolean;
   requestTimeoutMs?: number;
+  redirect?: 'error';
 }
 
 export interface ApiError {
@@ -54,6 +57,7 @@ export function createApiClient(opts: ApiClientOptions) {
       res = await fetch(`${baseUrl}${path}`, {
         method,
         headers,
+        redirect: opts.redirect,
         body: body === undefined ? undefined : JSON.stringify(body),
         ...(opts.requestTimeoutMs ? { signal: AbortSignal.timeout(opts.requestTimeoutMs) } : {}),
       });
@@ -83,6 +87,23 @@ export function createApiClient(opts: ApiClientOptions) {
         details: parsed,
       },
     };
+  }
+
+  async function downloadAttachment(route: string): Promise<ApiResult<Uint8Array>> {
+    const headers: Record<string, string> = {};
+    if (deviceToken) headers.authorization = `Bearer ${deviceToken}`;
+    else if (opts.principalCode) headers['x-principal-code'] = opts.principalCode;
+    try {
+      const response = await fetch(`${baseUrl}${route}`, { headers, redirect: 'error' });
+      if (!response.ok || response.headers.get('content-type')?.includes('application/json') && !response.headers.has('content-disposition')) {
+        const error: unknown = await response.json().catch(() => null);
+        if (isApiEnvelope<Uint8Array>(error) && !error.ok) return error;
+        return { ok: false, error: { code: 'api_http_error', message: `附件下载失败（HTTP ${response.status}）` } };
+      }
+      return { ok: true, data: new Uint8Array(await response.arrayBuffer()) };
+    } catch (error) {
+      return { ok: false, error: { code: 'api_unreachable', message: `无法下载附件（${error instanceof Error ? error.message : String(error)}）` } };
+    }
   }
 
   async function executionRequest<T>(route: string, body: Record<string, unknown>): Promise<ApiResult<T>> {
@@ -162,6 +183,9 @@ export function createApiClient(opts: ApiClientOptions) {
     },
     async getProjectHome(projectCode: string): Promise<ApiResult<Record<string, unknown>>> {
       return request('GET', `/projects/${encodeURIComponent(projectCode)}/home`);
+    },
+    async updateProjectHome(projectCode: string, body: Record<string, unknown>): Promise<ApiResult<Record<string, unknown>>> {
+      return request('PUT', `/projects/${encodeURIComponent(projectCode)}/home`, body);
     },
     async listHandoffLibrary(projectCode: string, query = ''): Promise<ApiResult<Record<string, unknown>>> {
       const suffix = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : '';
@@ -266,20 +290,10 @@ export function createApiClient(opts: ApiClientOptions) {
       return request('GET', `/design-prototypes/${encodeURIComponent(prototypeCode)}`);
     },
     async downloadDesignPrototypeFile(prototypeCode: string, revision: number): Promise<ApiResult<Uint8Array>> {
-      try {
-        const headers: Record<string, string> = {};
-        if (deviceToken) headers.authorization = `Bearer ${deviceToken}`;
-        else if (opts.principalCode) headers['x-principal-code'] = opts.principalCode;
-        const response = await fetch(`${baseUrl}/design-prototypes/${encodeURIComponent(prototypeCode)}/file?revision=${revision}`, { headers, redirect: 'error' });
-        if (!response.ok) {
-          const error: unknown = await response.json().catch(() => null);
-          if (isApiEnvelope<Uint8Array>(error) && !error.ok) return error;
-          return { ok: false, error: { code: 'api_http_error', message: `附件下载失败（HTTP ${response.status}）` } };
-        }
-        return { ok: true, data: new Uint8Array(await response.arrayBuffer()) };
-      } catch (error) {
-        return { ok: false, error: { code: 'api_unreachable', message: `无法下载原型附件（${error instanceof Error ? error.message : String(error)}）` } };
-      }
+      return downloadAttachment(`/design-prototypes/${encodeURIComponent(prototypeCode)}/file?revision=${revision}`);
+    },
+    async downloadDefectEvidence(code: string, index: number): Promise<ApiResult<Uint8Array>> {
+      return downloadAttachment(`/defects/${encodeURIComponent(code)}/evidence/${index}/file`);
     },
     async createDesignPrototype(projectCode: string, body: Record<string, unknown>): Promise<ApiResult<Record<string, unknown>>> {
       return request('POST', `/projects/${encodeURIComponent(projectCode)}/design-prototypes`, body);
@@ -288,7 +302,20 @@ export function createApiClient(opts: ApiClientOptions) {
       return request('PATCH', `/design-prototypes/${encodeURIComponent(prototypeCode)}`, body);
     },
     async listTasks(query = ''): Promise<ApiResult<Array<Record<string, unknown>>>> {
-      return request('GET', `/tasks${query}`);
+      const params = new URLSearchParams(query.replace(/^\?/, ''));
+      const tasks: Array<Record<string, unknown>> = [];
+      let offset = Number(params.get('offset') ?? 0);
+      const limit = params.get('limit') ?? '500';
+      for (;;) {
+        params.set('limit', limit);
+        params.set('offset', String(offset));
+        const result = await request<Array<Record<string, unknown>>>('GET', `/tasks?${params}`) as ApiResult<Array<Record<string, unknown>>> & { has_more?: boolean };
+        if (!result.ok) return result;
+        tasks.push(...result.data);
+        if (!result.has_more) return { ok: true, data: tasks };
+        if (!result.data.length) return { ok: false, error: { code: 'api_bad_response', message: '任务分页未前进，请重试' } };
+        offset += result.data.length;
+      }
     },
     async taskHistory(taskCode: string): Promise<ApiResult<Array<Record<string, unknown>>>> {
       return request('GET', `/tasks/${encodeURIComponent(taskCode)}/history`);
@@ -405,11 +432,23 @@ export function createApiClient(opts: ApiClientOptions) {
     async listTeams(): Promise<ApiResult<Array<Record<string, unknown>>>> {
       return request('GET', '/teams');
     },
+    async exportAudit(query: URLSearchParams): Promise<ApiResult<AuditExportPage>> {
+      return request('GET', `/audit/export?${query}`);
+    },
     async addTeamMember(teamCode: string, body: { user_code: string; role: string }): Promise<ApiResult<Record<string, unknown>>> {
       return request('POST', `/teams/${encodeURIComponent(teamCode)}/members`, body);
     },
     async createRequirement(body: Record<string, unknown>): Promise<ApiResult<Record<string, unknown>>> {
       return request('POST', '/requirements', body);
+    },
+    async transitionRequirement(code: string, to: string): Promise<ApiResult<Record<string, unknown>>> {
+      return request('POST', `/requirements/${encodeURIComponent(code)}/transition`, { to });
+    },
+    async createRequirementBaseline(project: string, body: Record<string, unknown>): Promise<ApiResult<Record<string, unknown>>> {
+      return request('POST', `/projects/${encodeURIComponent(project)}/requirement-baselines`, body);
+    },
+    async listRequirementBaselines(project: string): Promise<ApiResult<Array<Record<string, unknown>>>> {
+      return request('GET', `/projects/${encodeURIComponent(project)}/requirement-baselines`);
     },
     async listRequirements(projectCode?: string, query = ''): Promise<ApiResult<Array<Record<string, unknown>>>> {
       const params = new URLSearchParams();

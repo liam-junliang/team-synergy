@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
-import { and, desc, eq, isNull } from 'drizzle-orm';
-import { createPublicCode, fail, findUserByCode, codeCondition, insertAudit, now, revokeStableDevice } from '@team-synergy/application';
+import { desc, eq } from 'drizzle-orm';
+import { createPublicCode, fail, listPrincipalDevices, codeCondition, insertAudit, now, revokeStableDevice } from '@team-synergy/application';
 import { DomainError, assertAuditedChange, toAuditEvent } from '@team-synergy/domain';
 import { schema, type Db } from '@team-synergy/persistence';
-import { unauthorized } from '../auth.js';
+import { hasAuthenticatedSession, unauthorized } from '../auth.js';
 
 /** Installation management and individual session revocation share the same ownership boundary. */
 export function registerDeviceRoutes(app: FastifyInstance, db: Db): void {
@@ -21,22 +21,13 @@ export function registerDeviceRoutes(app: FastifyInstance, db: Db): void {
     await insertAudit(tx, toAuditEvent(audit, createPublicCode(), now()));
   }
   app.get<{ Querystring: { user_code?: string } }>('/devices', async (request, reply) => {
-    if (request.authKind !== 'bearer' || !request.principal) return unauthorized(reply);
+    if (!hasAuthenticatedSession(request) || !request.principal) return unauthorized(reply);
     try {
-      const actor = await findUserByCode(db, request.principal);
-      const target = await findUserByCode(db, request.query.user_code ?? request.principal);
-      if (!actor || actor.status !== 'active' || !actor.is_system_admin && actor.id !== target?.id) throw new DomainError('device_forbidden', '只能查看自己的客户端');
-      if (!target) return { ok: true as const, data: [] };
-      const devices = await db.select().from(schema.devices).where(eq(schema.devices.principal_id, target.id)).orderBy(desc(schema.devices.last_login_at), desc(schema.devices.created_at));
-      const data = await Promise.all(devices.map(async device => {
-        const sessions = await db.select().from(schema.deviceSessions).where(and(eq(schema.deviceSessions.device_id, device.id), isNull(schema.deviceSessions.revoked_at)));
-        return { device_code: device.code, device_name: device.device_name, created_at: device.created_at, last_login_at: device.last_login_at ?? device.created_at, client_type: device.client_type, platform: device.platform, current: device.code === request.authDeviceCode, status: device.revoked_at ? 'revoked' : 'active', session_count: device.revoked_at ? 0 : sessions.filter(s => !s.expires_at || Date.parse(s.expires_at) > Date.now()).length };
-      }));
-      return { ok: true as const, data };
+      return { ok: true as const, data: await listPrincipalDevices(db, request.principal, request.query.user_code, request.authDeviceCode ?? undefined) };
     } catch (error) { return fail(error); }
   });
   app.get<{ Params: { device_code: string } }>('/devices/:device_code/sessions', async (request, reply) => {
-    if (request.authKind !== 'bearer' || !request.principal) return unauthorized(reply);
+    if (!hasAuthenticatedSession(request) || !request.principal) return unauthorized(reply);
     try {
       const { device } = await ownDevice(request.principal, request.params.device_code);
       const sessions = await db.select().from(schema.deviceSessions).where(eq(schema.deviceSessions.device_id, device.id)).orderBy(desc(schema.deviceSessions.created_at));
@@ -44,7 +35,7 @@ export function registerDeviceRoutes(app: FastifyInstance, db: Db): void {
     } catch (error) { return fail(error); }
   });
   app.post<{ Params: { session_code: string } }>('/sessions/:session_code/revoke', async (request, reply) => {
-    if (request.authKind !== 'bearer' || !request.principal) return unauthorized(reply);
+    if (!hasAuthenticatedSession(request) || !request.principal) return unauthorized(reply);
     const principal = request.principal;
     try {
       const data = await db.transaction(async tx => {
@@ -60,7 +51,7 @@ export function registerDeviceRoutes(app: FastifyInstance, db: Db): void {
     } catch (error) { return fail(error); }
   });
   app.patch<{ Params: { device_code: string }; Body: { device_name?: string } }>('/devices/:device_code', async (request, reply) => {
-    if (request.authKind !== 'bearer' || !request.principal) return unauthorized(reply);
+    if (!hasAuthenticatedSession(request) || !request.principal) return unauthorized(reply);
     const principal = request.principal;
     try {
       const name = request.body?.device_name;
@@ -75,7 +66,7 @@ export function registerDeviceRoutes(app: FastifyInstance, db: Db): void {
     } catch (error) { return fail(error); }
   });
   app.post<{ Params: { device_code: string } }>('/devices/:device_code/revoke', async (request, reply) => {
-    if (request.authKind !== 'bearer' || !request.principal) return unauthorized(reply);
+    if (!hasAuthenticatedSession(request) || !request.principal) return unauthorized(reply);
     const principal = request.principal;
     try {
       const data = await db.transaction(async tx => {

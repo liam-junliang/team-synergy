@@ -1,0 +1,2259 @@
+{
+  "schema_version": "intake-pilot/0.1",
+  "purpose": "read_only_evaluation",
+  "generated_at": "2026-10-18T09:59:38.538Z",
+  "project": {
+    "code": "TBP8SXKNJ092Y9086176",
+    "name": "TS Platform",
+    "repository_binding": "not_resolved_in_this_local_pilot"
+  },
+  "generated_by": {
+    "kind": "agent_assisted_manual_pilot",
+    "skill_version": null,
+    "review": "pending",
+    "server_import_supported": false
+  },
+  "source": {
+    "head": "88cd8bc57d13363cfdefdb47227ee783f1156908",
+    "branch": "main",
+    "dirty": true,
+    "scope": "账号认证、团队/项目权限、所有权与账号生命周期、系统管理及 CLI 接入地址/发布可用性",
+    "scan_mode": "selected_files",
+    "complete_repository_scan": false,
+    "captured_after_tests": true,
+    "source_alignment": "Evidence hashes captured after test execution; this task made no business source edits. No pre-run whole-worktree attestation.",
+    "manifest_algorithm": "sha256(sorted(relative_path + NUL + file_sha256 + LF))",
+    "manifest_sha256": "93099d3a76f5631a0dae3381a50f6e85a36262409a65dbf2a306023dc9b7d87d",
+    "files": [
+      {
+        "path": "README.md",
+        "sha256": "9ffe4e1e3da6eaef83480a5f8161af5ceb06cfc214d81b058d166c40dd841ada",
+        "git_status": "M README.md"
+      },
+      {
+        "path": "apps/core-api/src/auth.ts",
+        "sha256": "e32a3e2008758b4d1682ebce789310d8b4177fdc7f96cf0c4a07f9e683821057",
+        "git_status": "M apps/core-api/src/auth.ts"
+      },
+      {
+        "path": "apps/core-api/src/routes/cli-distribution.ts",
+        "sha256": "e8a9d74bc22ebea71a0cc6bad58b0a1a6983c0c5956b05c06627f215a0638475",
+        "git_status": "?? apps/core-api/src/routes/cli-distribution.ts"
+      },
+      {
+        "path": "apps/core-api/tests/admin-governance.test.mjs",
+        "sha256": "517014597f8758aacfeb5e3c38641722560b6332d516a9423b7cee80314e0939",
+        "git_status": "?? apps/core-api/tests/admin-governance.test.mjs"
+      },
+      {
+        "path": "apps/core-api/tests/auth.test.mjs",
+        "sha256": "429dce85f3daa610196791991625e7e2c5be72cfe0fb54086881bd3802644364",
+        "git_status": "M apps/core-api/tests/auth.test.mjs"
+      },
+      {
+        "path": "apps/core-api/tests/cli-distribution.test.mjs",
+        "sha256": "9ae302c3dbe97ee1060da45ce058bea83ec6bfba60e68221aeb6df9b31a3596a",
+        "git_status": "?? apps/core-api/tests/cli-distribution.test.mjs"
+      },
+      {
+        "path": "apps/core-api/tests/device-sessions.test.mjs",
+        "sha256": "6c21882147596bf3c4034387029514ed6b0fdc4a0dadfd8ca97216a3d5602c55",
+        "git_status": "?? apps/core-api/tests/device-sessions.test.mjs"
+      },
+      {
+        "path": "apps/core-api/tests/permissions.test.mjs",
+        "sha256": "085868b72943d013149f47cbcb163dc3c9a6ba502235e8d0ddb519141b7acfa9",
+        "git_status": "?? apps/core-api/tests/permissions.test.mjs"
+      },
+      {
+        "path": "apps/core-api/tests/system-settings.test.mjs",
+        "sha256": "71b86ee9f71d1dffa8f312d91e2d91871db0a32f380bd26acbc0f5596af6a4de",
+        "git_status": "?? apps/core-api/tests/system-settings.test.mjs"
+      },
+      {
+        "path": "apps/core-api/tests/test-db.mjs",
+        "sha256": "4cf5b5de83066eb44a0ae5dd315db2c13f166e190dca141c0340adac45c4e21e",
+        "git_status": "clean"
+      },
+      {
+        "path": "apps/web/src/AdminWorkspace.tsx",
+        "sha256": "3b8d8ef11ebce4e971781f8012008a3a65310310e788f1113c85e669fbfab7a6",
+        "git_status": "?? apps/web/src/AdminWorkspace.tsx"
+      },
+      {
+        "path": "apps/web/src/SystemSettings.tsx",
+        "sha256": "0242e400f81e9ff8e32845508ea6e1e42d268b2c4abad512fbc1595dcad6d2d6",
+        "git_status": "?? apps/web/src/SystemSettings.tsx"
+      },
+      {
+        "path": "apps/web/src/platformClientConfig.ts",
+        "sha256": "7674710239772da2f5f08fbb33067694933074fce44508e33a4f24db7ef573ad",
+        "git_status": "?? apps/web/src/platformClientConfig.ts"
+      },
+      {
+        "path": "apps/web/src/workspaceRouting.ts",
+        "sha256": "337eafe3ca1d105553213653a6a6d2ad3ffc9b2ce8499980cd00c8e79195de18",
+        "git_status": "M apps/web/src/workspaceRouting.ts"
+      },
+      {
+        "path": "apps/web/tests/admin-workspace.test.mjs",
+        "sha256": "3c0f9ba3dc64c12aa9711aa9aea807e3c23b6bbb1c8315ecb154f79a49cac5ec",
+        "git_status": "?? apps/web/tests/admin-workspace.test.mjs"
+      },
+      {
+        "path": "apps/web/tests/platform-client-config.test.mjs",
+        "sha256": "ec4520f9f780f49f107e2dc725c4b2b5c29f8480c91fee86776c4b0615423724",
+        "git_status": "?? apps/web/tests/platform-client-config.test.mjs"
+      },
+      {
+        "path": "package.json",
+        "sha256": "af29f24d1c5921e5d47386f4e20acea6c1483e6d85e83a30e223062b33d9164b",
+        "git_status": "clean"
+      },
+      {
+        "path": "packages/application/src/admin-governance-use-cases.ts",
+        "sha256": "ef5f86465541b9946b24afb3a70fed25b2eb1d905f985c4a63fb0417b58ae869",
+        "git_status": "?? packages/application/src/admin-governance-use-cases.ts"
+      },
+      {
+        "path": "packages/application/src/auth-device.ts",
+        "sha256": "3188ed12f1924d270046096530d5ca7fe7e0b0ef6c93fb3ecf442f17242ec391",
+        "git_status": "?? packages/application/src/auth-device.ts"
+      },
+      {
+        "path": "packages/application/src/auth-use-cases.ts",
+        "sha256": "7f62f7b6f9c1654314ae07a73bb07c7afcc85c0fe3bc872557fe67ef93a439f8",
+        "git_status": "M packages/application/src/auth-use-cases.ts"
+      },
+      {
+        "path": "packages/application/src/device-authorization-use-cases.ts",
+        "sha256": "6fb6b6d587c3ca42146ef1369f9ff193edcc9f321330112c00c6ad188e8883c1",
+        "git_status": "?? packages/application/src/device-authorization-use-cases.ts"
+      },
+      {
+        "path": "packages/application/src/member-use-cases.ts",
+        "sha256": "033f3ad88b5de278587bd1f156f741b7e923585f9f71c90494a07222f1871fe8",
+        "git_status": "M packages/application/src/member-use-cases.ts"
+      },
+      {
+        "path": "packages/application/src/ownership-use-cases.ts",
+        "sha256": "6b9ca76b8921dcf52431a71a230d99f099cfae5d896f2b8201ca963229f87d8a",
+        "git_status": "?? packages/application/src/ownership-use-cases.ts"
+      },
+      {
+        "path": "packages/application/src/project-access.ts",
+        "sha256": "777a3e2469a349bf4dd7e375a0c2add92a7104132e33bc840991697af6a10920",
+        "git_status": "?? packages/application/src/project-access.ts"
+      },
+      {
+        "path": "packages/application/src/project-policy-use-cases.ts",
+        "sha256": "25a46fb0df6af07d4707244868fac970a85dcc13bf87a1b14d7e4a5934854c8f",
+        "git_status": "?? packages/application/src/project-policy-use-cases.ts"
+      },
+      {
+        "path": "packages/application/src/project-use-cases-project.ts",
+        "sha256": "ca2c3ed3c1dfb32331490a5a959b622a8d0607f8ab49a4a5de89e0b0a3deb3d5",
+        "git_status": "M packages/application/src/project-use-cases-project.ts"
+      },
+      {
+        "path": "packages/application/src/system-settings-use-cases.ts",
+        "sha256": "220be26f51c432ea96165e25ad3001ec108a3d2a3abc9cc0775a90fb2d4201c8",
+        "git_status": "?? packages/application/src/system-settings-use-cases.ts"
+      },
+      {
+        "path": "packages/application/src/team-use-cases.ts",
+        "sha256": "1d9e18e05eb64fe182ff629c9c7ccd5ffc75d78bf3338ea4e39996a8d07f3828",
+        "git_status": "M packages/application/src/team-use-cases.ts"
+      },
+      {
+        "path": "packages/application/src/user-use-cases.ts",
+        "sha256": "d239919c422f4834835f75216d9b8014d0bbcf1251b5a0769524c911813b95d5",
+        "git_status": "M packages/application/src/user-use-cases.ts"
+      },
+      {
+        "path": "packages/application/tests/auth-use-cases.test.mjs",
+        "sha256": "b0a541e605fba4ea2797910e07da38a911e94db89ba9572db511e7a64a737378",
+        "git_status": "M packages/application/tests/auth-use-cases.test.mjs"
+      },
+      {
+        "path": "packages/application/tests/device-sessions.test.mjs",
+        "sha256": "e7ff9e09b6178f250d45db185ec651e01395f039f4186438d09a2efb87fc3acd",
+        "git_status": "?? packages/application/tests/device-sessions.test.mjs"
+      },
+      {
+        "path": "packages/application/tests/permission-members.test.mjs",
+        "sha256": "c3f6c2063ffc247bf615b677b9e06f257c36e0cbf01633ffb3f0b4ac285f89aa",
+        "git_status": "?? packages/application/tests/permission-members.test.mjs"
+      },
+      {
+        "path": "packages/application/tests/permissions-ownership.test.mjs",
+        "sha256": "af75c6221fcd788cf2e4a6b2a88009b8d4f23b2e8219e5cb59737d2d31c40fcb",
+        "git_status": "?? packages/application/tests/permissions-ownership.test.mjs"
+      },
+      {
+        "path": "packages/application/tests/permissions-policy.test.mjs",
+        "sha256": "f0fbf8a5e6d38ce4f961c15c91cfcd0e628416c46fac243a66328e2e34c491d2",
+        "git_status": "?? packages/application/tests/permissions-policy.test.mjs"
+      },
+      {
+        "path": "packages/application/tests/test-db.mjs",
+        "sha256": "4830830cc8d700313b176f0f66b718af2cf2403720c92befa9f0bfd1ed352196",
+        "git_status": "clean"
+      }
+    ],
+    "excluded": [
+      "secrets and environment files",
+      "dependency/generated directories",
+      "unselected product domains",
+      "production database records"
+    ],
+    "unverified": [
+      "完整仓库覆盖率",
+      "实际生产部署版本",
+      "真实浏览器交互",
+      "所有平台安装器真实安装"
+    ]
+  },
+  "identity_policy": "Sample stable keys are fixed in this artifact, not generated from title. Production prepare must persist namespaces and reuse mappings across batches.",
+  "modules": [
+    {
+      "key": "module.identity",
+      "title": "账号认证与设备接入",
+      "grouping": "proposed",
+      "review": "pending"
+    },
+    {
+      "key": "module.access",
+      "title": "团队与项目授权",
+      "grouping": "proposed",
+      "review": "pending"
+    },
+    {
+      "key": "module.responsibility",
+      "title": "所有权与账号生命周期",
+      "grouping": "proposed",
+      "review": "pending"
+    },
+    {
+      "key": "module.admin",
+      "title": "平台系统管理",
+      "grouping": "proposed",
+      "review": "pending"
+    }
+  ],
+  "features": [
+    {
+      "key": "feature.password",
+      "module_key": "module.identity",
+      "title": "密码登录与改密",
+      "grouping": "proposed",
+      "review": "pending"
+    },
+    {
+      "key": "feature.device",
+      "module_key": "module.identity",
+      "title": "设备、会话与浏览器授权",
+      "grouping": "proposed",
+      "review": "pending"
+    },
+    {
+      "key": "feature.policy",
+      "module_key": "module.access",
+      "title": "项目访问策略与外部协作",
+      "grouping": "proposed",
+      "review": "pending"
+    },
+    {
+      "key": "feature.members",
+      "module_key": "module.access",
+      "title": "成员角色管理及工作交接保护",
+      "grouping": "proposed",
+      "review": "pending"
+    },
+    {
+      "key": "feature.ownership",
+      "module_key": "module.responsibility",
+      "title": "唯一负责人及接受式转移",
+      "grouping": "proposed",
+      "review": "pending"
+    },
+    {
+      "key": "feature.closure",
+      "module_key": "module.responsibility",
+      "title": "账号注销责任交接",
+      "grouping": "proposed",
+      "review": "pending"
+    },
+    {
+      "key": "feature.governance",
+      "module_key": "module.admin",
+      "title": "管理入口与团队项目治理",
+      "grouping": "proposed",
+      "review": "pending"
+    },
+    {
+      "key": "feature.user-admin",
+      "module_key": "module.admin",
+      "title": "系统用户状态管理",
+      "grouping": "proposed",
+      "review": "pending"
+    },
+    {
+      "key": "feature.cli-config",
+      "module_key": "module.admin",
+      "title": "CLI 地址配置与发布可用性",
+      "grouping": "proposed",
+      "review": "pending"
+    }
+  ],
+  "requirements": [
+    {
+      "source_key": "auth.password-lifecycle",
+      "kind": "requirement",
+      "title": "账号密码登录与强制改密",
+      "feature_key": "feature.password",
+      "module_key": "module.identity",
+      "observed_behavior": [
+        "账号密码登录拒绝无效密码或非 active 账号；初始密码必须未过期。",
+        "需要改密的会话只允许 whoami、改密和退出，其他路由返回 password_change_required。",
+        "改密必须验证当前密码，新密码长度为 8–128 字符。",
+        "携带当前会话改密时保留该会话，吊销其他设备及同设备的其他会话；未提供当前会话时吊销全部设备。"
+      ],
+      "evidence": [
+        {
+          "path": "packages/application/src/auth-use-cases.ts",
+          "symbol": "loginWithPassword",
+          "lines": [
+            37,
+            54
+          ]
+        },
+        {
+          "path": "packages/application/src/auth-use-cases.ts",
+          "symbol": "changePassword",
+          "lines": [
+            57,
+            80
+          ]
+        },
+        {
+          "path": "apps/core-api/src/auth.ts",
+          "symbol": "registerAuthMiddleware",
+          "lines": [
+            40,
+            59
+          ]
+        }
+      ],
+      "tests": [
+        {
+          "path": "packages/application/tests/auth-use-cases.test.mjs",
+          "line": 58,
+          "name": "initial password login requires a password change before normal use",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "initial password login requires a password change before normal use"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "packages/application/tests/auth-use-cases.test.mjs",
+          "line": 95,
+          "name": "proactive password change requires the current password and revokes other devices",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "proactive password change requires the current password and revokes other devices"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "apps/core-api/tests/auth.test.mjs",
+          "line": 162,
+          "name": "initial password login blocks non-auth routes until the user changes password",
+          "run_id": "run.http-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "initial password login blocks non-auth routes until the user changes password"
+          ],
+          "coverage": "related_scenarios_only"
+        }
+      ],
+      "assessment": {
+        "implementation": "observed_in_code",
+        "review": "pending",
+        "production": "not_verified",
+        "proposed_lifecycle": "draft"
+      },
+      "proposed_action": "review_only",
+      "limitations": [
+        "相关测试结果不代表所有分支及生产部署都已验证。"
+      ]
+    },
+    {
+      "source_key": "auth.stable-device-sessions",
+      "kind": "requirement",
+      "title": "稳定设备身份、独立会话与最后登录时间",
+      "feature_key": "feature.device",
+      "module_key": "module.identity",
+      "observed_behavior": [
+        "设备使用用户、client_type、installation_id 与安装密钥校验，不使用 MAC 地址。",
+        "同一安装再次登录复用设备及执行凭据，但创建新的会话；最后登录时间仅成功登录更新。",
+        "每个用户最多 10 个未吊销设备，新会话默认有效期 90 天。",
+        "退出只吊销当前会话；吊销设备会同时吊销其全部会话和运行租约。",
+        "重新登录不复活旧会话，旧设备凭据支持一次性迁移为会话。"
+      ],
+      "evidence": [
+        {
+          "path": "packages/application/src/auth-device.ts",
+          "symbol": "parseDeviceIdentity",
+          "lines": [
+            10,
+            24
+          ]
+        },
+        {
+          "path": "packages/application/src/auth-device.ts",
+          "symbol": "createDeviceLogin",
+          "lines": [
+            30,
+            58
+          ]
+        },
+        {
+          "path": "packages/application/src/auth-device.ts",
+          "symbol": "resolveSessionToken",
+          "lines": [
+            61,
+            80
+          ]
+        },
+        {
+          "path": "packages/application/src/auth-device.ts",
+          "symbol": "revokeStableDevice",
+          "lines": [
+            83,
+            87
+          ]
+        },
+        {
+          "path": "packages/application/src/auth-use-cases.ts",
+          "symbol": "logout",
+          "lines": [
+            104,
+            109
+          ]
+        }
+      ],
+      "tests": [
+        {
+          "path": "packages/application/tests/device-sessions.test.mjs",
+          "line": 18,
+          "name": "the same verified installation receives separate sessions, preserves identity and updates only successful login timestamps",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "the same verified installation receives separate sessions, preserves identity and updates only successful login timestamps"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "packages/application/tests/device-sessions.test.mjs",
+          "line": 38,
+          "name": "concurrent password logins cannot bypass the unique installation or ten-device ceiling",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "concurrent password logins cannot bypass the unique installation or ten-device ceiling"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "packages/application/tests/device-sessions.test.mjs",
+          "line": 89,
+          "name": "relogin on the same installation recovers an existing Run lease, different devices cannot, and device revocation invalidates it",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "relogin on the same installation recovers an existing Run lease, different devices cannot, and device revocation invalidates it"
+          ],
+          "coverage": "related_scenarios_only"
+        }
+      ],
+      "assessment": {
+        "implementation": "observed_in_code",
+        "review": "pending",
+        "production": "not_verified",
+        "proposed_lifecycle": "draft"
+      },
+      "proposed_action": "review_only",
+      "limitations": [
+        "相关测试结果不代表所有分支及生产部署都已验证。"
+      ]
+    },
+    {
+      "source_key": "auth.cli-browser-authorization",
+      "kind": "requirement",
+      "title": "CLI 浏览器授权与一次性兑换",
+      "feature_key": "feature.device",
+      "module_key": "module.identity",
+      "observed_behavior": [
+        "CLI 携带安装身份申请授权，获得用户授权码及轮询密钥；请求有效期 10 分钟。",
+        "用户须登录、完成初始改密并明确批准；拒绝、过期或已处理请求不能继续授权。",
+        "CLI 初始轮询间隔 5 秒，过快轮询返回 slow_down 并增加间隔。",
+        "批准后仅轮询密钥可兑换会话，兑换在事务中只成功一次；浏览器自身会话不交给 CLI。"
+      ],
+      "evidence": [
+        {
+          "path": "packages/application/src/device-authorization-use-cases.ts",
+          "symbol": "start",
+          "lines": [
+            10,
+            26
+          ]
+        },
+        {
+          "path": "packages/application/src/device-authorization-use-cases.ts",
+          "symbol": "approve",
+          "lines": [
+            36,
+            49
+          ]
+        },
+        {
+          "path": "packages/application/src/device-authorization-use-cases.ts",
+          "symbol": "token",
+          "lines": [
+            54,
+            72
+          ]
+        }
+      ],
+      "tests": [
+        {
+          "path": "packages/application/tests/device-sessions.test.mjs",
+          "line": 60,
+          "name": "device authorization needs explicit approval, throttles polling and consumes the secret atomically once",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "device authorization needs explicit approval, throttles polling and consumes the secret atomically once"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "packages/application/tests/device-sessions.test.mjs",
+          "line": 78,
+          "name": "denied, expired and forced-password-change authorization never creates a session",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "denied, expired and forced-password-change authorization never creates a session"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "apps/core-api/tests/device-sessions.test.mjs",
+          "line": 49,
+          "name": "browser authorizes a CLI without sharing its own token and only the polling secret exchanges once",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "browser authorizes a CLI without sharing its own token and only the polling secret exchanges once"
+          ],
+          "coverage": "related_scenarios_only"
+        }
+      ],
+      "assessment": {
+        "implementation": "observed_in_code",
+        "review": "pending",
+        "production": "not_verified",
+        "proposed_lifecycle": "draft"
+      },
+      "proposed_action": "review_only",
+      "limitations": [
+        "相关测试结果不代表所有分支及生产部署都已验证。"
+      ]
+    },
+    {
+      "source_key": "access.effective-project-role",
+      "kind": "requirement",
+      "title": "项目独立授权及团队默认访问",
+      "feature_key": "feature.policy",
+      "module_key": "module.access",
+      "observed_behavior": [
+        "有效项目权限依次取唯一负责人、项目显式授权、团队默认策略，否则无权限。",
+        "private 不提供团队继承权限；team_read 继承 Viewer；team_write 继承 Member。",
+        "项目显式 Viewer 覆盖 team_write，团队管理员身份本身不提供私有项目访问。",
+        "非团队成员可通过项目显式授权参与，并标记 isExternal。",
+        "Viewer 可读不可写；Owner/Admin 可管理；仅 Owner 可管理管理员、访问策略、转移和归档。",
+        "非 active 或已注销账号无项目权限；归档项目保留读取，常规写入和管理被拒绝。"
+      ],
+      "evidence": [
+        {
+          "path": "packages/application/src/project-access.ts",
+          "symbol": "projectCapabilities",
+          "lines": [
+            9,
+            14
+          ]
+        },
+        {
+          "path": "packages/application/src/project-access.ts",
+          "symbol": "resolveProjectAccess",
+          "lines": [
+            28,
+            42
+          ]
+        },
+        {
+          "path": "packages/application/src/project-access.ts",
+          "symbol": "assertProjectAccess",
+          "lines": [
+            52,
+            60
+          ]
+        }
+      ],
+      "tests": [
+        {
+          "path": "packages/application/tests/permissions-policy.test.mjs",
+          "line": 24,
+          "name": "${policy}: effective access follows owner, explicit grant, team default, then no access",
+          "parameters": [
+            "private",
+            "team_read",
+            "team_write"
+          ],
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "private: effective access follows owner, explicit grant, team default, then no access",
+            "team_read: effective access follows owner, explicit grant, team default, then no access",
+            "team_write: effective access follows owner, explicit grant, team default, then no access"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "packages/application/tests/permissions-policy.test.mjs",
+          "line": 196,
+          "name": "archived projects retain read access but reject policy, member, and content changes",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "archived projects retain read access but reject policy, member, and content changes"
+          ],
+          "coverage": "related_scenarios_only"
+        }
+      ],
+      "assessment": {
+        "implementation": "observed_in_code",
+        "review": "pending",
+        "production": "not_verified",
+        "proposed_lifecycle": "draft"
+      },
+      "proposed_action": "review_only",
+      "limitations": [
+        "相关测试结果不代表所有分支及生产部署都已验证。"
+      ]
+    },
+    {
+      "source_key": "members.management-boundaries",
+      "kind": "requirement",
+      "title": "团队与项目成员角色管理边界",
+      "feature_key": "feature.members",
+      "module_key": "module.access",
+      "observed_behavior": [
+        "团队可授予 Admin/Member，项目可授予 Admin/Member/Viewer；不能直接授予 Owner。",
+        "Owner 可任免管理员；Admin 可管理普通成员，但不能修改管理员同级、自己或 Owner。",
+        "项目 Owner 只能通过所有权转移变更，不能直接移除或降级。",
+        "撤销项目显式授权后重新计算团队继承权限；团队成员可能恢复默认访问，外部成员失去访问。",
+        "归档项目不允许成员权限变更，成功变更记录角色前后值及访问来源审计。"
+      ],
+      "evidence": [
+        {
+          "path": "packages/application/src/team-use-cases.ts",
+          "symbol": "assertCanManage",
+          "lines": [
+            18,
+            22
+          ]
+        },
+        {
+          "path": "packages/application/src/member-use-cases.ts",
+          "symbol": "assertAssignableRole/assertCanManage",
+          "lines": [
+            13,
+            25
+          ]
+        },
+        {
+          "path": "packages/application/src/member-use-cases.ts",
+          "symbol": "mutate",
+          "lines": [
+            62,
+            95
+          ]
+        }
+      ],
+      "tests": [
+        {
+          "path": "packages/application/tests/permission-members.test.mjs",
+          "line": 49,
+          "name": "team and project admins manage ordinary members but cannot change peers, owners, or themselves",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "team and project admins manage ordinary members but cannot change peers, owners, or themselves"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "packages/application/tests/permission-members.test.mjs",
+          "line": 85,
+          "name": "removing an explicit role reports restored team access; external access is fully revoked",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "removing an explicit role reports restored team access; external access is fully revoked"
+          ],
+          "coverage": "related_scenarios_only"
+        }
+      ],
+      "assessment": {
+        "implementation": "observed_in_code",
+        "review": "pending",
+        "production": "not_verified",
+        "proposed_lifecycle": "draft"
+      },
+      "proposed_action": "review_only",
+      "limitations": [
+        "相关测试结果不代表所有分支及生产部署都已验证。"
+      ]
+    },
+    {
+      "source_key": "members.permission-change-handoff",
+      "kind": "requirement",
+      "title": "权限收回前保护未完成任务和运行",
+      "feature_key": "feature.members",
+      "module_key": "module.access",
+      "observed_behavior": [
+        "成员失去写权限或被移除前，检查其未结束任务及 active/preparing/suspended Run。",
+        "存在未完成工作时拒绝变更，返回任务和 Run 编码，权限及审计不发生部分写入。",
+        "只有项目 Owner 可预览及修改团队访问策略；预览返回新增读取/写入、失去访问/写入及显式例外数量。",
+        "team_write 降为 team_read/private 时，只检查真正失去写权限的继承成员；Owner 与显式写授权不被默认策略覆盖。"
+      ],
+      "evidence": [
+        {
+          "path": "packages/application/src/member-use-cases.ts",
+          "symbol": "assertWorkHandedOff",
+          "lines": [
+            27,
+            38
+          ]
+        },
+        {
+          "path": "packages/application/src/member-use-cases.ts",
+          "symbol": "mutate",
+          "lines": [
+            71,
+            78
+          ]
+        },
+        {
+          "path": "packages/application/src/project-policy-use-cases.ts",
+          "symbol": "context/previewPolicy",
+          "lines": [
+            11,
+            39
+          ]
+        },
+        {
+          "path": "packages/application/src/project-policy-use-cases.ts",
+          "symbol": "updatePolicy",
+          "lines": [
+            44,
+            70
+          ]
+        }
+      ],
+      "tests": [
+        {
+          "path": "packages/application/tests/permission-members.test.mjs",
+          "line": 131,
+          "name": "open work blocks readonly downgrades and removals atomically",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "open work blocks readonly downgrades and removals atomically"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "packages/application/tests/permissions-policy.test.mjs",
+          "line": 129,
+          "name": "team_write to ${nextPolicy} requires inherited writers to hand off unfinished tasks",
+          "parameters": [
+            "team_read",
+            "private"
+          ],
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "team_write to team_read requires inherited writers to hand off unfinished tasks",
+            "team_write to private requires inherited writers to hand off unfinished tasks"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "packages/application/tests/permissions-policy.test.mjs",
+          "line": 175,
+          "name": "team_write to ${nextPolicy} preserves owner and explicit writers without requiring unrelated handoffs",
+          "parameters": [
+            "team_read",
+            "private"
+          ],
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "team_write to team_read preserves owner and explicit writers without requiring unrelated handoffs",
+            "team_write to private preserves owner and explicit writers without requiring unrelated handoffs"
+          ],
+          "coverage": "related_scenarios_only"
+        }
+      ],
+      "assessment": {
+        "implementation": "observed_in_code",
+        "review": "pending",
+        "production": "not_verified",
+        "proposed_lifecycle": "draft"
+      },
+      "proposed_action": "review_only",
+      "limitations": [
+        "相关测试结果不代表所有分支及生产部署都已验证。"
+      ]
+    },
+    {
+      "source_key": "ownership.creator-and-owner",
+      "kind": "requirement",
+      "title": "固定创建者与唯一现任负责人",
+      "feature_key": "feature.ownership",
+      "module_key": "module.responsibility",
+      "observed_behavior": [
+        "创建团队时记录 created_by 和唯一 owner_principal_id，创建者初始为 Owner，底层成员角色存 Admin。",
+        "团队 Owner/Admin 可以创建项目，普通团队成员不能。",
+        "项目创建者成为项目唯一 Owner，默认访问策略为 team_read；团队 Owner 不自动成为该项目 Owner。",
+        "待注销账号不能创建新的团队或项目。"
+      ],
+      "evidence": [
+        {
+          "path": "packages/application/src/team-use-cases.ts",
+          "symbol": "createTeam",
+          "lines": [
+            31,
+            47
+          ]
+        },
+        {
+          "path": "packages/application/src/project-use-cases-project.ts",
+          "symbol": "createProject",
+          "lines": [
+            40,
+            75
+          ]
+        }
+      ],
+      "tests": [
+        {
+          "path": "packages/application/tests/permission-members.test.mjs",
+          "line": 33,
+          "name": "new team records immutable creator and unique owner while storing an admin membership",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "new team records immutable creator and unique owner while storing an admin membership"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "packages/application/tests/permissions-policy.test.mjs",
+          "line": 52,
+          "name": "team manager may create a project with a visible team_read default and becomes its sole owner",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "team manager may create a project with a visible team_read default and becomes its sole owner"
+          ],
+          "coverage": "related_scenarios_only"
+        }
+      ],
+      "assessment": {
+        "implementation": "observed_in_code",
+        "review": "pending",
+        "production": "not_verified",
+        "proposed_lifecycle": "draft"
+      },
+      "proposed_action": "review_only",
+      "limitations": [
+        "相关测试结果不代表所有分支及生产部署都已验证。"
+      ]
+    },
+    {
+      "source_key": "ownership.accepted-transfer",
+      "kind": "requirement",
+      "title": "接收确认的团队与项目所有权转移",
+      "feature_key": "feature.ownership",
+      "module_key": "module.responsibility",
+      "observed_behavior": [
+        "正常转移由当前 Owner 发起，接收人必须是有效、非待注销的所属团队正式成员；项目外部协作者不能直接接收 Owner。",
+        "每个团队或项目只能存在一个有效待接收请求，请求 7 天过期。",
+        "接收人本人接受后才变更 Owner；前任 Owner 保留 Admin，created_by 保持不变。",
+        "团队和项目分别转移；转移项目不会自动转移团队，归档状态不被转移改变。",
+        "取消、过期或已处理请求不能重复接受；失效负责人恢复须专门权限及原因，并仍由接收人确认。"
+      ],
+      "evidence": [
+        {
+          "path": "packages/application/src/ownership-use-cases.ts",
+          "symbol": "assertRecipient/assertRecoveryAuthority",
+          "lines": [
+            48,
+            59
+          ]
+        },
+        {
+          "path": "packages/application/src/ownership-use-cases.ts",
+          "symbol": "requestTransfer",
+          "lines": [
+            107,
+            135
+          ]
+        },
+        {
+          "path": "packages/application/src/ownership-use-cases.ts",
+          "symbol": "changeTransfer",
+          "lines": [
+            141,
+            175
+          ]
+        }
+      ],
+      "tests": [
+        {
+          "path": "packages/application/tests/permissions-ownership.test.mjs",
+          "line": 27,
+          "name": "ownership changes only after recipient acceptance, retains creator and makes previous owner admin",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "ownership changes only after recipient acceptance, retains creator and makes previous owner admin"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "packages/application/tests/permissions-ownership.test.mjs",
+          "line": 47,
+          "name": "concurrent acceptance succeeds once and only one pending request exists per scope",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "concurrent acceptance succeeds once and only one pending request exists per scope"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "packages/application/tests/permissions-ownership.test.mjs",
+          "line": 75,
+          "name": "recipient eligibility is checked both on request and acceptance",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "recipient eligibility is checked both on request and acceptance"
+          ],
+          "coverage": "related_scenarios_only"
+        }
+      ],
+      "assessment": {
+        "implementation": "observed_in_code",
+        "review": "pending",
+        "production": "not_verified",
+        "proposed_lifecycle": "draft"
+      },
+      "proposed_action": "review_only",
+      "limitations": [
+        "相关测试结果不代表所有分支及生产部署都已验证。"
+      ]
+    },
+    {
+      "source_key": "account.closure-responsibility",
+      "kind": "requirement",
+      "title": "注销前责任转移及历史保留",
+      "feature_key": "feature.closure",
+      "module_key": "module.responsibility",
+      "observed_behavior": [
+        "注销采用开始、取消、完成阶段；待注销期间仍允许转出已有所有权。",
+        "完成注销前必须清空所有团队/项目所有权，包括归档项目及未确认的历史 Owner，并结束或交接任务和活动 Run。",
+        "最后一位有效系统管理员不能注销。",
+        "注销后禁用账号、清空密码及绑定令牌、吊销设备会话和租约，保留创建者、历史任务及设备记录。"
+      ],
+      "evidence": [
+        {
+          "path": "packages/application/src/ownership-use-cases.ts",
+          "symbol": "closureData",
+          "lines": [
+            222,
+            237
+          ]
+        },
+        {
+          "path": "packages/application/src/ownership-use-cases.ts",
+          "symbol": "changeClosure",
+          "lines": [
+            245,
+            282
+          ]
+        }
+      ],
+      "tests": [
+        {
+          "path": "packages/application/tests/permissions-ownership.test.mjs",
+          "line": 168,
+          "name": "closure includes archived and unresolved legacy ownership and blocks until all responsibility is transferred",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "closure includes archived and unresolved legacy ownership and blocks until all responsibility is transferred"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "packages/application/tests/permissions-ownership.test.mjs",
+          "line": 184,
+          "name": "closure blocks open work, then revokes credentials and leases while preserving history",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "closure blocks open work, then revokes credentials and leases while preserving history"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "packages/application/tests/permissions-ownership.test.mjs",
+          "line": 213,
+          "name": "pending closure still permits outgoing transfers and former owners can close after separate team and project acceptance",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "pending closure still permits outgoing transfers and former owners can close after separate team and project acceptance"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "packages/application/tests/permissions-ownership.test.mjs",
+          "line": 250,
+          "name": "concurrent platform administrator closures retain one active administrator",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "concurrent platform administrator closures retain one active administrator"
+          ],
+          "coverage": "related_scenarios_only"
+        }
+      ],
+      "assessment": {
+        "implementation": "observed_in_code",
+        "review": "pending",
+        "production": "not_verified",
+        "proposed_lifecycle": "draft"
+      },
+      "proposed_action": "review_only",
+      "limitations": [
+        "相关测试结果不代表所有分支及生产部署都已验证。"
+      ]
+    },
+    {
+      "source_key": "admin.workspace-and-authority",
+      "kind": "requirement",
+      "title": "系统管理入口与业务权限分离",
+      "feature_key": "feature.governance",
+      "module_key": "module.admin",
+      "observed_behavior": [
+        "系统管理员的默认登录入口是 /admin/teams，管理台提供团队项目、用户和配置管理；显式项目和浏览器授权深链接保留。",
+        "普通账号不能挂载管理数据页面；管理接口使用 Bearer 身份并重新检查有效系统管理员权限。",
+        "全局元数据查看不自动加入团队或项目，不提供未授权的项目文档、需求和任务读取权。"
+      ],
+      "evidence": [
+        {
+          "path": "apps/web/src/workspaceRouting.ts",
+          "symbol": "workspacePathAfterLogin",
+          "lines": [
+            184,
+            191
+          ]
+        },
+        {
+          "path": "apps/web/src/AdminWorkspace.tsx",
+          "symbol": "AdminWorkspace",
+          "lines": [
+            8,
+            18
+          ]
+        },
+        {
+          "path": "packages/application/src/admin-governance-use-cases.ts",
+          "symbol": "requireAdmin/listTeams/listProjects",
+          "lines": [
+            11,
+            108
+          ]
+        }
+      ],
+      "tests": [
+        {
+          "path": "apps/web/tests/admin-workspace.test.mjs",
+          "line": 29,
+          "name": "admins land in management while browser approval and explicit project links survive login",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "admins land in management while browser approval and explicit project links survive login"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "apps/web/tests/admin-workspace.test.mjs",
+          "line": 42,
+          "name": "ordinary users cannot mount any admin data surface or issue admin queries",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "ordinary users cannot mount any admin data surface or issue admin queries"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "apps/core-api/tests/admin-governance.test.mjs",
+          "line": 37,
+          "name": "system administrators see global metadata without becoming team or project members",
+          "run_id": "run.http-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "system administrators see global metadata without becoming team or project members"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "apps/core-api/tests/admin-governance.test.mjs",
+          "line": 62,
+          "name": "governance rejects business owners, legacy identity, anonymous, stale or disabled administrator authority",
+          "run_id": "run.http-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "governance rejects business owners, legacy identity, anonymous, stale or disabled administrator authority"
+          ],
+          "coverage": "related_scenarios_only"
+        }
+      ],
+      "assessment": {
+        "implementation": "observed_in_code",
+        "review": "pending",
+        "production": "not_verified",
+        "proposed_lifecycle": "draft"
+      },
+      "proposed_action": "review_only",
+      "limitations": [
+        "相关测试结果不代表所有分支及生产部署都已验证。"
+      ]
+    },
+    {
+      "source_key": "admin.metadata-governance",
+      "kind": "requirement",
+      "title": "全局团队项目检索与有审计的元数据维护",
+      "feature_key": "feature.governance",
+      "module_key": "module.admin",
+      "observed_behavior": [
+        "团队、项目支持搜索和分页，项目可按团队及状态筛选，成员数遵循有效成员访问规则。",
+        "修改团队名称、项目名称/说明/归档状态需要填写管理原因，业务变更和审计记录在同一事务内保存。",
+        "项目修改必须携带 base_snapshot，旧版本拒绝覆盖新内容；不改变创建者、现任负责人或成员授权。",
+        "团队名称修改当前采用行锁，没有与项目相同的调用者 base_snapshot 字段，不把项目并发规则泛化到团队。"
+      ],
+      "evidence": [
+        {
+          "path": "packages/application/src/admin-governance-use-cases.ts",
+          "symbol": "listFilter/listTeams/listProjects",
+          "lines": [
+            19,
+            108
+          ]
+        },
+        {
+          "path": "packages/application/src/admin-governance-use-cases.ts",
+          "symbol": "updateTeam/updateProject",
+          "lines": [
+            110,
+            161
+          ]
+        }
+      ],
+      "tests": [
+        {
+          "path": "apps/core-api/tests/admin-governance.test.mjs",
+          "line": 79,
+          "name": "governance search and pagination preserve filters and count effective inherited membership",
+          "run_id": "run.http-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "governance search and pagination preserve filters and count effective inherited membership"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "apps/core-api/tests/admin-governance.test.mjs",
+          "line": 100,
+          "name": "metadata edits require reason, audit old/new values and preserve owners and membership",
+          "run_id": "run.http-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "metadata edits require reason, audit old/new values and preserve owners and membership"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "apps/core-api/tests/admin-governance.test.mjs",
+          "line": 149,
+          "name": "stale administrator edits cannot restore an archived project or overwrite newer metadata",
+          "run_id": "run.http-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "stale administrator edits cannot restore an archived project or overwrite newer metadata"
+          ],
+          "coverage": "related_scenarios_only"
+        }
+      ],
+      "assessment": {
+        "implementation": "observed_in_code",
+        "review": "pending",
+        "production": "not_verified",
+        "proposed_lifecycle": "draft"
+      },
+      "proposed_action": "review_only",
+      "limitations": [
+        "相关测试结果不代表所有分支及生产部署都已验证。"
+      ]
+    },
+    {
+      "source_key": "admin.running-project-archive",
+      "kind": "requirement",
+      "title": "运行及交接中的项目禁止直接归档",
+      "feature_key": "feature.governance",
+      "module_key": "module.admin",
+      "observed_behavior": [
+        "管理员归档项目时检查 active、preparing、suspended Run；存在这些运行或挂起交接时拒绝归档并返回运行编码。",
+        "通过检查的归档变更保持原负责人、成员及任务历史；归档不等同于删除。"
+      ],
+      "evidence": [
+        {
+          "path": "packages/application/src/admin-governance-use-cases.ts",
+          "symbol": "updateProject",
+          "lines": [
+            132,
+            161
+          ]
+        }
+      ],
+      "tests": [
+        {
+          "path": "apps/core-api/tests/admin-governance.test.mjs",
+          "line": 132,
+          "name": "admin archival guards all execution and handover run states without changing running work",
+          "run_id": "run.http-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "admin archival guards all execution and handover run states without changing running work"
+          ],
+          "coverage": "related_scenarios_only"
+        }
+      ],
+      "assessment": {
+        "implementation": "observed_in_code",
+        "review": "pending",
+        "production": "not_verified",
+        "proposed_lifecycle": "draft"
+      },
+      "proposed_action": "review_only",
+      "limitations": [
+        "相关测试结果不代表所有分支及生产部署都已验证。"
+      ]
+    },
+    {
+      "source_key": "admin.user-reactivation",
+      "kind": "requirement",
+      "title": "恢复普通用户不恢复旧凭据和租约",
+      "feature_key": "feature.user-admin",
+      "module_key": "module.admin",
+      "observed_behavior": [
+        "有效系统管理员可恢复被禁用的普通用户；拒绝系统管理员、已注销及待注销目标。",
+        "恢复前清理旧设备、登录会话及活动租约，账号须重新登录，恢复动作保留审计。"
+      ],
+      "evidence": [
+        {
+          "path": "packages/application/src/user-use-cases.ts",
+          "symbol": "enableUser",
+          "lines": [
+            263,
+            292
+          ]
+        }
+      ],
+      "tests": [
+        {
+          "path": "apps/core-api/tests/admin-governance.test.mjs",
+          "line": 250,
+          "name": "reenabling normal users is audited, refuses deletion, and cannot revive old device credentials",
+          "run_id": "run.http-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "reenabling normal users is audited, refuses deletion, and cannot revive old device credentials"
+          ],
+          "coverage": "related_scenarios_only"
+        }
+      ],
+      "assessment": {
+        "implementation": "observed_in_code",
+        "review": "pending",
+        "production": "not_verified",
+        "proposed_lifecycle": "draft"
+      },
+      "proposed_action": "review_only",
+      "limitations": [
+        "相关测试结果不代表所有分支及生产部署都已验证。"
+      ]
+    },
+    {
+      "source_key": "admin.versioned-public-addresses",
+      "kind": "requirement",
+      "title": "平台公开地址的安全校验、版本保存与审计",
+      "feature_key": "feature.cli-config",
+      "module_key": "module.admin",
+      "observed_behavior": [
+        "管理员设置公开 Web/API 地址；留空清除覆盖值，Web 仅站点根路径，API 可有安全路径。",
+        "地址使用 HTTPS，本机回环允许 HTTP；拒绝凭据、查询参数、片段、控制字符及命令字符。",
+        "保存需完整字段和 base_revision；行锁检查版本，冲突不写入，真实变更递增版本并同事务审计，相同值不产生额外版本。",
+        "普通有效账号仅能读取两个公开地址，不能获取管理字段或保存设置。"
+      ],
+      "evidence": [
+        {
+          "path": "packages/application/src/system-settings-use-cases.ts",
+          "symbol": "normalizedUrl",
+          "lines": [
+            18,
+            38
+          ]
+        },
+        {
+          "path": "packages/application/src/system-settings-use-cases.ts",
+          "symbol": "actor/clientConfig/updateSettings",
+          "lines": [
+            41,
+            113
+          ]
+        }
+      ],
+      "tests": [
+        {
+          "path": "apps/core-api/tests/system-settings.test.mjs",
+          "line": 29,
+          "name": "settings require active system-admin bearer credentials and client-config exposes only public URLs",
+          "run_id": "run.http-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "settings require active system-admin bearer credentials and client-config exposes only public URLs"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "apps/core-api/tests/system-settings.test.mjs",
+          "line": 46,
+          "name": "settings persist normalized URLs, version changes atomically with audit, and keep Host out of configuration",
+          "run_id": "run.http-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "settings persist normalized URLs, version changes atomically with audit, and keep Host out of configuration"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "apps/core-api/tests/system-settings.test.mjs",
+          "line": 97,
+          "name": "URL validation rejects unsafe schemes, credentials, deployment paths and command injection without partial writes",
+          "run_id": "run.http-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "URL validation rejects unsafe schemes, credentials, deployment paths and command injection without partial writes"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "apps/core-api/tests/system-settings.test.mjs",
+          "line": 128,
+          "name": "concurrent admins cannot overwrite an unseen settings revision or produce a phantom audit",
+          "run_id": "run.http-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "concurrent admins cannot overwrite an unseen settings revision or produce a phantom audit"
+          ],
+          "coverage": "related_scenarios_only"
+        }
+      ],
+      "assessment": {
+        "implementation": "observed_in_code",
+        "review": "pending",
+        "production": "not_verified",
+        "proposed_lifecycle": "draft"
+      },
+      "proposed_action": "review_only",
+      "limitations": [
+        "相关测试结果不代表所有分支及生产部署都已验证。"
+      ]
+    },
+    {
+      "source_key": "admin.cli-guide-addresses",
+      "kind": "requirement",
+      "title": "CLI 指引使用平台公开地址并等待配置加载",
+      "feature_key": "feature.cli-config",
+      "module_key": "module.admin",
+      "observed_behavior": [
+        "CLI 指引经同源已认证 API 获取公开地址，依据配置生成 --api 与必要的 --web 参数，不向配置域名发送当前平台认证请求。",
+        "无配置时使用当前站点回退；配置未加载或失败时不显示猜测的登录命令。",
+        "设置保存成功会更新设置缓存并使同一客户端的 platform-client-config 缓存失效；不把它等同于已验证的跨浏览器即时广播。"
+      ],
+      "evidence": [
+        {
+          "path": "apps/web/src/platformClientConfig.ts",
+          "symbol": "getPlatformClientConfig/clientConnectionUrls/cliLoginCommand",
+          "lines": [
+            10,
+            27
+          ]
+        },
+        {
+          "path": "apps/web/src/SystemSettings.tsx",
+          "symbol": "SettingsForm",
+          "lines": [
+            22,
+            37
+          ]
+        }
+      ],
+      "tests": [
+        {
+          "path": "apps/web/tests/platform-client-config.test.mjs",
+          "line": 16,
+          "name": "connection commands use configured public addresses and preserve a distinct browser origin",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "connection commands use configured public addresses and preserve a distinct browser origin"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "apps/web/tests/platform-client-config.test.mjs",
+          "line": 28,
+          "name": "configuration is read only from the authenticated same-origin API, never from configured external hosts",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "configuration is read only from the authenticated same-origin API, never from configured external hosts"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "apps/web/tests/platform-client-config.test.mjs",
+          "line": 41,
+          "name": "the CLI guide waits for settings instead of offering potentially incorrect local connection commands",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "the CLI guide waits for settings instead of offering potentially incorrect local connection commands"
+          ],
+          "coverage": "related_scenarios_only"
+        }
+      ],
+      "assessment": {
+        "implementation": "observed_in_code",
+        "review": "pending",
+        "production": "not_verified",
+        "proposed_lifecycle": "draft"
+      },
+      "proposed_action": "review_only",
+      "limitations": [
+        "自动测试覆盖命令生成、同源请求和 SSR 初始呈现；本次未验证真实浏览器点击保存后的跳转、重新聚焦及其他标签页更新。"
+      ]
+    },
+    {
+      "source_key": "admin.cli-release-availability",
+      "kind": "requirement",
+      "title": "CLI 安装发布清单与实际可下载状态",
+      "feature_key": "feature.cli-config",
+      "module_key": "module.admin",
+      "observed_behavior": [
+        "配置页按 Windows/macOS/Linux × x64/arm64 展示六种发布目标，状态来自服务端清单。",
+        "公共下载仅允许精确安装脚本、发布清单及清单所列文件；缺失或大小不匹配的安装包不对外宣称可用。",
+        "服务端清单过滤检查文件存在和大小，不能据此声称服务端已对每次下载执行 SHA-256 校验。"
+      ],
+      "evidence": [
+        {
+          "path": "apps/web/src/SystemSettings.tsx",
+          "symbol": "CliReleaseStatus",
+          "lines": [
+            55,
+            69
+          ]
+        },
+        {
+          "path": "apps/core-api/src/routes/cli-distribution.ts",
+          "symbol": "isCliDistributionPath/safeFile/registerCliDistributionRoutes",
+          "lines": [
+            12,
+            74
+          ]
+        }
+      ],
+      "tests": [
+        {
+          "path": "apps/web/tests/admin-workspace.test.mjs",
+          "line": 61,
+          "name": "release status reports all six targets using actual artifacts rather than OS assumptions",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "release status reports all six targets using actual artifacts rather than OS assumptions"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "apps/core-api/tests/cli-distribution.test.mjs",
+          "line": 24,
+          "name": "only the precise distribution routes are public",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "only the precise distribution routes are public"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "apps/core-api/tests/cli-distribution.test.mjs",
+          "line": 45,
+          "name": "install pages never advertise missing or incomplete artifacts from a stale manifest",
+          "run_id": "run.extended-pilot",
+          "execution": "passed",
+          "executed_cases": [
+            "install pages never advertise missing or incomplete artifacts from a stale manifest"
+          ],
+          "coverage": "related_scenarios_only"
+        },
+        {
+          "path": "apps/core-api/tests/cli-distribution.test.mjs",
+          "line": 60,
+          "name": "release symlinks cannot expose files outside the distribution directory",
+          "run_id": "run.extended-pilot",
+          "execution": "skipped",
+          "executed_cases": [
+            "release symlinks cannot expose files outside the distribution directory"
+          ],
+          "coverage": "related_scenarios_only"
+        }
+      ],
+      "assessment": {
+        "implementation": "observed_in_code",
+        "review": "pending",
+        "production": "not_verified",
+        "proposed_lifecycle": "draft"
+      },
+      "proposed_action": "review_only",
+      "limitations": [
+        "符号链接逃逸回归因当前 Windows 无法创建测试符号链接而跳过；六种系统的安装器真实安装未在本次运行。"
+      ]
+    }
+  ],
+  "questions": [
+    {
+      "key": "question.project-create-error-copy",
+      "title": "项目创建权限错误文案不符实际行为",
+      "status": "observed_in_code",
+      "observation": "createProject 使用 isProjectManager 允许团队 Owner/Admin，但拒绝文案仍为只有团队 Owner 可以创建项目。现有测试定义明确覆盖团队 Admin 创建成功。",
+      "evidence": [
+        {
+          "path": "packages/application/src/project-use-cases-project.ts",
+          "symbol": "createProject",
+          "lines": [
+            51,
+            56
+          ]
+        },
+        {
+          "path": "packages/application/tests/permissions-policy.test.mjs",
+          "line": 52,
+          "name": "team manager may create a project with a visible team_read default and becomes its sole owner"
+        }
+      ],
+      "follow_up": "作为文案修正候选核对，不自动登记已确认生产缺陷。"
+    },
+    {
+      "key": "question.production-legacy-identity",
+      "title": "生产环境旧身份通道配置待确认",
+      "status": "observed_in_code",
+      "observation": "未设置开关且不是 production 时接受声明式 x-principal-code；生产显式设置 ACP_ALLOW_LEGACY_IDENTITY=1 也会开启。未检查实际部署环境。",
+      "evidence": [
+        {
+          "path": "apps/core-api/src/auth.ts",
+          "symbol": "allowLegacyIdentity",
+          "lines": [
+            90,
+            93
+          ]
+        }
+      ],
+      "follow_up": "验证部署变量后才能声明生产已禁用旧通道。"
+    },
+    {
+      "key": "question.session-expiry-policy",
+      "title": "会话到期与历史迁移策略待确定",
+      "status": "observed_in_code",
+      "observation": "新会话期限固定为 90 天，旧凭据迁移会话未设置到期时间。",
+      "evidence": [
+        {
+          "path": "packages/application/src/auth-device.ts",
+          "symbol": "createDeviceLogin",
+          "lines": [
+            53,
+            56
+          ]
+        },
+        {
+          "path": "packages/application/src/auth-device.ts",
+          "symbol": "resolveSessionToken",
+          "lines": [
+            67,
+            71
+          ]
+        }
+      ],
+      "follow_up": "是否统一迁移到期或提供管理员策略属于目标需求，不能标记为已有能力。"
+    },
+    {
+      "key": "question.external-owner-eligibility",
+      "title": "外部协作者与所有权接收人的资格差异",
+      "status": "observed_in_code",
+      "observation": "项目可授权外部成员，但所有权接收人必须是所属团队的正式成员。",
+      "evidence": [
+        {
+          "path": "packages/application/src/project-access.ts",
+          "symbol": "resolveProjectAccess",
+          "lines": [
+            33,
+            41
+          ]
+        },
+        {
+          "path": "packages/application/src/ownership-use-cases.ts",
+          "symbol": "assertRecipient",
+          "lines": [
+            48,
+            52
+          ]
+        }
+      ],
+      "follow_up": "规格中保留该现状边界，不把所有项目成员均可接收所有权作为推断结果。"
+    },
+    {
+      "key": "question.browser-config-refresh",
+      "title": "真实浏览器保存配置后更新指引尚未验证",
+      "status": "verification_gap",
+      "observation": "本次权限设置阻止浏览器访问本地站点；接口和 SSR 通过不能替代保存、导航、重新聚焦及多标签页交互。",
+      "evidence": [
+        {
+          "path": "apps/web/src/SystemSettings.tsx",
+          "symbol": "SettingsForm",
+          "lines": [
+            28,
+            32
+          ]
+        }
+      ],
+      "follow_up": "恢复可用浏览器测试环境后验证交互，保持未验证状态，不推断实际存在缺陷。"
+    },
+    {
+      "key": "question.readme-current-navigation",
+      "title": "README 导航说明落后于当前路由",
+      "status": "observed_in_code",
+      "observation": "README 的项目首页说明仍将文档置于任务之后且未列测试；当前 PROJECT_SECTIONS 为项目、文档、计划、需求、设计、任务、测试、缺陷、交接。",
+      "evidence": [
+        {
+          "path": "apps/web/src/workspaceRouting.ts",
+          "symbol": "PROJECT_SECTIONS",
+          "lines": [
+            1,
+            1
+          ]
+        },
+        {
+          "path": "README.md",
+          "symbol": "项目首页与必读资料",
+          "lines": [
+            196,
+            196
+          ]
+        }
+      ],
+      "follow_up": "作为资料漂移候选，在全量资料同步时修订，不改写产品行为。"
+    }
+  ],
+  "task_candidates": [
+    {
+      "key": "candidate-task.permission-error-copy",
+      "title": "统一项目创建权限的错误提示",
+      "basis": "question.project-create-error-copy",
+      "requirement_key": "ownership.creator-and-owner",
+      "kind": "copy_correction",
+      "acceptance": "普通团队成员被拒绝时提示 Owner/Admin 可创建；原权限行为不改变。",
+      "status": "candidate_only",
+      "applied": false
+    },
+    {
+      "key": "candidate-task.browser-config-check",
+      "title": "验证配置保存后的 CLI 指引刷新交互",
+      "basis": "question.browser-config-refresh",
+      "requirement_key": "admin.cli-guide-addresses",
+      "kind": "verification",
+      "acceptance": "覆盖保存后导航、刷新、重新聚焦和其他标签页；区分同客户端缓存失效与跨标签页更新。",
+      "status": "candidate_only",
+      "applied": false
+    },
+    {
+      "key": "candidate-task.production-auth-policy",
+      "title": "确认生产部署的旧身份通道策略",
+      "basis": "question.production-legacy-identity",
+      "requirement_key": "admin.workspace-and-authority",
+      "kind": "deployment_verification",
+      "acceptance": "记录目标部署配置，验证未认证声明式身份不能访问需要 Bearer 的接口；不把开发默认值当成生产事实。",
+      "status": "candidate_only",
+      "applied": false
+    },
+    {
+      "key": "candidate-task.readme-navigation",
+      "title": "修订 README 的项目导航说明",
+      "basis": "question.readme-current-navigation",
+      "requirement_key": null,
+      "kind": "documentation",
+      "acceptance": "当前导航顺序与 workspaceRouting 一致，保留必要的历史兼容说明。",
+      "status": "candidate_only",
+      "applied": false
+    }
+  ],
+  "verification": {
+    "environment": "Windows; isolated local PostgreSQL database acp_intake_pilot_test",
+    "build": {
+      "outcome": "passed",
+      "commands": [
+        "pnpm --filter @team-synergy/application... build",
+        "pnpm --filter @team-synergy/core-api build"
+      ]
+    },
+    "runs": [
+      {
+        "id": "run.http-pilot",
+        "kind": "client_reported",
+        "command": "node --test --test-concurrency=1 apps/core-api/tests/auth.test.mjs apps/core-api/tests/permissions.test.mjs apps/core-api/tests/system-settings.test.mjs apps/core-api/tests/admin-governance.test.mjs",
+        "files": [
+          "apps/core-api/tests/auth.test.mjs",
+          "apps/core-api/tests/permissions.test.mjs",
+          "apps/core-api/tests/system-settings.test.mjs",
+          "apps/core-api/tests/admin-governance.test.mjs"
+        ],
+        "completed_at": "2026-10-18T09:52:04.802Z",
+        "total": 30,
+        "passed": 30,
+        "failed": 0,
+        "skipped": 0,
+        "log_sha256": "92a7b2d51189f58976ca1065873c5bcb074942aff4295aa33fe8f004359c4a89",
+        "results": [
+          {
+            "name": "system administrators see global metadata without becoming team or project members",
+            "outcome": "passed"
+          },
+          {
+            "name": "governance rejects business owners, legacy identity, anonymous, stale or disabled administrator authority",
+            "outcome": "passed"
+          },
+          {
+            "name": "governance search and pagination preserve filters and count effective inherited membership",
+            "outcome": "passed"
+          },
+          {
+            "name": "metadata edits require reason, audit old/new values and preserve owners and membership",
+            "outcome": "passed"
+          },
+          {
+            "name": "admin archival guards all execution and handover run states without changing running work",
+            "outcome": "passed"
+          },
+          {
+            "name": "stale administrator edits cannot restore an archived project or overwrite newer metadata",
+            "outcome": "passed"
+          },
+          {
+            "name": "normal rename racing an administrator edit keeps project snapshots monotonic",
+            "outcome": "passed"
+          },
+          {
+            "name": "normal archive racing an administrator edit keeps project snapshots monotonic",
+            "outcome": "passed"
+          },
+          {
+            "name": "normal repository-create racing an administrator edit keeps project snapshots monotonic",
+            "outcome": "passed"
+          },
+          {
+            "name": "normal repository-update racing an administrator edit keeps project snapshots monotonic",
+            "outcome": "passed"
+          },
+          {
+            "name": "reenabling normal users is audited, refuses deletion, and cannot revive old device credentials",
+            "outcome": "passed"
+          },
+          {
+            "name": "auth routes complete login, whoami, logout, and revoke the bearer token",
+            "outcome": "passed"
+          },
+          {
+            "name": "initial password login blocks non-auth routes until the user changes password",
+            "outcome": "passed"
+          },
+          {
+            "name": "bearer principal takes precedence over x-principal-code on protected and transition routes",
+            "outcome": "passed"
+          },
+          {
+            "name": "system admin can reissue a one-time bind token for an existing user code",
+            "outcome": "passed"
+          },
+          {
+            "name": "system admin creates a user with a generated public code and ignores caller-supplied user_code",
+            "outcome": "passed"
+          },
+          {
+            "name": "password change without current password is rejected once the user has a permanent password",
+            "outcome": "passed"
+          },
+          {
+            "name": "password change revokes every other device but keeps the calling device",
+            "outcome": "passed"
+          },
+          {
+            "name": "x-principal-code legacy identity is rejected when the environment switch is off",
+            "outcome": "passed"
+          },
+          {
+            "name": "protected HTTP reads require authentication and query/body identity cannot impersonate a project member",
+            "outcome": "passed"
+          },
+          {
+            "name": "Viewer writes are denied even with forged identities or authorship from an earlier role",
+            "outcome": "passed"
+          },
+          {
+            "name": "team and project Admins manage ordinary members but cannot edit peers, grant Admin, or replace Owner",
+            "outcome": "passed"
+          },
+          {
+            "name": "policy endpoints provide impact, inherit read/write access, and preserve explicit Viewer restrictions",
+            "outcome": "passed"
+          },
+          {
+            "name": "ownership transfers require the real owner and recipient, preserve creator history, and keep scopes independent",
+            "outcome": "passed"
+          },
+          {
+            "name": "account closure blocks owned archived projects, requires transfers in both scopes, and revokes Bearer credentials",
+            "outcome": "passed"
+          },
+          {
+            "name": "settings require active system-admin bearer credentials and client-config exposes only public URLs",
+            "outcome": "passed"
+          },
+          {
+            "name": "settings persist normalized URLs, version changes atomically with audit, and keep Host out of configuration",
+            "outcome": "passed"
+          },
+          {
+            "name": "admins closing their accounts cannot read or change system settings",
+            "outcome": "passed"
+          },
+          {
+            "name": "URL validation rejects unsafe schemes, credentials, deployment paths and command injection without partial writes",
+            "outcome": "passed"
+          },
+          {
+            "name": "concurrent admins cannot overwrite an unseen settings revision or produce a phantom audit",
+            "outcome": "passed"
+          }
+        ]
+      },
+      {
+        "id": "run.extended-pilot",
+        "kind": "client_reported",
+        "command": "node --test --test-concurrency=1 packages/application/tests/auth-use-cases.test.mjs packages/application/tests/device-sessions.test.mjs packages/application/tests/permissions-policy.test.mjs packages/application/tests/permission-members.test.mjs packages/application/tests/permissions-ownership.test.mjs apps/core-api/tests/device-sessions.test.mjs apps/core-api/tests/cli-distribution.test.mjs apps/web/tests/platform-client-config.test.mjs apps/web/tests/admin-workspace.test.mjs",
+        "files": [
+          "packages/application/tests/auth-use-cases.test.mjs",
+          "packages/application/tests/device-sessions.test.mjs",
+          "packages/application/tests/permissions-policy.test.mjs",
+          "packages/application/tests/permission-members.test.mjs",
+          "packages/application/tests/permissions-ownership.test.mjs",
+          "apps/core-api/tests/device-sessions.test.mjs",
+          "apps/core-api/tests/cli-distribution.test.mjs",
+          "apps/web/tests/platform-client-config.test.mjs",
+          "apps/web/tests/admin-workspace.test.mjs"
+        ],
+        "completed_at": "2026-10-18T09:54:10.093Z",
+        "total": 78,
+        "passed": 77,
+        "failed": 0,
+        "skipped": 1,
+        "log_sha256": "cac44bd0806f65ce86963c3183cc9542892866ee10052ebd71b0ddf7bd37ab85",
+        "results": [
+          {
+            "name": "only the precise distribution routes are public",
+            "outcome": "passed"
+          },
+          {
+            "name": "public manifest projects approved fields and shell TSV uses the same artifacts",
+            "outcome": "passed"
+          },
+          {
+            "name": "release downloads are restricted to published manifest files",
+            "outcome": "passed"
+          },
+          {
+            "name": "install pages never advertise missing or incomplete artifacts from a stale manifest",
+            "outcome": "passed"
+          },
+          {
+            "name": "missing, duplicate and malformed releases fail closed",
+            "outcome": "passed"
+          },
+          {
+            "name": "release symlinks cannot expose files outside the distribution directory",
+            "outcome": "skipped",
+            "reason": "OS does not permit creating a test symlink"
+          },
+          {
+            "name": "device sessions are independently revoked, only owners can manage them, and secrets never appear in device responses",
+            "outcome": "passed"
+          },
+          {
+            "name": "browser authorizes a CLI without sharing its own token and only the polling secret exchanges once",
+            "outcome": "passed"
+          },
+          {
+            "name": "authorization gates reject forced-password sessions, legacy identity and excessive unauthenticated starts",
+            "outcome": "passed"
+          },
+          {
+            "name": "public route matching only permits the intended methods and safe release paths",
+            "outcome": "passed"
+          },
+          {
+            "name": "admins land in management while browser approval and explicit project links survive login",
+            "outcome": "passed"
+          },
+          {
+            "name": "ordinary users cannot mount any admin data surface or issue admin queries",
+            "outcome": "passed"
+          },
+          {
+            "name": "admin navigation exposes configuration, team/project governance and users, without business menus",
+            "outcome": "passed"
+          },
+          {
+            "name": "release status reports all six targets using actual artifacts rather than OS assumptions",
+            "outcome": "passed"
+          },
+          {
+            "name": "settings form shows configured addresses and explains deployment boundary",
+            "outcome": "passed"
+          },
+          {
+            "name": "team governance displays global ownership and no personal project entry",
+            "outcome": "passed"
+          },
+          {
+            "name": "users page uses normalized API deletion states without mislabeling users as admins",
+            "outcome": "passed"
+          },
+          {
+            "name": "admin API preserves optimistic revision, reason and paginated query encoding",
+            "outcome": "passed"
+          },
+          {
+            "name": "new administrative errors follow locale changes and retain original diagnostics",
+            "outcome": "passed"
+          },
+          {
+            "name": "admin copy is translated while names supplied by users stay unchanged",
+            "outcome": "passed"
+          },
+          {
+            "name": "connection commands use configured public addresses and preserve a distinct browser origin",
+            "outcome": "passed"
+          },
+          {
+            "name": "configuration is read only from the authenticated same-origin API, never from configured external hosts",
+            "outcome": "passed"
+          },
+          {
+            "name": "the CLI guide waits for settings instead of offering potentially incorrect local connection commands",
+            "outcome": "passed"
+          },
+          {
+            "name": "bindDevice consumes the bind token once and separates session credentials from the stable execution secret",
+            "outcome": "passed"
+          },
+          {
+            "name": "bindDevice rejects expired bind tokens without creating a device",
+            "outcome": "passed"
+          },
+          {
+            "name": "initial password login requires a password change before normal use",
+            "outcome": "passed"
+          },
+          {
+            "name": "proactive password change requires the current password and revokes other devices",
+            "outcome": "passed"
+          },
+          {
+            "name": "device binding enforces a per-user device limit",
+            "outcome": "passed"
+          },
+          {
+            "name": "resolveToken rejects a disabled user immediately",
+            "outcome": "passed"
+          },
+          {
+            "name": "revokeDevice accepts a token and makes it unresolvable",
+            "outcome": "passed"
+          },
+          {
+            "name": "the same verified installation receives separate sessions, preserves identity and updates only successful login timestamps",
+            "outcome": "passed"
+          },
+          {
+            "name": "concurrent password logins cannot bypass the unique installation or ten-device ceiling",
+            "outcome": "passed"
+          },
+          {
+            "name": "legacy credentials are enrolled once and binding cannot merge unrelated installations or resurrect sessions",
+            "outcome": "passed"
+          },
+          {
+            "name": "device authorization needs explicit approval, throttles polling and consumes the secret atomically once",
+            "outcome": "passed"
+          },
+          {
+            "name": "denied, expired and forced-password-change authorization never creates a session",
+            "outcome": "passed"
+          },
+          {
+            "name": "relogin on the same installation recovers an existing Run lease, different devices cannot, and device revocation invalidates it",
+            "outcome": "passed"
+          },
+          {
+            "name": "new team records immutable creator and unique owner while storing an admin membership",
+            "outcome": "passed"
+          },
+          {
+            "name": "team and project admins manage ordinary members but cannot change peers, owners, or themselves",
+            "outcome": "passed"
+          },
+          {
+            "name": "effective roster includes inherited team members and explicit viewers override team_write",
+            "outcome": "passed"
+          },
+          {
+            "name": "removing an explicit role reports restored team access; external access is fully revoked",
+            "outcome": "passed"
+          },
+          {
+            "name": "removing a team member revokes this team project grants and preserves unrelated external collaboration",
+            "outcome": "passed"
+          },
+          {
+            "name": "team removal protects any project owner and project role changes protect even a disabled owner",
+            "outcome": "passed"
+          },
+          {
+            "name": "open work blocks readonly downgrades and removals atomically",
+            "outcome": "passed"
+          },
+          {
+            "name": "ordinary team members see only authorized project counts while managers retain governance counts",
+            "outcome": "passed"
+          },
+          {
+            "name": "team governance exposes project responsibility metadata to team managers without granting private content access",
+            "outcome": "passed"
+          },
+          {
+            "name": "ownership changes only after recipient acceptance, retains creator and makes previous owner admin",
+            "outcome": "passed"
+          },
+          {
+            "name": "concurrent acceptance succeeds once and only one pending request exists per scope",
+            "outcome": "passed"
+          },
+          {
+            "name": "cancelled and expired requests cannot change ownership; expiry permits a fresh request",
+            "outcome": "passed"
+          },
+          {
+            "name": "recipient eligibility is checked both on request and acceptance",
+            "outcome": "passed"
+          },
+          {
+            "name": "project recovery requires disabled owner, team owner authority, a reason, and recipient acceptance",
+            "outcome": "passed"
+          },
+          {
+            "name": "recovery authority and owner inactivity are revalidated when the recipient accepts",
+            "outcome": "passed"
+          },
+          {
+            "name": "only platform admins initiate recovery for a team with an unavailable owner",
+            "outcome": "passed"
+          },
+          {
+            "name": "legacy resolution requires an existing owner, preserves creator and converts other owners to admins",
+            "outcome": "passed"
+          },
+          {
+            "name": "platform admin can resolve unavailable legacy owners solely to enable audited recovery",
+            "outcome": "passed"
+          },
+          {
+            "name": "closure includes archived and unresolved legacy ownership and blocks until all responsibility is transferred",
+            "outcome": "passed"
+          },
+          {
+            "name": "closure blocks open work, then revokes credentials and leases while preserving history",
+            "outcome": "passed"
+          },
+          {
+            "name": "pending closure still permits outgoing transfers and former owners can close after separate team and project acceptance",
+            "outcome": "passed"
+          },
+          {
+            "name": "concurrent recipient closure and transfer acceptance never create an orphan owner",
+            "outcome": "passed"
+          },
+          {
+            "name": "concurrent platform administrator closures retain one active administrator",
+            "outcome": "passed"
+          },
+          {
+            "name": "private: effective access follows owner, explicit grant, team default, then no access",
+            "outcome": "passed"
+          },
+          {
+            "name": "team_read: effective access follows owner, explicit grant, team default, then no access",
+            "outcome": "passed"
+          },
+          {
+            "name": "team_write: effective access follows owner, explicit grant, team default, then no access",
+            "outcome": "passed"
+          },
+          {
+            "name": "team manager may create a project with a visible team_read default and becomes its sole owner",
+            "outcome": "passed"
+          },
+          {
+            "name": "sorting inherited projects stores personal order without creating permission overrides",
+            "outcome": "passed"
+          },
+          {
+            "name": "leaving a team immediately removes inherited access while unrelated external grants remain",
+            "outcome": "passed"
+          },
+          {
+            "name": "policy preview is owner-only and counts inherited changes without overriding explicit exceptions",
+            "outcome": "passed"
+          },
+          {
+            "name": "policy changes immediately alter inherited access and leave explicit grants and history intact",
+            "outcome": "passed"
+          },
+          {
+            "name": "team_write to team_read requires inherited writers to hand off unfinished tasks",
+            "outcome": "passed"
+          },
+          {
+            "name": "team_write to team_read blocks an inherited writer's active run independently of task assignment",
+            "outcome": "passed"
+          },
+          {
+            "name": "team_write to team_read blocks an inherited writer's preparing run independently of task assignment",
+            "outcome": "passed"
+          },
+          {
+            "name": "team_write to team_read blocks an inherited writer's suspended run independently of task assignment",
+            "outcome": "passed"
+          },
+          {
+            "name": "team_write to team_read preserves owner and explicit writers without requiring unrelated handoffs",
+            "outcome": "passed"
+          },
+          {
+            "name": "team_write to private requires inherited writers to hand off unfinished tasks",
+            "outcome": "passed"
+          },
+          {
+            "name": "team_write to private blocks an inherited writer's active run independently of task assignment",
+            "outcome": "passed"
+          },
+          {
+            "name": "team_write to private blocks an inherited writer's preparing run independently of task assignment",
+            "outcome": "passed"
+          },
+          {
+            "name": "team_write to private blocks an inherited writer's suspended run independently of task assignment",
+            "outcome": "passed"
+          },
+          {
+            "name": "team_write to private preserves owner and explicit writers without requiring unrelated handoffs",
+            "outcome": "passed"
+          },
+          {
+            "name": "archived projects retain read access but reject policy, member, and content changes",
+            "outcome": "passed"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "total": 108,
+      "passed": 107,
+      "failed": 0,
+      "skipped": 1
+    },
+    "browser": "not_run_saved_access_preference",
+    "evidence_trust": "client_reported; no server attestation; no production acceptance"
+  },
+  "publish": {
+    "applied": false,
+    "live_project_mutations": 0,
+    "historical_tasks_closed": 0,
+    "needs_existing_entity_matching": true,
+    "needs_human_review": true
+  }
+}

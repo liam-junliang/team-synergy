@@ -6,9 +6,26 @@ import type { TeamRole } from '@team-synergy/contracts';
 import { fail, insertAudit, now } from './task-service.js';
 import { createPublicCode, findTeamByCode, findUserByCode } from './public-code.js';
 import { resolveProjectAccess, resolveTeamRole } from './project-access.js';
+import { lockAggregate } from './aggregate-lock.js';
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 type TeamMemberCommand = { teamCode: string; userCode: string; actorPrincipalCode: string };
+class TeamProjectScopesChanged extends Error {}
+
+/** Fence every affected project before governance rows, retrying concurrent project creation. */
+async function withTeamProjectFences<T>(db: Db, teamId: bigint, work: (tx: Tx, projectIds: bigint[]) => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await db.transaction(async tx => {
+        const scopes = await tx.select({ id: schema.projects.id }).from(schema.projects).where(eq(schema.projects.team_id, teamId)).orderBy(asc(schema.projects.id));
+        for (const project of scopes) await lockAggregate(tx, 'project', project.id);
+        return work(tx, scopes.map(project => project.id));
+      });
+    } catch (error) {
+      if (!(error instanceof TeamProjectScopesChanged) || attempt >= 4) throw error;
+    }
+  }
+}
 
 async function activeUserByCode(db: Db, principalCode: string) {
   const user = await findUserByCode(db, principalCode);
@@ -135,7 +152,7 @@ export function createTeamUseCases(db: Db) {
       if (!team) throw new DomainError('team_not_found', `团队不存在：${cmd.teamCode}`);
       if (!actor) throw new DomainError('user_not_found', `有效用户不存在：${cmd.actorPrincipalCode}`);
       if (!user) throw new DomainError('team_member_not_found', `团队成员不存在：${cmd.userCode}`);
-      const data = await db.transaction(async tx => {
+      const data = await withTeamProjectFences(db, team.id, async (tx, projectIds) => {
         const locked = await tx.select().from(schema.users).where(inArray(schema.users.id, [...new Set([actor.id, user.id])])).orderBy(asc(schema.users.id)).for('update');
         const actorUser = locked.find(row => row.id === actor.id);
         const targetUser = locked.find(row => row.id === user.id);
@@ -143,6 +160,12 @@ export function createTeamUseCases(db: Db) {
         if (!targetUser || (operation !== 'remove' && (targetUser.status !== 'active' || targetUser.deleted_at))) throw new DomainError('user_not_found', '只能授权有效用户');
         const [current] = await tx.select().from(schema.teams).where(eq(schema.teams.id, team.id)).for('update');
         if (!current) throw new DomainError('team_not_found', '团队不存在');
+        // Project creation takes the team row lock. Recheck after obtaining it;
+        // acquiring any newly discovered fence here would invert the lock order.
+        const currentProjects = await tx.select({ id: schema.projects.id }).from(schema.projects).where(eq(schema.projects.team_id, team.id)).orderBy(asc(schema.projects.id));
+        if (currentProjects.length !== projectIds.length || currentProjects.some((project, i) => project.id !== projectIds[i])) {
+          throw new TeamProjectScopesChanged('Team projects changed while acquiring membership fences');
+        }
         const [target] = await tx.select().from(schema.teamMembers).where(and(eq(schema.teamMembers.team_id, current.id), eq(schema.teamMembers.principal_id, user.id)));
         const targetRole = current.owner_principal_id === user.id ? 'owner' : target?.role === 'owner' && current.owner_principal_id !== null ? 'admin' : target?.role;
         assertCanManage(await resolveTeamRole(tx, current.id, actor.id), targetRole, role);

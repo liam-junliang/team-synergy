@@ -274,6 +274,181 @@
       "when": 1792378800000,
       "tag": "0039_project_intake",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1792382400000,
+      "tag": "0040_project_library_root",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1792386000000,
+      "tag": "0041_intake_quality_gate",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1792389600000,
+      "tag": "0042_intake_material_sources",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1792540800000,
+      "tag": "0043_system_agent_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1792710000000,
+      "tag": "0044_task_pagination",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1792713600001,
+      "tag": "0045_auth_login_throttling",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1792717200000,
+      "tag": "0046_scoped_material_fences",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1792720800000,
+      "tag": "0047_auth_security_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1792724400000,
+      "tag": "0048_core_foreign_keys_expand",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1792728000000,
+      "tag": "0049_core_foreign_keys_validate",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1792731600000,
+      "tag": "0050_core_time_expand",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1792735200000,
+      "tag": "0051_core_time_contract",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1793098800000,
+      "tag": "0052_code_understanding",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1794268800000,
+      "tag": "0053_project_memory_slice",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1794268860000,
+      "tag": "0054_memory_preference_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1794355200000,
+      "tag": "0055_project_document_memory",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1794355260000,
+      "tag": "0056_project_memory_binding",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1794355320000,
+      "tag": "0057_personal_memory_revisions",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1794355380000,
+      "tag": "0058_memory_capture_inbox",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1794355440000,
+      "tag": "0059_memory_capture_optional_binding",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1794355500000,
+      "tag": "0060_project_material_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1794355560000,
+      "tag": "0061_project_material_index_sources",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1794355620000,
+      "tag": "0062_defect_report_evidence",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1794441600000,
+      "tag": "0063_platform_skill_release",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1794475200000,
+      "tag": "0064_code_hosted_analysis",
+      "breakpoints": true
     }
   ]
 }

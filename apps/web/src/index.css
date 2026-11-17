@@ -136,7 +136,7 @@ select.form-control {
   margin-block: 1.5rem 0.75rem;
 }
 
-.markdown-document :where([id]) {
+.markdown-document :where([id], [data-source-line]) {
   scroll-margin-top: calc(var(--document-reader-header-height, 0px) + 1.5rem);
 }
 
@@ -252,4 +252,34 @@ select.form-control {
   background-clip: padding-box;
 }
 
+}
+
+/* The project library scrolls the reader and its header together. Other
+   workbenches keep the shared sticky header and its measured anchor offset. */
+.project-library-reader [data-document-reader-header] {
+  position: static;
+  padding-block: 0.75rem;
+}
+
+.project-library-reader [data-document-reader-header] > :first-child {
+  margin-bottom: 0.375rem;
+}
+
+.project-library-reader .markdown-document {
+  --document-reader-header-height: 1.75rem;
+}
+
+.project-library-reader .markdown-document > :first-child { margin-top: 0; }
+
+.project-library-columns > #document-version-history {
+  bottom: auto;
+  max-height: var(--library-viewport-height, 80dvh);
+}
+
+@media (width >= 64rem) {
+  .project-library-reader .markdown-document { --document-reader-header-height: 0px; }
+}
+
+@media (width >= 80rem) {
+  .project-library-columns > #document-version-history { position: sticky; top: 0; }
 }

@@ -16,9 +16,9 @@
     "agentctl": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/bundle-intake-skill.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --test --test-concurrency=1 tests/*.test.mjs"
+    "test": "node ../../scripts/run-tests.mjs -- node --test --test-concurrency=1 tests/*.test.mjs"
   },
   "dependencies": {
     "@team-synergy/contracts": "workspace:*",
@@ -33,6 +33,7 @@
     "@types/node": "^22.17.0",
     "drizzle-orm": "^0.44.7",
     "pg": "^8.16.3",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "@team-synergy/application": "workspace:*"
   }
 }

@@ -1,4 +1,8 @@
 const permissions: Record<string, string> = {
+  '个人设置': 'Personal settings',
+  '账号菜单': 'Account menu',
+  '账号资料': 'Account details',
+  '注销账号': 'Account closure',
   '管理所有权交接和账号注销。': 'Manage ownership transfers and account closure.',
   '所有权交接': 'Ownership transfers',
   '没有待处理的转移请求。': 'No pending transfers.',

@@ -1,5 +1,6 @@
+import { lockProjectByCode } from './aggregate-lock.js';
 import { createHash } from 'node:crypto';
-import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import type { Db } from '@team-synergy/persistence';
 import { schema } from '@team-synergy/persistence';
 import { DomainError, assertAuditedChange, toAuditEvent } from '@team-synergy/domain';
@@ -33,7 +34,7 @@ export interface CreateRequirementBaselineCommand extends AccessArgs {
 }
 
 async function access(tx: Tx, args: AccessArgs, mutation = false) {
-  const [project] = await tx.select().from(schema.projects).where(eq(schema.projects.code, args.projectCode)).for('share').limit(1);
+  const [project] = await tx.select().from(schema.projects).where(eq(schema.projects.code, args.projectCode)).limit(1);
   if (!project) throw new DomainError('project_not_found', '项目不存在');
   const [user] = await tx.select().from(schema.users).where(eq(schema.users.code, args.principalCode)).for('share').limit(1);
   if (!user) throw new DomainError('user_not_found', '用户不存在');
@@ -171,7 +172,7 @@ export function createRequirementBaselineUseCases(db: Db) {
         if (!Array.isArray(args.requirements) || !args.requirements.length || args.requirements.some(item => !item || typeof item.requirement_code !== 'string' || !Number.isInteger(item.revision) || item.revision < 1) || new Set(args.requirements.map(item => item.requirement_code)).size !== args.requirements.length) throw new DomainError('baseline_invalid_selection', '请选择不重复的需求及有效修订版本');
         return await db.transaction(async tx => {
           // Same lock as requirement/material writers, acquired before any reads to avoid upgrades.
-          await tx.execute(sql`select pg_advisory_xact_lock(1094930512)`);
+          await lockProjectByCode(tx, args.projectCode);
           const { project, user } = await access(tx, args, true);
           const [parent] = await tx.select().from(schema.requirementBaselines).where(eq(schema.requirementBaselines.project_id, project.id)).orderBy(desc(schema.requirementBaselines.version)).limit(1);
           if (args.parentBaselineCode !== undefined && args.parentBaselineCode !== (parent?.code ?? null)) throw new DomainError('baseline_parent_conflict', '基线已更新，请基于最新基线重新确认');
@@ -202,7 +203,7 @@ export function createRequirementBaselineUseCases(db: Db) {
     async compare(args: BaselineArgs & { compareTo: string }): Promise<TaskResult<RequirementBaselineComparison>> {
       try {
         return await db.transaction(async tx => {
-          await tx.execute(sql`select pg_advisory_xact_lock_shared(1094930512)`);
+          await lockProjectByCode(tx, args.projectCode, true);
           const { project } = await access(tx, args);
           const from = await loadRequirementBaseline(tx, project.id, args.baselineCode);
           if (!from) throw new DomainError('baseline_not_found', '此项目中不存在该基线');

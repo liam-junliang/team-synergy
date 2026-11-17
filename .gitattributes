@@ -1,2 +1,4 @@
 .githooks/* text eol=lf
 *.sh text eol=lf
+# The immutable release digest covers the original bytes on every build host.
+skills/reverse-project-docs/** -text

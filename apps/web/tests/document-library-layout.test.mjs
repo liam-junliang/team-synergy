@@ -125,6 +125,35 @@ test('文档页滚动视口不留顶部空隙，需求与架构目录共享独�
   }
 });
 
+test('项目文档库的页头、索引和正文共享主滚动面，目录独立可达且完整显示长标题', async () => {
+  const { ProjectDocumentsWorkbench } = await vite.ssrLoadModule('/src/ProjectDocumentsWorkbench.tsx');
+  const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
+  const projectCode = 'QA-DOCS';
+  const title = '项目文档库中用于区分相似文件的完整长标题';
+  const item = { ...document, title, project_code: projectCode, folder_code: null, status: 'active', content: '# 第一章\n\n最后一段正文' };
+  client.setQueryData(['project', projectCode], { code: projectCode, role: 'viewer', status: 'active' });
+  client.setQueryData(['handoff-library', projectCode, ''], { project_code: projectCode, can_create: false, folders: [], documents: [item] });
+  client.setQueryData(['handoff-document', item.document_code], item);
+  const render = props => renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(ProjectDocumentsWorkbench, props)));
+  try {
+    const html = render({ projectCode });
+    const main = html.match(/<main[^>]*>/)[0];
+    assert.match(main, /tabindex="0"/i);
+    assert.match(main, /overflow-y-auto/);
+    assert.doesNotMatch(main, /overflow-hidden/);
+    const aside = html.match(/<aside id="project-document-directory"[\s\S]*?<\/aside>/)[0];
+    assert.match(aside, /lg:sticky/);
+    assert.match(aside, /role="region" aria-label="文档目录"[^>]*lg:overflow-y-auto/);
+    assert.match(aside, /aria-current="page" title="项目文档库中用于区分相似文件的完整长标题"/);
+    assert.doesNotMatch(aside, /truncate/);
+    const pane = html.match(/<section tabindex="-1" aria-label="文档正文"[^>]*>/i)[0];
+    assert.doesNotMatch(pane, /overflow-(?:hidden|auto|scroll)|overflow-y-(?:auto|scroll)/);
+    assert.match(html, /最后一段正文/);
+    assert.match(render({}), /选择项目/);
+    assert.doesNotMatch(render({}), /资料检索索引/);
+  } finally { client.clear(); }
+});
+
 test('标题换行或切换语言后，章节定位偏移跟随实际头部高度且卸载时清理', async (context) => {
   const { trackDocumentReaderHeaderHeight } = await vite.ssrLoadModule('/src/DocumentReaderHeader.tsx');
   const original = globalThis.ResizeObserver;

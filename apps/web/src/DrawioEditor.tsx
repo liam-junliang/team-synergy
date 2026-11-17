@@ -89,6 +89,8 @@ export function DrawioFrame({ source, readOnly = false, title, onSave, onClose }
   return <div className="diagram-preview">
     {status && <p className="diagram-status" role="status">{t(status)}</p>}
     {error && <p className="diagram-error" role="alert">{t(error)}</p>}
+    {/* allow-same-origin retains diagrams.net's origin, not the application's.
+        Keep the URL external and the postMessage origin/window checks together. */}
     <iframe key={attempt} ref={frameRef} src={frameUrl} title={title}
       className={`diagram-frame${readOnly ? '' : ' diagram-frame-editor'}`}
       sandbox="allow-scripts allow-same-origin allow-downloads" referrerPolicy="no-referrer"

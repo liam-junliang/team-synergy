@@ -1,0 +1,308 @@
+{
+  "schema_version": 1,
+  "reviewer": "/root/ua_quality_benchmark",
+  "reviewed_at": "2026-11-12T10:36:21.620Z",
+  "method": "manual_source_cross_check",
+  "benchmark_sha256": "54635c96fadee99597f14423b408fc72eed97da13a8751488be03a5205d183f4",
+  "graph_sha256": "ecd9a4a51572fd8f7d6f6f9281f9fb0b8ed34a06f58affceb16c9c8641acffe8",
+  "cases": [
+    {
+      "id": "Q01",
+      "score": 2,
+      "rationale": "控制面/本地执行面划分正确；README、服务构建器、HTTP客户端和agentd解释可以说明责任分离。但图中没有从CLI任务命令跨路由到应用用例的完整边，不能只靠这张图追完一个任务动作。",
+      "missing_facts": [
+        "任务HTTP路由到应用服务的具体跨批连接",
+        "由共享状态到本地执行的完整验证路径"
+      ],
+      "false_claims": [],
+      "graph_evidence": [
+        {
+          "node_id": "b5:f-cli-api-client",
+          "quote": "CLI 到 core-api 的 HTTP 同步客户端"
+        }
+      ],
+      "source_refs": [
+        "README.md:1-78",
+        "apps/cli/src/api-client.ts:1-94",
+        "apps/core-api/src/routes/tasks.ts:58-100",
+        "apps/agentd/src/supervisor.ts:1-85"
+      ]
+    },
+    {
+      "id": "Q02",
+      "score": 1,
+      "rationale": "能定位任务服务与任务模块，但摘要没有分派、身份/Profile、前置任务状态或活动Run冲突的条件。",
+      "missing_facts": [
+        "依赖必须closed",
+        "assignee/profile/base_snapshot匹配",
+        "已有活动Run或交接拒绝",
+        "verifier的单独claim分支"
+      ],
+      "false_claims": [],
+      "graph_evidence": [
+        {
+          "node_id": "b4:file-task-service",
+          "quote": "任务列表/分配/领取/工作区"
+        }
+      ],
+      "source_refs": [
+        "packages/application/src/task-service.ts:396-552",
+        "packages/application/src/execution-guard.ts:9-17"
+      ]
+    },
+    {
+      "id": "Q03",
+      "score": 1,
+      "rationale": "任务与验收入口可导航，但没有解释Builder自测、Verifier全验收覆盖与管理者关闭的不同职责和状态结果。",
+      "missing_facts": [
+        "self_test pass只到submitted",
+        "verifier_review全验收覆盖",
+        "fail/inconclusive回failed",
+        "verified且owner/admin管理权限才close"
+      ],
+      "false_claims": [],
+      "graph_evidence": [
+        {
+          "node_id": "b4:file-project-use-cases",
+          "quote": "以及验收、关闭和任务历史"
+        }
+      ],
+      "source_refs": [
+        "packages/application/src/task-service.ts:797-879",
+        "packages/application/src/project-use-cases.ts:572-655",
+        "packages/application/src/project-use-cases.ts:702-748",
+        "packages/application/src/project-access.ts:9-14",
+        "packages/domain/src/task-state-machine.ts:96-129"
+      ]
+    },
+    {
+      "id": "Q04",
+      "score": 1,
+      "rationale": "提到正确边界和agentd租约监护，但没有具体写入拒绝条件、已撤销/过期租约与epoch-zero兼容例外。不能把边界名词当成已解释守卫。",
+      "missing_facts": [
+        "run/task epoch与设备租约一致",
+        "撤权/未完成交接与失效租约拒绝",
+        "epoch-zero仅在其他守卫之后兼容"
+      ],
+      "false_claims": [],
+      "graph_evidence": [
+        {
+          "node_id": "b3:file-execution-use-cases",
+          "quote": "以 Run 所有者、设备、项目访问和 execution epoch 做边界"
+        }
+      ],
+      "source_refs": [
+        "packages/application/src/execution-guard.ts:19-55",
+        "packages/application/src/execution-use-cases.ts:1-128",
+        "apps/agentd/src/supervisor.ts:1-85"
+      ]
+    },
+    {
+      "id": "Q05",
+      "score": 1,
+      "rationale": "交接功能清单基本正确，但不能回答何时停止旧执行、何时目标才获得执行权以及为什么需要来源漂移检查。",
+      "missing_facts": [
+        "prepare即暂停source并撤旧lease",
+        "stop确认与workspace manifest才允许发布",
+        "独立目标Run/工作区和ready receipt",
+        "来源principal保留且activate才转执行人"
+      ],
+      "false_claims": [],
+      "graph_evidence": [
+        {
+          "node_id": "b3:file-handover-use-cases",
+          "quote": "上下文编译、发布、查看、接受、取消与恢复"
+        }
+      ],
+      "source_refs": [
+        "packages/application/src/handover-use-cases.ts:204-219",
+        "packages/application/src/handover-use-cases.ts:314-375",
+        "packages/application/src/handover-use-cases.ts:383-447"
+      ]
+    },
+    {
+      "id": "Q06",
+      "score": 1,
+      "rationale": "知道存在评审与需求修订，但没有说明评审绑定具体修订、显式管理者close与执行状态分离。",
+      "missing_facts": [
+        "review绑定document_revision_id",
+        "vote不能自动close",
+        "审批结论不意味着实现或交付完成"
+      ],
+      "false_claims": [],
+      "graph_evidence": [
+        {
+          "node_id": "b4:file-requirement-collaboration-use-cases",
+          "quote": "评审投票/结论及访问审计"
+        }
+      ],
+      "source_refs": [
+        "packages/application/src/requirement-collaboration-use-cases.ts:419-486",
+        "packages/application/src/requirement-document-use-cases.ts:275-354"
+      ]
+    },
+    {
+      "id": "Q07",
+      "score": 1,
+      "rationale": "能找到所有权与注销用例；请求、接受和取消的功能枚举没有说明接收人本人、过期、注销交接清单和最后管理员限制。",
+      "missing_facts": [
+        "请求≠接受且只能接收人接受",
+        "注销前所有权/未结任务/活动Run清空",
+        "最后管理员保护",
+        "历史保留与设备/租约撤销"
+      ],
+      "false_claims": [],
+      "graph_evidence": [
+        {
+          "node_id": "b3:file-ownership-use-cases",
+          "quote": "所有权转移与账号关闭流程"
+        }
+      ],
+      "source_refs": [
+        "packages/application/src/ownership-use-cases.ts:141-181",
+        "packages/application/src/ownership-use-cases.ts:224-288"
+      ]
+    },
+    {
+      "id": "Q08",
+      "score": 1,
+      "rationale": "策略模块可定位，未给出明确/继承的优先级及private/team_read/team_write语义；核心project-access文件也未覆盖。",
+      "missing_facts": [
+        "owner→explicit→team优先级",
+        "team_read=viewer/team_write=member",
+        "viewer及archived修改拒绝"
+      ],
+      "false_claims": [],
+      "graph_evidence": [
+        {
+          "node_id": "b4:file-project-policy-use-cases",
+          "quote": "继承写权限交接约束及审计"
+        }
+      ],
+      "source_refs": [
+        "packages/application/src/project-access.ts:9-63",
+        "packages/application/src/project-policy-use-cases.ts:1-77"
+      ]
+    },
+    {
+      "id": "Q09",
+      "score": 1,
+      "rationale": "只有技能生命周期与Run清单导航；未描述精确修订冻结、旧Run空清单、当前授权重新核验或交接复制。",
+      "missing_facts": [
+        "固定revision/package_sha/generation",
+        "legacy无manifest不套当前安装",
+        "固定版本仍受当前授权约束",
+        "交接同项目复制固定清单"
+      ],
+      "false_claims": [],
+      "graph_evidence": [
+        {
+          "node_id": "b4:file-skills-use-cases",
+          "quote": "安装及项目/Run 清单"
+        }
+      ],
+      "source_refs": [
+        "packages/application/src/skills-run.ts:19-85",
+        "packages/application/src/skills-use-cases.ts:1-70",
+        "packages/application/src/handover-use-cases.ts:393-402"
+      ]
+    },
+    {
+      "id": "Q10",
+      "score": 1,
+      "rationale": "测试资产/执行/缺陷的职责导航正确，但读者无法知道历史case snapshot、is_outdated或仅fail结果可关联缺陷。",
+      "missing_facts": [
+        "执行固定case/asset修订和snapshot",
+        "后续修订只标outdated不改历史",
+        "仅fail结果可连缺陷",
+        "定义不是执行事实"
+      ],
+      "false_claims": [],
+      "graph_evidence": [
+        {
+          "node_id": "b5:f-testing",
+          "quote": "版本修订及测试执行记录"
+        }
+      ],
+      "source_refs": [
+        "packages/application/src/testing-use-cases.ts:186-198",
+        "packages/application/src/testing-use-cases.ts:209-260",
+        "packages/application/src/testing-use-cases.ts:266-306"
+      ]
+    },
+    {
+      "id": "Q11",
+      "score": 1,
+      "rationale": "可以导航测试资产用例，但未包含testing-content文件，未解释上传真实性/配额检查或list去除正文。",
+      "missing_facts": [
+        "safe basename/MIME/canonical base64/6MiB",
+        "服务端计算SHA和size并拒绝不匹配",
+        "list不返回bytes但历史detail保留"
+      ],
+      "false_claims": [],
+      "graph_evidence": [
+        {
+          "node_id": "b5:f-testing",
+          "quote": "实现测试用例与测试资产的定义、查询"
+        }
+      ],
+      "source_refs": [
+        "packages/application/src/testing-content.ts:32-55",
+        "packages/application/src/testing-content.ts:71-88",
+        "packages/application/src/testing-use-cases.ts:106-122",
+        "packages/application/src/testing-use-cases.ts:311-324"
+      ]
+    },
+    {
+      "id": "Q12",
+      "score": 2,
+      "rationale": "能说明安全捕获与提交前指纹复核，intake-skill又明确不隐式发布；CLI摘要提到审阅计划hash和依赖顺序。仍缺冻结计划具体拒绝条件与部分发布的状态语义。",
+      "missing_facts": [
+        "逐候选create/bind/skip和依赖skip拒绝",
+        "manage权限与当前plan_hash严格一致",
+        "按项恢复，不能声称整批原子"
+      ],
+      "false_claims": [],
+      "graph_evidence": [
+        {
+          "node_id": "b6:file:apps/cli/src/intake-source.ts",
+          "quote": "排除敏感文件和目录，读取候选包并在提交前重新校验源码指纹"
+        }
+      ],
+      "source_refs": [
+        "apps/cli/src/intake-source.ts:10-28",
+        "apps/cli/src/intake-source.ts:119-161",
+        "packages/application/src/intake-use-cases.ts:203-234",
+        "packages/application/src/intake-use-cases.ts:256-336"
+      ]
+    }
+  ],
+  "architecture_assessment": {
+    "module_partition": {
+      "score": 2,
+      "maximum": 5,
+      "rationale": "33个非文件节点分属六个输入批次，层级按工程/入口/用例包反复切分；业务职责与技术层交错，缺一份统一主责地图。"
+    },
+    "business_explanation": {
+      "score": 1,
+      "maximum": 5,
+      "rationale": "多为文件功能清单，关键状态、拒绝路径和授权条件缺失。"
+    },
+    "dependency_synthesis": {
+      "score": 1,
+      "maximum": 5,
+      "rationale": "134条边全部留在b1至b6批次内；不能串起跨批的客户端、路由、守卫、领域状态机及持久化。"
+    },
+    "source_traceability": {
+      "score": 3,
+      "maximum": 5,
+      "rationale": "72文件的路径/范围合法且commit一致；许多锚点覆盖整文件，无法为具体业务断言定位精确条件，347文件不在UA解释覆盖中。"
+    },
+    "takeover_usefulness": {
+      "score": 1,
+      "maximum": 5,
+      "rationale": "架构入口与Intake约束有一定接手帮助，多数正常/拒绝操作题只能指向源文件，不能仅凭图说明规则和验证计划。"
+    }
+  },
+  "safety_statement": "本次受审问题未发现明确的严重相反断言；这不证明图中所有未抽查叙述都正确。缺少解释单独计为遗漏。原生索引、源码覆盖和语义质量分开报告。"
+}

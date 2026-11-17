@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { registerProjectMaterialRoutes } from './project-materials.js';
 import {
   PROJECT_DOCUMENT_INPUT_KINDS,
   createProjectDocumentUseCases,
@@ -25,6 +26,7 @@ function statusOf(value: unknown): ProjectDocumentStatus | undefined {
 
 /** Project handoff library: nested folders, multiple documents and immutable revisions. */
 export function registerProjectDocumentRoutes(app: FastifyInstance, db: Db): void {
+  registerProjectMaterialRoutes(app, db);
   const uc = createProjectDocumentUseCases(db);
 
   app.get<{
@@ -69,6 +71,7 @@ export function registerProjectDocumentRoutes(app: FastifyInstance, db: Db): voi
 
   app.post<{ Params: { project_code: string }; Body: Record<string, unknown> }>(
     '/projects/:project_code/handoff/documents',
+    { bodyLimit: 8 * 1024 * 1024 },
     async (request) => {
       const body = request.body ?? {};
       return await uc.createDocument({
@@ -89,6 +92,7 @@ export function registerProjectDocumentRoutes(app: FastifyInstance, db: Db): voi
 
   app.patch<{ Params: { document_code: string }; Body: Record<string, unknown> }>(
     '/handoff-documents/:document_code',
+    { bodyLimit: 8 * 1024 * 1024 },
     async (request) => {
       const body = request.body ?? {};
       return await uc.reviseDocument({
@@ -103,6 +107,7 @@ export function registerProjectDocumentRoutes(app: FastifyInstance, db: Db): voi
         content: String(body.content ?? ''),
         changeSummary: String(body.change_summary ?? ''),
         status: statusOf(body.status),
+        baseRevision: body.base_revision === undefined ? undefined : typeof body.base_revision === 'number' ? body.base_revision : NaN,
       });
     },
   );

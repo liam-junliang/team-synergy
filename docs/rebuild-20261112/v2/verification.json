@@ -1,0 +1,395 @@
+{
+  "source": {
+    "kind": "draft",
+    "snapshot_id": "256f8b15f9dc0fa80e7f56aa9d1b2b59f4ef5104a16926dfbc9ad47f4b64137b",
+    "commit": "92728fbec04cfa34fee4421cb0a9319d1b755164",
+    "tree": "49552be4701dabf53fee33e09f50c4224a85d918",
+    "manifest_sha256": "fbef191aec7613bc168d383a3cc49c57cf6220968ef02a3bab4d4cdd483b937c"
+  },
+  "dossier": {
+    "sourceFiles": 677,
+    "surfaces": 83,
+    "modules": 13,
+    "features": 104,
+    "journeys": 7,
+    "citedRanges": 672
+  },
+  "platform": {
+    "documents": [
+      {
+        "file": "design-brief.md",
+        "kind": "project",
+        "title": "TeamSynergy 高阶设计背景与模块职责",
+        "code": "HRHEHPAKE11QK5SB1HQ1",
+        "revision": 2,
+        "source": "5MW8E5JHTVEYY18YHZXY",
+        "sha": "2c0be9fdf5b7cd92d0a54e474a0afbbf38971277a9aeac0bc61eb2b8fd5b57e8"
+      },
+      {
+        "file": "modules/M01-identity.md",
+        "kind": "requirement",
+        "title": "M01 账号、登录与设备身份",
+        "code": "A7ZY3TE5EBTNTS0HFKD6",
+        "revision": 1,
+        "source": "WCR3GXPRXDD52BH49A2Z",
+        "sha": "5a8656f5faf0a5fa4857df6637a11f965023f5c90a92ad9a68d83aebbabd4eb0"
+      },
+      {
+        "file": "modules/M02-project-access.md",
+        "kind": "requirement",
+        "title": "M02 团队、项目与所有权",
+        "code": "P1439ZKZ4AE7QW66RKX7",
+        "revision": 1,
+        "source": "N6HQ34V54G8B275VBH7S",
+        "sha": "8afe21ad35eb4e5da684d3e0bfba924e7b609c6d6dd7a2e8f2f2ebcb8b4c8e6d"
+      },
+      {
+        "file": "modules/M03-planning.md",
+        "kind": "requirement",
+        "title": "M03 项目首页、规划与仓库",
+        "code": "59V0RB5T93QDDA74V1BW",
+        "revision": 1,
+        "source": "XAGWN3DX6F4FGFXMHKYR",
+        "sha": "b4948f45d12197b80b237a70c091087a2c28ed535d78fa312e503ff7d6f1cc59"
+      },
+      {
+        "file": "modules/M04-requirements.md",
+        "kind": "requirement",
+        "title": "M04 想法、议题与需求基线",
+        "code": "9SCC711X4SXZ0QWXVNTZ",
+        "revision": 1,
+        "source": "VXYEAAQ0ED5P08MVKNPE",
+        "sha": "e43df17f2fff3c2e48d8da9171a3838bd3cc4fbcf7caa982309870f9f05bce62"
+      },
+      {
+        "file": "modules/M05-design.md",
+        "kind": "requirement",
+        "title": "M05 原型与架构设计",
+        "code": "JW1HPRRY7W7ZQMEDJV3E",
+        "revision": 1,
+        "source": "9PQRBPXSTJ8W0BTH9SZP",
+        "sha": "5bd6fc92e0054067f4cb357cf223ab2d82ba77a62cda7e82c23c87ca2de56901"
+      },
+      {
+        "file": "modules/M06-documents.md",
+        "kind": "requirement",
+        "title": "M06 资料库与文档质量",
+        "code": "PJ5WSJ6A2S2SCEF5FBQJ",
+        "revision": 1,
+        "source": "XPP9NQ81065BTVSN89DG",
+        "sha": "4bd1b48ab60fc78439d447e385bae2add4de297e5f147e2d3655dba96d0f79d9"
+      },
+      {
+        "file": "modules/M07-task.md",
+        "kind": "requirement",
+        "title": "M07 任务与执行证据",
+        "code": "EJFJ0C1W8ET8HPQXV5WG",
+        "revision": 1,
+        "source": "BFBTZWSFKAEFTH9QR00J",
+        "sha": "fb471ed17cc86864298bbf7e805da568cc0979972d788991e2b4dcfb5cac7d3d"
+      },
+      {
+        "file": "modules/M08-run-handover.md",
+        "kind": "requirement",
+        "title": "M08 本地运行、设备租约与成员交接",
+        "code": "CDK1QN2379DCEAXF5TTS",
+        "revision": 1,
+        "source": "8BETF9SWP4SXCC8X60SV",
+        "sha": "b0ab7eb7f44b36522da582322f4866f71863313ffe56c191a277e8d791b169b8"
+      },
+      {
+        "file": "modules/M09-quality-defect.md",
+        "kind": "requirement",
+        "title": "M09 测试用例、资料、执行与缺陷回归",
+        "code": "TMEX2VDFSXG60SVQW2KK",
+        "revision": 1,
+        "source": "9X1VNBW27YZZKJ9GWE5M",
+        "sha": "8004f07975884410d91db94ae177989e407abfc02bd6ca4e596710772badb2e7"
+      },
+      {
+        "file": "modules/M10-code-intake.md",
+        "kind": "requirement",
+        "title": "M10 代码理解与规格接入",
+        "code": "R8HT8GFQQPTXK6RDS9YR",
+        "revision": 1,
+        "source": "TJS9TTAXX3654Y1QTT60",
+        "sha": "08f5c4359a064a8eb7af3503d4764fd914796dc6dea9b2e8aa54b61b87081f30"
+      },
+      {
+        "file": "modules/M11-agent-skills.md",
+        "kind": "requirement",
+        "title": "M11 系统 Agent 修改稿与技能版本",
+        "code": "15D6Z3C4RY1K02ZG8TXD",
+        "revision": 1,
+        "source": "EE55NXX7C5YHPS0P2RFB",
+        "sha": "3cc7592452eb029f44ae678e5411db5c553bec5a5695db55e9750faa64cca771"
+      },
+      {
+        "file": "modules/M12-governance.md",
+        "kind": "requirement",
+        "title": "M12 管理、审计与系统运维",
+        "code": "94ED19R7VEMVQMFWVT9W",
+        "revision": 1,
+        "source": "JX507P1YCG201ECY3VM5",
+        "sha": "330ae72bed98ccc7dbfe68e361373baba1af5f56eeeff65ae07c8a30817d8b66"
+      },
+      {
+        "file": "modules/M13-memory.md",
+        "kind": "requirement",
+        "title": "M13 项目共识、个人记忆与成员 Agent 接入",
+        "code": "AX6DF68YAVH8519JTV56",
+        "revision": 1,
+        "source": "ZX2QVVGCWQDYECQ3T4TM",
+        "sha": "5f9fc15ad7bf2681b2fc4099af215a67f2906eaa5ceed26617d966170b774164"
+      },
+      {
+        "file": "architecture.md",
+        "kind": "architecture",
+        "title": "系统设计、数据所有权与跨模块流程",
+        "code": "909XV48HYVV01HSSVC3V",
+        "revision": 1,
+        "source": "SCVRQJA0PRRKKNGRBY2Z",
+        "sha": "721d64129d1e753295266559a9634fd5d279445e47e47b2e4df78ab3b86d2a9b"
+      },
+      {
+        "file": "acceptance.md",
+        "kind": "testing",
+        "title": "跨模块业务验收与证据矩阵",
+        "code": "537J3RKPAR8BKSSYBDNN",
+        "revision": 1,
+        "source": "4WYR17VDYK9HJYE94E9C",
+        "sha": "c4742094d1883662991622bcc676f6aac043244741cf2538d4b014e32f53f87f"
+      },
+      {
+        "file": "contracts.md",
+        "kind": "project",
+        "title": "数据接口与权限契约",
+        "code": "YN3418WK0ZGW1AETZAMJ",
+        "revision": 1,
+        "source": "EARPM4ASQZQ1K5YM8P7J",
+        "sha": "9242e9f75c5e5f5c41957b19ee4e55fb63e8053834cc6d63754d3c2831c1a3a6"
+      },
+      {
+        "file": "operations.md",
+        "kind": "project",
+        "title": "部署、降级与恢复验收",
+        "code": "BNNCCV9XXQ1AS8MFK80S",
+        "revision": 1,
+        "source": "13KENK5KYJN8XCV6GTPQ",
+        "sha": "cca9df976ef890242a46633c7a527142db8a1f3523247290d3bad8dc6ba0cc99"
+      },
+      {
+        "file": "interaction-design.md",
+        "kind": "project",
+        "title": "交互设计与原型走查指南",
+        "code": "SWKG9K8J37TSWECN9AHE",
+        "revision": 1,
+        "source": "AGBAE33ZEEGR43Z31BVZ",
+        "sha": "0ca9b801d461fffda332ade81f4c2b5223c2f5e1d62554e4fcd10e16c2d83c06"
+      },
+      {
+        "file": "intake-protocol.md",
+        "kind": "project",
+        "title": "从代码理解到规格采纳：命令与状态走查",
+        "code": "7HFETHPGWCPZPB00GMJJ",
+        "revision": 1,
+        "source": "T63C0MQG0MRG9FASXBDP",
+        "sha": "e0fa215ee853956dab7e87786e050b7db91323350a931237b70a1f1fefea56e9"
+      }
+    ],
+    "prototypes": [
+      {
+        "file": "prototypes/access.html",
+        "title": "成员入项与权限变更",
+        "code": "R0GGFR4AG6QYPEA8EQTZ",
+        "revision": 1,
+        "status": "draft",
+        "htmlSha": "81b00d9af44dd94e49f60021a7d69e5b24860dd7d6c39b53548becf02156fde6",
+        "notesSha": "cfa32464b21e69f2248c9e2992e869625b6d49ad305f20bc7edd14e28e5d28e3"
+      },
+      {
+        "file": "prototypes/review.html",
+        "title": "从议题决定到需求基线",
+        "code": "9MCNC1CHDTMYEY0FP1YJ",
+        "revision": 1,
+        "status": "draft",
+        "htmlSha": "ebb5dd3cf6fed0f496074409ac83b72f5fd13afe92453727aedd3d3a0ea4cef7",
+        "notesSha": "155334e7c7db0e8ddafc942912287b98a4e9e8a76defb4f709a33df1443b2911"
+      },
+      {
+        "file": "prototypes/delivery.html",
+        "title": "运行交接、验证与缺陷回归",
+        "code": "4VKBFC1C1RWR9CBVDS53",
+        "revision": 1,
+        "status": "draft",
+        "htmlSha": "f69ca9657a782b0195932cf6f507fa758f17b957b839d728c57d52836306b4c2",
+        "notesSha": "cd6f7302dc2dfa9054cf6ce9766d3a63320145cbdecfd026d2382d971ef72f12"
+      },
+      {
+        "file": "prototypes/knowledge.html",
+        "title": "记忆检索与私有修订",
+        "code": "D3A7T6F2SPG51B3NV2TA",
+        "revision": 1,
+        "status": "draft",
+        "htmlSha": "6009db2231639a02d47ec37eee6907ce339c2c35ee7dbdaf89072e992fefe628",
+        "notesSha": "254cab930293a2c597d763b0fbd2347ad988c08efe56b5e32b4c2a28f4303681"
+      }
+    ]
+  },
+  "reader": {
+    "http": 24,
+    "cli": 24,
+    "mcp": 24,
+    "grep": "8BETF9SWP4SXCC8X60SV",
+    "read": "ZX2QVVGCWQDYECQ3T4TM",
+    "range": [
+      17,
+      22
+    ],
+    "memory": {
+      "enabled": true,
+      "counts": {
+        "total": 24,
+        "pending": 0,
+        "processing": 0,
+        "synced": 24,
+        "needsReconcile": 0,
+        "notQueued": 0
+      },
+      "legacyCleanupPending": 0
+    }
+  },
+  "engineIndexCardsVerified": 24,
+  "browser": {
+    "browser": "155.0.8059.12",
+    "frame": {
+      "sandbox": "allow-scripts",
+      "referrerpolicy": "no-referrer"
+    },
+    "runs": [
+      {
+        "prototype": "reference",
+        "size": "desktop",
+        "observations": 0
+      },
+      {
+        "prototype": "reference",
+        "size": "mobile",
+        "observations": 0
+      },
+      {
+        "prototype": "access",
+        "size": "desktop",
+        "observations": 21
+      },
+      {
+        "prototype": "access",
+        "size": "mobile",
+        "observations": 21
+      },
+      {
+        "prototype": "review",
+        "size": "desktop",
+        "observations": 18
+      },
+      {
+        "prototype": "review",
+        "size": "mobile",
+        "observations": 18
+      },
+      {
+        "prototype": "delivery",
+        "size": "desktop",
+        "observations": 28
+      },
+      {
+        "prototype": "delivery",
+        "size": "mobile",
+        "observations": 28
+      },
+      {
+        "prototype": "knowledge",
+        "size": "desktop",
+        "observations": 5
+      },
+      {
+        "prototype": "knowledge",
+        "size": "mobile",
+        "observations": 5
+      }
+    ],
+    "visual": {
+      "score": 94,
+      "verdict": "pass",
+      "category_match": true,
+      "differences": [
+        "访问页使用深绿侧栏，评审页使用浅色侧栏，参考界面使用深蓝顶栏。",
+        "交付页围绕单个任务呈现编号、状态和证据，知识页围绕单条来源呈现修订，参考看板并排展示多条任务。"
+      ],
+      "suggestions": [],
+      "reasoning": "四个原型均可在桌面和窄屏辨识当前情境、状态与下一步。知识页第四个选项已整体换行，窄屏操作时的焦点也清晰可见。"
+    }
+  },
+  "projectSkill": {
+    "code": "SAV4S0KR9RAK2NM9JW2H",
+    "revision": 1,
+    "packageSha": "f19ee152e4a03efd0332294c2af87b017257aed56280f4330df2abcf6a89120b",
+    "files": [
+      "SKILL.md",
+      "agents/openai.yaml",
+      "references/artifacts.md",
+      "references/verification.md",
+      "scripts/check_dossier.py"
+    ],
+    "project": "19Q4K7PDARXQ9JHW6R6F"
+  },
+  "gateNegativeChecks": {
+    "control": {
+      "code": 0,
+      "result": "{\"sourceFiles\": 4, \"surfaces\": 4, \"modules\": 3, \"features\": 7, \"journeys\": 6, \"citedRanges\": 42}"
+    },
+    "drift": {
+      "code": 1,
+      "result": "source drift: lib/argument.js"
+    },
+    "surface": {
+      "code": 1,
+      "result": "unassigned surfaces: ['lib/argument.js']"
+    },
+    "owner": {
+      "code": 1,
+      "result": "invalid disposition lib/argument.js"
+    },
+    "citation": {
+      "code": 1,
+      "result": "argument.md: bad range lib/argument.js:99999-"
+    },
+    "state": {
+      "code": 1,
+      "result": "missing interface state in variable-argument"
+    },
+    "case": {
+      "code": 1,
+      "result": "unresolved acceptance case in variable-argument"
+    },
+    "newendpoint": {
+      "code": 1,
+      "result": "unfrozen surface: lib\\new.js"
+    }
+  },
+  "tests": {
+    "passed": 83,
+    "failed": 0,
+    "fileConcurrency": 1,
+    "isolatedPostgres": true,
+    "suites": [
+      "apps/core-api/tests/design-prototypes.test.mjs",
+      "apps/web/tests/design-workbench.test.mjs",
+      "packages/application/tests/permissions-policy.test.mjs",
+      "packages/application/tests/baseline-use-cases.test.mjs",
+      "packages/application/tests/handover-use-cases.test.mjs",
+      "packages/application/tests/defect-use-cases.test.mjs",
+      "packages/application/tests/memory-slice.test.mjs"
+    ]
+  }
+}

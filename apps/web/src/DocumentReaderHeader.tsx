@@ -27,7 +27,7 @@ export function DocumentReaderHeader({ breadcrumb, title, summary, metadata, act
   useEffect(() => {
     if (headerRef.current) return trackDocumentReaderHeaderHeight(headerRef.current);
   }, []);
-  return <header ref={headerRef} className="sticky top-0 z-10 border-b border-slate-200 bg-white px-4 py-5 sm:px-6">
+  return <header ref={headerRef} className="sticky top-0 z-10 border-b border-slate-200 bg-white px-4 py-5 sm:px-6" data-document-reader-header="">
     <div className="mb-3 flex min-h-8 flex-wrap items-center justify-between gap-3">
       <div className="flex min-w-0 items-center gap-2 text-xs text-slate-500">{breadcrumb}</div>
       <div role="group" aria-label={actionsLabel} className="flex max-w-full flex-wrap items-center gap-2">{children}</div>

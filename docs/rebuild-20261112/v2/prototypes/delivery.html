@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>交付工作台 · TeamSynergy 原型</title><style>
+:root{color-scheme:light;--bg:#eef2f6;--ink:#17283b;--muted:#43576b;--rule:#c9d4de;--brand:#075d59;--brand-light:#e0efeb;--warn:#873616;--warn-bg:#fff0e5;font-family:Inter,"Microsoft YaHei","PingFang SC",sans-serif;font-size:16px}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);line-height:1.65}a{color:var(--brand)}a:focus-visible,summary:focus-visible{outline:3px solid #b15c12;outline-offset:4px}header{background:#192c40;color:#fff;border-bottom:4px solid #559b90}header>div,.wrap{max-width:1080px;margin:auto;padding:0 30px}.bar{display:flex;align-items:center;gap:14px;min-height:62px}.mark{font:700 15px/32px "Consolas",monospace;background:#d9f1e9;color:#174841;border-radius:7px;width:33px;text-align:center}.bar strong{font-size:17px}.bar span:last-child{color:#c9d7e2;margin-left:auto;font-size:13px}.wrap{padding-top:30px;padding-bottom:50px}.intro{display:flex;align-items:end;justify-content:space-between;gap:24px;margin:0 0 18px}.intro h1{font-size:clamp(26px,3.3vw,39px);line-height:1.22;margin:0 0 7px;letter-spacing:-.035em}.intro p{font-size:14px;color:var(--muted);margin:0}.nav{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 20px}.nav a{padding:6px 14px;border:1px solid var(--rule);border-radius:6px;background:white;text-decoration:none;font-size:14px;font-weight:600}.nav a:hover,.actions a:hover{box-shadow:0 0 0 2px #93b7b3}.app{position:relative}.screen{display:none;background:white;border:1px solid var(--rule);border-radius:12px;overflow:hidden;box-shadow:0 4px 14px #1832450b;scroll-margin-top:12px}body:not(:has(.route-choice:checked)) .screen:target{display:block}body:not(:has(.route-choice:checked)) .app:not(:has(.screen:target)) #h-start{display:block}.cap{padding:15px 25px;border-bottom:1px solid var(--rule);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;background:#f8fafb}.cap small{font-size:13px;color:var(--muted)}.cap strong{font-size:14px}.main{padding:24px;display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);align-items:start;gap:24px}.main h2{margin:8px 0;font-size:clamp(23px,3vw,32px);line-height:1.3;letter-spacing:-.025em}.main p{margin:8px 0 16px}.status{border-radius:5px;background:var(--brand-light);color:#074d42;display:inline-block;padding:3px 10px;font-weight:650;font-size:13px;overflow-wrap:anywhere}.issue .status{background:var(--warn-bg);color:var(--warn)}.statecode{font:500 12px/1.4 Consolas,monospace;display:inline-block;padding-left:6px}.facts{margin:0;background:#f4f7f9;padding:16px 19px;border-radius:8px;border:1px solid #dae2e9}.facts dt{font-size:13px;color:var(--muted)}.facts dd{font-size:15px;overflow-wrap:anywhere;margin:2px 0 12px;font-weight:600}.facts dd:last-child{margin:2px 0 0}.actions{padding:0 24px 22px;display:flex;gap:10px;flex-wrap:wrap}.actions a{display:inline-block;border:1px solid var(--rule);border-radius:6px;padding:8px 14px;text-decoration:none;font-weight:600;color:var(--ink);background:#fff;font-size:14px}.actions a:first-child{background:var(--brand);border-color:var(--brand);color:#fff}details{border-top:1px solid var(--rule);padding:14px 24px;background:#fafcfd;font-size:14px;color:var(--muted)}summary{cursor:pointer;font-weight:600;color:var(--ink);width:fit-content;max-width:100%}details p{margin:9px 0;max-width:75ch}.refs{font-family:Consolas,monospace;color:#425c71;font-size:12px}.nav-current{font-weight:650;color:var(--brand)}@media(max-width:680px){header>div,.wrap{padding-left:15px;padding-right:15px}.wrap{padding-top:19px}.bar{min-height:52px;gap:9px}.intro{display:block}.nav{gap:6px}.nav a{padding:6px 10px}.cap{padding:12px 15px}.main{padding:16px;display:block}.main p{margin:8px 0 14px}.facts{margin:15px 0 2px}.actions{padding:0 16px 16px;gap:8px}.actions a{max-width:100%}details{padding:13px 16px}.bar span:last-child{font-size:12px}}@media print{body{background:white}.intro,.nav,.bar{display:none}.screen{box-shadow:none}.main{display:block}.actions{display:none}}
+
+body:has(.route-choice:checked) .app .screen{display:none}
+body:has(input.go-h-start:checked) .app #h-start{display:block}
+body:has(input.go-h-prepared:checked) .app #h-prepared{display:block}
+body:has(input.go-h-noack:checked) .app #h-noack{display:block}
+body:has(input.go-h-package:checked) .app #h-package{display:block}
+body:has(input.go-h-published:checked) .app #h-published{display:block}
+body:has(input.go-h-accepted:checked) .app #h-accepted{display:block}
+body:has(input.go-h-restoring:checked) .app #h-restoring{display:block}
+body:has(input.go-h-wrong-device:checked) .app #h-wrong-device{display:block}
+body:has(input.go-h-ready:checked) .app #h-ready{display:block}
+body:has(input.go-h-drift:checked) .app #h-drift{display:block}
+body:has(input.go-h-contract:checked) .app #h-contract{display:block}
+body:has(input.go-h-approved:checked) .app #h-approved{display:block}
+body:has(input.go-h-approved-ready:checked) .app #h-approved-ready{display:block}
+body:has(input.go-h-active:checked) .app #h-active{display:block}
+body:has(input.go-h-cancel:checked) .app #h-cancel{display:block}
+body:has(input.go-h-resumed:checked) .app #h-resumed{display:block}
+body:has(input.go-q-failed:checked) .app #q-failed{display:block}
+body:has(input.go-q-pass:checked) .app #q-pass{display:block}
+body:has(input.go-q-reported:checked) .app #q-reported{display:block}
+body:has(input.go-q-existing:checked) .app #q-existing{display:block}
+body:has(input.go-q-triaged:checked) .app #q-triaged{display:block}
+body:has(input.go-q-fixing:checked) .app #q-fixing{display:block}
+body:has(input.go-q-blocked:checked) .app #q-blocked{display:block}
+body:has(input.go-q-verified:checked) .app #q-verified{display:block}
+body:has(input.go-q-retest:checked) .app #q-retest{display:block}
+body:has(input.go-q-closed:checked) .app #q-closed{display:block}
+body:has(input.go-q-reopened:checked) .app #q-reopened{display:block}
+body:has(input.go-q-rejected:checked) .app #q-rejected{display:block}
+body:has(input.go-t-building:checked) .app #t-building{display:block}
+body:has(input.go-t-submitted:checked) .app #t-submitted{display:block}
+body:has(input.go-t-partial:checked) .app #t-partial{display:block}
+body:has(input.go-t-rework:checked) .app #t-rework{display:block}
+body:has(input.go-t-reassigned:checked) .app #t-reassigned{display:block}
+body:has(input.go-t-verified:checked) .app #t-verified{display:block}
+body:has(input.go-t-closed:checked) .app #t-closed{display:block}
+.nav,.actions{align-items:flex-start}.nav details,.actions details{padding:0;border:1px solid var(--rule);border-radius:6px;background:white;max-width:100%}.nav summary,.actions summary{padding:7px 13px;list-style:none;cursor:pointer;color:var(--ink);font-size:14px;line-height:1.65}.nav summary::marker,.actions summary::marker{content:""}.nav summary::-webkit-details-marker,.actions summary::-webkit-details-marker{display:none}.nav summary:after,.actions summary:after{content:" ›";margin-left:4px;color:inherit}.nav details:hover,.actions details:hover{border-color:#68968d}.actions details:first-child>summary{background:var(--brand);color:white;border-radius:5px}.nav details[open],.actions details[open]{background:#f4f8f7}.confirm{display:flex;align-items:center;gap:7px;padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer;color:#075d59}.confirm input{margin:0;accent-color:var(--brand);width:16px;height:16px}.confirm:focus-within{outline:2px solid #ac570a;outline-offset:-3px}.nav details,.actions details{overflow-wrap:anywhere}.screen[tabindex]{outline-offset:-3px}
+</style></head>
+<body><header><div class="bar"><span class="mark" aria-hidden="true">TS</span><strong>TeamSynergy</strong><span>订单平台项目</span></div></header>
+<main class="wrap"><div class="intro"><div><h1>交付工作台</h1><p>交互原型 · 展开操作并选中目标状态，演练交接、验收与回归。所有数据均为示例。</p></div></div>
+<nav class="nav" aria-label="切换演练起点"><details name="route-operation"><summary>设备交接</summary><label class="confirm"><input class="route-choice go-h-start" type="radio" name="route-state" value="h-start"><span>进入「准备交出任务」</span></label></details><details name="route-operation"><summary>任务验收</summary><label class="confirm"><input class="route-choice go-t-building" type="radio" name="route-state" value="t-building"><span>进入「提交产物和自测证据」</span></label></details><details name="route-operation"><summary>缺陷回归</summary><label class="confirm"><input class="route-choice go-q-failed" type="radio" name="route-state" value="q-failed"><span>进入「从失败结果发起修复」</span></label></details></nav>
+<div class="app"><section tabindex="-1" id="h-start" aria-labelledby="title-h-start" class="screen ">
+<div class="cap"><strong><span class="nav-current">交接</span> / HAND-08</strong><small>执行人 · 林澈</small></div>
+<div class="main"><div><span class="status">交接前核对<span class="statecode">running</span></span><h2 id="title-h-start">准备交出任务</h2><p>订单导出任务已由林澈领取。接手人宋宁拥有当前项目的写权限。</p></div>
+<dl class="facts"><dt>任务</dt><dd>TASK-31 · 导出失败保留诊断记录</dd><dt>源 Run</dt><dd>RUN-A · active</dd><dt>接手设备</dt><dd>宋宁 · 设备 B</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>准备交接</summary><label class="confirm"><input class="route-choice go-h-prepared" type="radio" name="route-state" value="h-prepared"><span>进入「确认源执行已停止」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>提交准备请求只会先暂停源 Run。管理者发布后，宋宁才能阅读交接包。</p><span class="refs">M08-F05</span></details></section>
+<section tabindex="-1" id="h-prepared" aria-labelledby="title-h-prepared" class="screen ">
+<div class="cap"><strong><span class="nav-current">交接</span> / HAND-08</strong><small>执行人 · 林澈</small></div>
+<div class="main"><div><span class="status">等待停止确认<span class="statecode">preparing</span></span><h2 id="title-h-prepared">确认源执行已停止</h2><p>源 Run 已暂停。请核实本机托管进程已停止、仓库快照可获取，再将清单交给管理者。</p></div>
+<dl class="facts"><dt>源 Run</dt><dd>RUN-A · suspended</dd><dt>代码清单</dt><dd>导出服务 · 固定 commit、tree</dd><dt>停止回执</dt><dd>待确认 · 托管进程</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>提交快照与停止回执</summary><label class="confirm"><input class="route-choice go-h-package" type="radio" name="route-state" value="h-package"><span>进入「审核交接包」</span></label></details><details name="route-operation"><summary>查看缺少回执时的发布结果</summary><label class="confirm"><input class="route-choice go-h-noack" type="radio" name="route-state" value="h-noack"><span>进入「缺少源停止回执」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>准备阶段的交接包只对源执行者及项目管理者可读。收到停止确认前，发布会被拦截。</p><span class="refs">M08-F05、M08-F06</span></details></section>
+<section tabindex="-1" id="h-noack" aria-labelledby="title-h-noack" class="screen issue">
+<div class="cap"><strong><span class="nav-current">交接</span> / HAND-08</strong><small>项目管理员 · 周岚</small></div>
+<div class="main"><div><span class="status">发布被拦截<span class="statecode">preparing</span></span><h2 id="title-h-noack">缺少源停止回执</h2><p>代码清单已经登记，源设备仍缺少有效停止回执。接手人尚不能获取未发布材料。</p></div>
+<dl class="facts"><dt>错误</dt><dd>handover_not_ready</dd><dt>源 Run</dt><dd>RUN-A · suspended</dd><dt>交接包</dt><dd>未发布</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>回到源执行人</summary><label class="confirm"><input class="route-choice go-h-prepared" type="radio" name="route-state" value="h-prepared"><span>进入「确认源执行已停止」</span></label></details><details name="route-operation"><summary>取消这次交接</summary><label class="confirm"><input class="route-choice go-h-cancel" type="radio" name="route-state" value="h-cancel"><span>进入「交接已取消，源 Run 仍暂停」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>让源执行者从准备设备补交停止确认；管理者的发布操作不能代替 A 的回执。</p><span class="refs">M08-F06、M08-F07、M08-F11</span></details></section>
+<section tabindex="-1" id="h-package" aria-labelledby="title-h-package" class="screen ">
+<div class="cap"><strong><span class="nav-current">交接</span> / HAND-08</strong><small>项目管理员 · 周岚</small></div>
+<div class="main"><div><span class="status">可发布<span class="statecode">preparing</span></span><h2 id="title-h-package">审核交接包</h2><p>请核对接手人、固定需求版本和代码快照。源设备已提交停止回执。</p></div>
+<dl class="facts"><dt>接手人</dt><dd>宋宁 · 当前项目成员</dd><dt>需求基线</dt><dd>REQ-17 r3 · 固定正文</dd><dt>停止回执</dt><dd>源设备 A · 已确认</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>发布交接包</summary><label class="confirm"><input class="route-choice go-h-published" type="radio" name="route-state" value="h-published"><span>进入「接收固定的交接包」</span></label></details><details name="route-operation"><summary>取消交接</summary><label class="confirm"><input class="route-choice go-h-cancel" type="radio" name="route-state" value="h-cancel"><span>进入「交接已取消，源 Run 仍暂停」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>发布时还会核对接手人的写权限及资料漂移。已停机和已发布是两个独立状态。</p><span class="refs">M08-F06、M08-F07</span></details></section>
+<section tabindex="-1" id="h-published" aria-labelledby="title-h-published" class="screen ">
+<div class="cap"><strong><span class="nav-current">交接</span> / HAND-08</strong><small>接手人 · 宋宁</small></div>
+<div class="main"><div><span class="status">待接收<span class="statecode">published</span></span><h2 id="title-h-published">接收固定的交接包</h2><p>请先阅读执行摘要和需求基线，再决定是否继续。源执行者仍是任务的当前负责人。</p></div>
+<dl class="facts"><dt>源作者</dt><dd>林澈 · RUN-A</dd><dt>固定资料</dt><dd>REQ-17 r3 · 项目指南 r8</dd><dt>工作摘要</dt><dd>导出重试逻辑已改动，待验证空记录回执</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>接收交接</summary><label class="confirm"><input class="route-choice go-h-accepted" type="radio" name="route-state" value="h-accepted"><span>进入「在设备 B 恢复工作区」</span></label></details><details name="route-operation"><summary>取消交接</summary><label class="confirm"><input class="route-choice go-h-cancel" type="radio" name="route-state" value="h-cancel"><span>进入「交接已取消，源 Run 仍暂停」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>接收确认你愿意接手；变更负责人须等到恢复、就绪和激活均成功。</p><span class="refs">M08-F07</span></details></section>
+<section tabindex="-1" id="h-accepted" aria-labelledby="title-h-accepted" class="screen ">
+<div class="cap"><strong><span class="nav-current">交接</span> / HAND-08</strong><small>接手人 · 宋宁</small></div>
+<div class="main"><div><span class="status">待恢复<span class="statecode">accepted</span></span><h2 id="title-h-accepted">在设备 B 恢复工作区</h2><p>在本人设备上的另一工作目录恢复固定仓库版本，保留源执行者的历史会话。</p></div>
+<dl class="facts"><dt>目标目录</dt><dd>交接专用的独立 worktree</dd><dt>尝试编号</dt><dd>本次示例 ATT-B</dd><dt>所需上下文</dt><dd>固定资料、任务契约、技能版本和代码快照</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>恢复到独立目录</summary><label class="confirm"><input class="route-choice go-h-restoring" type="radio" name="route-state" value="h-restoring"><span>进入「核对恢复回执」</span></label></details><details name="route-operation"><summary>查看异设备回执</summary><label class="confirm"><input class="route-choice go-h-wrong-device" type="radio" name="route-state" value="h-wrong-device"><span>进入「设备与恢复尝试不匹配」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>首次恢复登记 preparing 的目标 Run。已登记后若本机步骤失败，用相同请求键恢复同一次尝试。</p><span class="refs">M08-F08</span></details></section>
+<section tabindex="-1" id="h-restoring" aria-labelledby="title-h-restoring" class="screen ">
+<div class="cap"><strong><span class="nav-current">交接</span> / HAND-08</strong><small>接手人 · 宋宁</small></div>
+<div class="main"><div><span class="status">待就绪<span class="statecode">restoring</span></span><h2 id="title-h-restoring">核对恢复回执</h2><p>核对本地工作树、固定上下文及本次尝试，向平台提交就绪回执。</p></div>
+<dl class="facts"><dt>目标 Run</dt><dd>RUN-B · preparing</dd><dt>设备 / 尝试</dt><dd>设备 B · ATT-B</dd><dt>上下文检查</dt><dd>代码 commit、工作区摘要、上下文哈希均匹配</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>提交就绪回执</summary><label class="confirm"><input class="route-choice go-h-ready" type="radio" name="route-state" value="h-ready"><span>进入「激活前最终确认」</span></label></details><details name="route-operation"><summary>改用第二台设备提交</summary><label class="confirm"><input class="route-choice go-h-wrong-device" type="radio" name="route-state" value="h-wrong-device"><span>进入「设备与恢复尝试不匹配」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>就绪只记录客户端对本次恢复的确认。此时源 Run 仍 suspended，目标不能续写任务。</p><span class="refs">M08-F08、M08-F09</span></details></section>
+<section tabindex="-1" id="h-wrong-device" aria-labelledby="title-h-wrong-device" class="screen issue">
+<div class="cap"><strong><span class="nav-current">交接</span> / HAND-08</strong><small>接手人 · 宋宁</small></div>
+<div class="main"><div><span class="status">回执被拒绝<span class="statecode">restoring</span></span><h2 id="title-h-wrong-device">设备与恢复尝试不匹配</h2><p>相同账号从另一设备提交回执，无法证明本次恢复是由已绑定设备完成。</p></div>
+<dl class="facts"><dt>错误</dt><dd>handover_receipt_invalid</dd><dt>当前设备</dt><dd>设备 C</dd><dt>绑定设备</dt><dd>设备 B · ATT-B</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>回到设备 B</summary><label class="confirm"><input class="route-choice go-h-restoring" type="radio" name="route-state" value="h-restoring"><span>进入「核对恢复回执」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>切回绑定设备并核对原尝试、commit 和上下文哈希后再提交。</p><span class="refs">M08-F08、M08-F09</span></details></section>
+<section tabindex="-1" id="h-ready" aria-labelledby="title-h-ready" class="screen ">
+<div class="cap"><strong><span class="nav-current">交接</span> / HAND-08</strong><small>接手人 · 宋宁</small></div>
+<div class="main"><div><span class="status">就绪已确认<span class="statecode">ready</span></span><h2 id="title-h-ready">激活前最终确认</h2><p>目标 Run 尚未激活。请选择资料保持不变的正常路径，或查看就绪后资料再次变动的结果。</p></div>
+<dl class="facts"><dt>源 / 目标</dt><dd>RUN-A suspended / RUN-B preparing</dd><dt>当前负责人</dt><dd>林澈</dd><dt>准备交付</dt><dd>交接基线 REQ-17 r3、指南 r8</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>激活目标 Run</summary><label class="confirm"><input class="route-choice go-h-active" type="radio" name="route-state" value="h-active"><span>进入「交接完成」</span></label></details><details name="route-operation"><summary>指南更新后尝试激活</summary><label class="confirm"><input class="route-choice go-h-drift" type="radio" name="route-state" value="h-drift"><span>进入「审阅来源变化」</span></label></details><details name="route-operation"><summary>任务契约变更后尝试激活</summary><label class="confirm"><input class="route-choice go-h-contract" type="radio" name="route-state" value="h-contract"><span>进入「任务契约变更需要重新准备」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>激活会再核对来源、当前成员与设备、回执和两端 Run 状态。</p><span class="refs">M08-F09、M08-F10</span></details></section>
+<section tabindex="-1" id="h-drift" aria-labelledby="title-h-drift" class="screen issue">
+<div class="cap"><strong><span class="nav-current">交接</span> / HAND-08</strong><small>项目管理员 · 周岚</small></div>
+<div class="main"><div><span class="status">激活受阻<span class="statecode">ready</span></span><h2 id="title-h-drift">审阅来源变化</h2><p>项目指南已从 r8 更新至 r9。上次就绪回执对应原资料，系统保留交接快照并阻止激活。</p></div>
+<dl class="facts"><dt>错误</dt><dd>context_source_changed</dd><dt>冻结 / 当前</dt><dd>项目指南 r8 → r9</dd><dt>示例批准理由</dt><dd>r9 仅调整排版，经逐项核对，本次交接继续采用 r8</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>以示例理由批准沿用 r8</summary><label class="confirm"><input class="route-choice go-h-approved" type="radio" name="route-state" value="h-approved"><span>进入「接手人重新确认原快照」</span></label></details><details name="route-operation"><summary>取消并重新准备</summary><label class="confirm"><input class="route-choice go-h-cancel" type="radio" name="route-state" value="h-cancel"><span>进入「交接已取消，源 Run 仍暂停」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>批准只覆盖本次实际审过的版本，写入理由和版本向量；原先就绪的交接会返回恢复中。</p><span class="refs">M08-F10</span></details></section>
+<section tabindex="-1" id="h-contract" aria-labelledby="title-h-contract" class="screen issue">
+<div class="cap"><strong><span class="nav-current">交接</span> / HAND-08</strong><small>项目管理员 · 周岚</small></div>
+<div class="main"><div><span class="status">不能豁免<span class="statecode">ready</span></span><h2 id="title-h-contract">任务契约变更需要重新准备</h2><p>本次异常样例中，冻结的任务契约与当前契约不同。批准沿用旧资料不能跨过契约冲突。</p></div>
+<dl class="facts"><dt>错误</dt><dd>context_contract_changed</dd><dt>冲突来源</dt><dd>任务契约</dd><dt>旧回执</dt><dd>不足以激活</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>取消旧交接</summary><label class="confirm"><input class="route-choice go-h-cancel" type="radio" name="route-state" value="h-cancel"><span>进入「交接已取消，源 Run 仍暂停」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>取消原交接，源执行人明确恢复后再按当前契约准备。这里展示守卫对变更的处理，正常任务编辑入口另有状态限制。</p><span class="refs">M08-F10、M08-F11</span></details></section>
+<section tabindex="-1" id="h-approved" aria-labelledby="title-h-approved" class="screen issue">
+<div class="cap"><strong><span class="nav-current">交接</span> / HAND-08</strong><small>接手人 · 宋宁</small></div>
+<div class="main"><div><span class="status">需重新就绪<span class="statecode">restoring</span></span><h2 id="title-h-approved">接手人重新确认原快照</h2><p>周岚已批准对已审阅的 r9 沿用 r8。原就绪回执被清除，冻结正文仍是 r8。</p></div>
+<dl class="facts"><dt>批准理由</dt><dd>排版变更已审阅，继续使用 r8</dd><dt>就绪回执</dt><dd>已清除</dd><dt>目标设备</dt><dd>设备 B · ATT-B</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>重新提交就绪回执</summary><label class="confirm"><input class="route-choice go-h-approved-ready" type="radio" name="route-state" value="h-approved-ready"><span>进入「按批准范围激活」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>同一设备重新确认原快照。后续资料若再次改变，批准不会自动涵盖新版本。</p><span class="refs">M08-F09、M08-F10</span></details></section>
+<section tabindex="-1" id="h-approved-ready" aria-labelledby="title-h-approved-ready" class="screen issue">
+<div class="cap"><strong><span class="nav-current">交接</span> / HAND-08</strong><small>接手人 · 宋宁</small></div>
+<div class="main"><div><span class="status">已重新就绪<span class="statecode">ready</span></span><h2 id="title-h-approved-ready">按批准范围激活</h2><p>设备 B 已重新提交回执，来源版本与管理者审阅的范围一致。</p></div>
+<dl class="facts"><dt>冻结文件</dt><dd>指南 r8</dd><dt>已审阅版本</dt><dd>指南 r9</dd><dt>新回执</dt><dd>设备 B · ATT-B</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>激活目标 Run</summary><label class="confirm"><input class="route-choice go-h-active" type="radio" name="route-state" value="h-active"><span>进入「交接完成」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>激活事务同时更新两个 Run、任务负责人及执行代数。</p><span class="refs">M08-F09、M08-F10</span></details></section>
+<section tabindex="-1" id="h-active" aria-labelledby="title-h-active" class="screen ">
+<div class="cap"><strong><span class="nav-current">交接</span> / HAND-08</strong><small>接手人 · 宋宁</small></div>
+<div class="main"><div><span class="status">可以续写<span class="statecode">completed</span></span><h2 id="title-h-active">交接完成</h2><p>宋宁成为当前负责人，可在设备 B 以新租约继续任务。源执行者的原有提交仍然保留署名。</p></div>
+<dl class="facts"><dt>源 Run</dt><dd>RUN-A · transferred</dd><dt>目标 Run</dt><dd>RUN-B · active</dd><dt>租约 / 负责人</dt><dd>设备 B · 新执行代数 · 宋宁</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>继续提交与验证</summary><label class="confirm"><input class="route-choice go-t-building" type="radio" name="route-state" value="t-building"><span>进入「提交产物和自测证据」</span></label></details><details name="route-operation"><summary>重新查看交接</summary><label class="confirm"><input class="route-choice go-h-start" type="radio" name="route-state" value="h-start"><span>进入「准备交出任务」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>此后提交产物应使用 B 的 Run。原 Run 或旧租约不能替代该身份提交。</p><span class="refs">M08-F09、M07-F07</span></details></section>
+<section tabindex="-1" id="h-cancel" aria-labelledby="title-h-cancel" class="screen ">
+<div class="cap"><strong><span class="nav-current">交接</span> / HAND-08</strong><small>执行人 · 林澈</small></div>
+<div class="main"><div><span class="status">等待显式恢复<span class="statecode">cancelled</span></span><h2 id="title-h-cancel">交接已取消，源 Run 仍暂停</h2><p>未完成的目标 Run 如已存在会被取消。取消不会自动启动原执行。</p></div>
+<dl class="facts"><dt>源 Run</dt><dd>RUN-A · suspended</dd><dt>准备授权</dt><dd>已失效</dd><dt>恢复前提</dt><dd>原负责人、有效设备、无待处理交接</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>恢复源 Run</summary><label class="confirm"><input class="route-choice go-h-resumed" type="radio" name="route-state" value="h-resumed"><span>进入「源执行者已恢复」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>包过期时源 Run 同样保持暂停。恢复由原负责人通过本人设备显式办理。</p><span class="refs">M08-F11</span></details></section>
+<section tabindex="-1" id="h-resumed" aria-labelledby="title-h-resumed" class="screen ">
+<div class="cap"><strong><span class="nav-current">交接</span> / HAND-08</strong><small>执行人 · 林澈</small></div>
+<div class="main"><div><span class="status">源 Run 恢复<span class="statecode">active</span></span><h2 id="title-h-resumed">源执行者已恢复</h2><p>原执行人持新代数与租约继续 RUN-A。若需再次换人，须重新准备。</p></div>
+<dl class="facts"><dt>当前负责人</dt><dd>林澈</dd><dt>源 Run</dt><dd>RUN-A · active</dd><dt>旧交接</dt><dd>保留取消记录</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>重新准备交接</summary><label class="confirm"><input class="route-choice go-h-start" type="radio" name="route-state" value="h-start"><span>进入「准备交出任务」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>恢复不会把已取消包重新发布。</p><span class="refs">M08-F11</span></details></section>
+<section tabindex="-1" id="q-failed" aria-labelledby="title-q-failed" class="screen issue">
+<div class="cap"><strong><span class="nav-current">测试与缺陷</span> / 订单导出</strong><small>测试成员 · 汪宁</small></div>
+<div class="main"><div><span class="status">未关联缺陷<span class="statecode">fail</span></span><h2 id="title-q-failed">从失败结果发起修复</h2><p>订单导出回归中，空结果集未留下诊断记录。请依据执行时保存的用例与证据办理。</p></div>
+<dl class="facts"><dt>执行记录</dt><dd>EXEC-12 · 预发布 / build-42</dd><dt>固定用例</dt><dd>CASE-06 r2 · 资料 DATA-04 r1</dd><dt>实际 / 预期</dt><dd>无诊断条目 / 应写入一条失败原因</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>新建缺陷并关联</summary><label class="confirm"><input class="route-choice go-q-reported" type="radio" name="route-state" value="q-reported"><span>进入「分诊新报告的缺陷」</span></label></details><details name="route-operation"><summary>关联已有同项目缺陷</summary><label class="confirm"><input class="route-choice go-q-existing" type="radio" name="route-state" value="q-existing"><span>进入「已关联既有缺陷」</span></label></details><details name="route-operation"><summary>查看通过结果的限制</summary><label class="confirm"><input class="route-choice go-q-pass" type="radio" name="route-state" value="q-pass"><span>进入「通过结果只读」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>选择“新建”将使用执行快照拼接复现步骤、环境、实际结果及报告；已有同项目缺陷可直接关联。</p><span class="refs">M09-F04、M09-F05、M09-F06</span></details></section>
+<section tabindex="-1" id="q-pass" aria-labelledby="title-q-pass" class="screen ">
+<div class="cap"><strong><span class="nav-current">测试与缺陷</span> / 订单导出</strong><small>测试成员 · 汪宁</small></div>
+<div class="main"><div><span class="status">不可关联缺陷<span class="statecode">pass</span></span><h2 id="title-q-pass">通过结果只读</h2><p>另一条用例已通过。该测试结果不能通过失败结果入口新建或绑定缺陷。</p></div>
+<dl class="facts"><dt>执行记录</dt><dd>EXEC-12</dd><dt>用例</dt><dd>CASE-02 r1</dd><dt>结果</dt><dd>pass</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>返回失败项</summary><label class="confirm"><input class="route-choice go-q-failed" type="radio" name="route-state" value="q-failed"><span>进入「从失败结果发起修复」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>若另有独立发现，可通过缺陷工作台直接报告。返回失败项可继续本次演练。</p><span class="refs">M09-F06、M09-F07</span></details></section>
+<section tabindex="-1" id="q-reported" aria-labelledby="title-q-reported" class="screen ">
+<div class="cap"><strong><span class="nav-current">测试与缺陷</span> / 订单导出</strong><small>项目管理员 · 周岚</small></div>
+<div class="main"><div><span class="status">待分诊<span class="statecode">reported</span></span><h2 id="title-q-reported">分诊新报告的缺陷</h2><p>失败结果已关联 DEF-18；复现步骤和报告均取自 CASE-06 r2 当时的执行。</p></div>
+<dl class="facts"><dt>缺陷</dt><dd>DEF-18 · medium</dd><dt>关联执行</dt><dd>EXEC-12 / CASE-06 r2</dd><dt>发现版本</dt><dd>build-42</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>确认进入分诊</summary><label class="confirm"><input class="route-choice go-q-triaged" type="radio" name="route-state" value="q-triaged"><span>进入「建立并指定修复任务」</span></label></details><details name="route-operation"><summary>拒绝此报告</summary><label class="confirm"><input class="route-choice go-q-rejected" type="radio" name="route-state" value="q-rejected"><span>进入「报告已拒绝」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>管理者决定是否接受修复。已关联结果不可随意改绑另一项。</p><span class="refs">M09-F06、M09-F07</span></details></section>
+<section tabindex="-1" id="q-existing" aria-labelledby="title-q-existing" class="screen ">
+<div class="cap"><strong><span class="nav-current">测试与缺陷</span> / 订单导出</strong><small>测试成员 · 汪宁</small></div>
+<div class="main"><div><span class="status">关联已保存<span class="statecode">fail</span></span><h2 id="title-q-existing">已关联既有缺陷</h2><p>同项目已有 DEF-18 处于分诊状态。本次仅建立结果关联，保留缺陷原有状态。</p></div>
+<dl class="facts"><dt>关联缺陷</dt><dd>DEF-18 · triaged</dd><dt>测试结果</dt><dd>仍为 fail</dd><dt>再次绑定</dt><dd>同编号重试可用，改绑会冲突</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>打开已分诊的缺陷</summary><label class="confirm"><input class="route-choice go-q-triaged" type="radio" name="route-state" value="q-triaged"><span>进入「建立并指定修复任务」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>进入既有缺陷的处置队列即可安排修复，不重复建单。</p><span class="refs">M09-F06</span></details></section>
+<section tabindex="-1" id="q-triaged" aria-labelledby="title-q-triaged" class="screen ">
+<div class="cap"><strong><span class="nav-current">测试与缺陷</span> / 订单导出</strong><small>项目管理员 · 周岚</small></div>
+<div class="main"><div><span class="status">待安排修复<span class="statecode">triaged</span></span><h2 id="title-q-triaged">建立并指定修复任务</h2><p>对同一 Feature 新建绑定 DEF-18 的 defect-fix 任务，再以该编号将缺陷转入 fixing。</p></div>
+<dl class="facts"><dt>修复任务</dt><dd>FIX-09 · 来源 defect-fix</dd><dt>验收条件</dt><dd>空集的导出失败写入诊断记录</dd><dt>归属</dt><dd>订单导出 / DEF-18</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>创建合规任务并转修复中</summary><label class="confirm"><input class="route-choice go-q-fixing" type="radio" name="route-state" value="q-fixing"><span>进入「回归前核对修复状态」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>创建任务和变更缺陷状态是两次写入；中途失败应核对现有任务后重试。</p><span class="refs">M09-F08、M07-F01</span></details></section>
+<section tabindex="-1" id="q-fixing" aria-labelledby="title-q-fixing" class="screen ">
+<div class="cap"><strong><span class="nav-current">测试与缺陷</span> / 订单导出</strong><small>测试成员 · 汪宁</small></div>
+<div class="main"><div><span class="status">修复已提交<span class="statecode">fixing</span></span><h2 id="title-q-fixing">回归前核对修复状态</h2><p>执行者已提交 FIX-09 的改动和自测，修复任务等待独立验证。</p></div>
+<dl class="facts"><dt>修复任务</dt><dd>FIX-09 · submitted</dd><dt>自测</dt><dd>self_test / pass</dd><dt>缺陷</dt><dd>DEF-18 · fixing</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>立即申请回归</summary><label class="confirm"><input class="route-choice go-q-blocked" type="radio" name="route-state" value="q-blocked"><span>进入「修复未验证，回归被阻止」</span></label></details><details name="route-operation"><summary>查看任务验证完成后的状态</summary><label class="confirm"><input class="route-choice go-q-verified" type="radio" name="route-state" value="q-verified"><span>进入「修复已经验证」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>此时申请回归仍会被拦截。可查看 verifier 完成 M07 验证后的路径。</p><span class="refs">M09-F08、M07-F08</span></details></section>
+<section tabindex="-1" id="q-blocked" aria-labelledby="title-q-blocked" class="screen issue">
+<div class="cap"><strong><span class="nav-current">测试与缺陷</span> / 订单导出</strong><small>测试成员 · 汪宁</small></div>
+<div class="main"><div><span class="status">暂不能回归<span class="statecode">fixing</span></span><h2 id="title-q-blocked">修复未验证，回归被阻止</h2><p>关联任务只有 submitted，尚无 verified 或 closed 的修复任务。缺陷保持 fixing。</p></div>
+<dl class="facts"><dt>错误</dt><dd>fix_task_not_completed</dd><dt>修复任务</dt><dd>FIX-09 · submitted</dd><dt>下一操作人</dt><dd>有写权限的 verifier Run 持有人</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>查看修复已验证的样例</summary><label class="confirm"><input class="route-choice go-q-verified" type="radio" name="route-state" value="q-verified"><span>进入「修复已经验证」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>修复任务应走独立验证。此处切换到已完成验证的样例，再检验回归门槛。</p><span class="refs">M09-F08、M07-F08</span></details></section>
+<section tabindex="-1" id="q-verified" aria-labelledby="title-q-verified" class="screen ">
+<div class="cap"><strong><span class="nav-current">测试与缺陷</span> / 订单导出</strong><small>测试成员 · 汪宁</small></div>
+<div class="main"><div><span class="status">可以进入回归<span class="statecode">fixing</span></span><h2 id="title-q-verified">修复已经验证</h2><p>FIX-09 已在独立 verifier Run 中通过，满足至少一个关联任务达标的门槛。</p></div>
+<dl class="facts"><dt>修复任务</dt><dd>FIX-09 · verified</dd><dt>验证证据</dt><dd>verifier_review / pass</dd><dt>缺陷</dt><dd>DEF-18 · fixing</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>进入回归</summary><label class="confirm"><input class="route-choice go-q-retest" type="radio" name="route-state" value="q-retest"><span>进入「作出回归结论」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>验证任务不会自动改变缺陷。需要有写权限的成员显式申请回归。</p><span class="refs">M09-F08、M07-F08</span></details></section>
+<section tabindex="-1" id="q-retest" aria-labelledby="title-q-retest" class="screen ">
+<div class="cap"><strong><span class="nav-current">测试与缺陷</span> / 订单导出</strong><small>项目管理员 · 周岚</small></div>
+<div class="main"><div><span class="status">待管理者处置<span class="statecode">retest</span></span><h2 id="title-q-retest">作出回归结论</h2><p>查看实际回归依据后决定关闭或重新分诊。本例中以 build-43 验证空集诊断。</p></div>
+<dl class="facts"><dt>被测版本</dt><dd>build-43</dd><dt>关联修复</dt><dd>FIX-09 · verified</dd><dt>可选决定</dt><dd>关闭 / 回到分诊</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>回归通过，关闭缺陷</summary><label class="confirm"><input class="route-choice go-q-closed" type="radio" name="route-state" value="q-closed"><span>进入「缺陷已关闭」</span></label></details><details name="route-operation"><summary>回归失败，回到分诊</summary><label class="confirm"><input class="route-choice go-q-reopened" type="radio" name="route-state" value="q-reopened"><span>进入「缺陷重新进入分诊」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>服务要求管理权限和合法状态；不会用一条测试执行自动替管理者关闭。</p><span class="refs">M09-F09</span></details></section>
+<section tabindex="-1" id="q-closed" aria-labelledby="title-q-closed" class="screen ">
+<div class="cap"><strong><span class="nav-current">测试与缺陷</span> / 订单导出</strong><small>项目管理员 · 周岚</small></div>
+<div class="main"><div><span class="status">终态<span class="statecode">closed</span></span><h2 id="title-q-closed">缺陷已关闭</h2><p>DEF-18 已关闭。本次历史失败记录仍为 fail，保留复现与修复线索。</p></div>
+<dl class="facts"><dt>失败执行</dt><dd>EXEC-12 · 保留</dd><dt>修复任务</dt><dd>FIX-09 · verified</dd><dt>缺陷</dt><dd>DEF-18 · closed</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>重看测试路径</summary><label class="confirm"><input class="route-choice go-q-failed" type="radio" name="route-state" value="q-failed"><span>进入「从失败结果发起修复」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>该终态不再提供流转操作。</p><span class="refs">M09-F09</span></details></section>
+<section tabindex="-1" id="q-reopened" aria-labelledby="title-q-reopened" class="screen ">
+<div class="cap"><strong><span class="nav-current">测试与缺陷</span> / 订单导出</strong><small>项目管理员 · 周岚</small></div>
+<div class="main"><div><span class="status">需要新一轮修复<span class="statecode">triaged</span></span><h2 id="title-q-reopened">缺陷重新进入分诊</h2><p>回归未达到预期，缺陷回到 triaged，保留既有修复任务和失败结果。</p></div>
+<dl class="facts"><dt>缺陷</dt><dd>DEF-18 · triaged</dd><dt>当前动作</dt><dd>重新安排修复</dd><dt>既有证据</dt><dd>原结果和修复记录可追溯</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>安排下一轮修复</summary><label class="confirm"><input class="route-choice go-q-triaged" type="radio" name="route-state" value="q-triaged"><span>进入「建立并指定修复任务」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>重开是 retest → triaged，不能从已经 closed 的终态直接重开。</p><span class="refs">M09-F09</span></details></section>
+<section tabindex="-1" id="q-rejected" aria-labelledby="title-q-rejected" class="screen issue">
+<div class="cap"><strong><span class="nav-current">测试与缺陷</span> / 订单导出</strong><small>项目管理员 · 周岚</small></div>
+<div class="main"><div><span class="status">终态<span class="statecode">rejected</span></span><h2 id="title-q-rejected">报告已拒绝</h2><p>拒绝后缺陷不能继续进入修复或回归。</p></div>
+<dl class="facts"><dt>缺陷</dt><dd>DEF-18 · rejected</dd><dt>失败结果</dt><dd>EXEC-12 中的 fail 保留</dd><dt>审计</dt><dd>记录拒绝人和变化</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>重看测试路径</summary><label class="confirm"><input class="route-choice go-q-failed" type="radio" name="route-state" value="q-failed"><span>进入「从失败结果发起修复」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>如要复查，读取历史报告，不对该终态重复分诊。</p><span class="refs">M09-F07、M09-F09</span></details></section>
+<section tabindex="-1" id="t-building" aria-labelledby="title-t-building" class="screen ">
+<div class="cap"><strong><span class="nav-current">任务验收</span> / TASK-31</strong><small>执行人 · 宋宁</small></div>
+<div class="main"><div><span class="status">准备提交<span class="statecode">running</span></span><h2 id="title-t-building">提交产物和自测证据</h2><p>任务有两条验收条件：导出失败有诊断记录、正常导出不重复写入。</p></div>
+<dl class="facts"><dt>任务 / Run</dt><dd>TASK-31 · RUN-B</dd><dt>提交产物</dt><dd>commit · 已登记内容摘要</dd><dt>自测</dt><dd>self_test / pass · AC-1</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>提交产物与自测</summary><label class="confirm"><input class="route-choice go-t-submitted" type="radio" name="route-state" value="t-submitted"><span>进入「独立验证提交」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>提交必须引用已知验收项，可以先覆盖部分条件；下一步的 verifier 通过必须覆盖全部条件。</p><span class="refs">M07-F07</span></details></section>
+<section tabindex="-1" id="t-submitted" aria-labelledby="title-t-submitted" class="screen ">
+<div class="cap"><strong><span class="nav-current">任务验收</span> / TASK-31</strong><small>验证成员 · 汪宁</small></div>
+<div class="main"><div><span class="status">等待验证结论<span class="statecode">submitted</span></span><h2 id="title-t-submitted">独立验证提交</h2><p>验证成员以 verifier Profile 领取独立 Run；执行作者和验证 Run 分别保留。</p></div>
+<dl class="facts"><dt>执行 / 验证</dt><dd>RUN-B completed / RUN-V active</dd><dt>完整覆盖</dt><dd>AC-1 与 AC-2</dd><dt>验证证据类型</dt><dd>verifier_review</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>提交全覆盖通过证据</summary><label class="confirm"><input class="route-choice go-t-verified" type="radio" name="route-state" value="t-verified"><span>进入「确认任务交付」</span></label></details><details name="route-operation"><summary>尝试只验证 AC-1 后通过</summary><label class="confirm"><input class="route-choice go-t-partial" type="radio" name="route-state" value="t-partial"><span>进入「验证覆盖不完整」</span></label></details><details name="route-operation"><summary>记录验证失败</summary><label class="confirm"><input class="route-choice go-t-rework" type="radio" name="route-state" value="t-rework"><span>进入「管理者重新分派返工」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>两项全部通过才能标记 verified。提交 fail 或 inconclusive 时原任务进入 failed，供管理者重派。</p><span class="refs">M07-F08</span></details></section>
+<section tabindex="-1" id="t-partial" aria-labelledby="title-t-partial" class="screen issue">
+<div class="cap"><strong><span class="nav-current">任务验收</span> / TASK-31</strong><small>验证成员 · 汪宁</small></div>
+<div class="main"><div><span class="status">验证被拒绝<span class="statecode">submitted</span></span><h2 id="title-t-partial">验证覆盖不完整</h2><p>AC-2 还没有被本次通过证据覆盖，任务继续等待验证结论。</p></div>
+<dl class="facts"><dt>错误</dt><dd>acceptance_coverage_incomplete</dd><dt>已覆盖</dt><dd>AC-1</dd><dt>待覆盖</dt><dd>AC-2</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>返回验证证据</summary><label class="confirm"><input class="route-choice go-t-submitted" type="radio" name="route-state" value="t-submitted"><span>进入「独立验证提交」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>补全验收引用后可以重新提交，不应直接关闭。</p><span class="refs">M07-F08</span></details></section>
+<section tabindex="-1" id="t-rework" aria-labelledby="title-t-rework" class="screen ">
+<div class="cap"><strong><span class="nav-current">任务验收</span> / TASK-31</strong><small>项目管理员 · 周岚</small></div>
+<div class="main"><div><span class="status">待重新分派<span class="statecode">failed</span></span><h2 id="title-t-rework">管理者重新分派返工</h2><p>验证 Run 已结束并留下失败证据。管理者可把任务重新分派给具备项目写权的成员。</p></div>
+<dl class="facts"><dt>验证结论</dt><dd>fail / verifier_review</dd><dt>原产物</dt><dd>保留既有 Run、提交与证据</dd><dt>重入条件</dt><dd>最新任务序号、有效负责人、验收标准</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>重新分派给宋宁</summary><label class="confirm"><input class="route-choice go-t-reassigned" type="radio" name="route-state" value="t-reassigned"><span>进入「已重新分派」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>重新分派得到 assigned，之后执行者重新领取才会创建新的活动 Run。</p><span class="refs">M07-F05、M07-F08</span></details></section>
+<section tabindex="-1" id="t-reassigned" aria-labelledby="title-t-reassigned" class="screen ">
+<div class="cap"><strong><span class="nav-current">任务验收</span> / TASK-31</strong><small>执行人 · 宋宁</small></div>
+<div class="main"><div><span class="status">待领取<span class="statecode">assigned</span></span><h2 id="title-t-reassigned">已重新分派</h2><p>本次返工仍使用同一任务。重新领取后以新的 builder Run 执行再提交。</p></div>
+<dl class="facts"><dt>任务</dt><dd>TASK-31 · assigned</dd><dt>历史 Run</dt><dd>原失败验证保留</dd><dt>负责人</dt><dd>宋宁</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>重看首轮提交</summary><label class="confirm"><input class="route-choice go-t-building" type="radio" name="route-state" value="t-building"><span>进入「提交产物和自测证据」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>再领取会获得另一编号的新 Run，以下导航可重看首轮示例。</p><span class="refs">M07-F05、M07-F06</span></details></section>
+<section tabindex="-1" id="t-verified" aria-labelledby="title-t-verified" class="screen ">
+<div class="cap"><strong><span class="nav-current">任务验收</span> / TASK-31</strong><small>项目管理员 · 周岚</small></div>
+<div class="main"><div><span class="status">可以关闭<span class="statecode">verified</span></span><h2 id="title-t-verified">确认任务交付</h2><p>独立验证已通过且覆盖 AC-1、AC-2。管理者应依据最新任务序号确认关闭。</p></div>
+<dl class="facts"><dt>任务</dt><dd>TASK-31 · verified</dd><dt>证据</dt><dd>verifier_review / pass</dd><dt>Feature</dt><dd>订单导出 · active</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>关闭任务</summary><label class="confirm"><input class="route-choice go-t-closed" type="radio" name="route-state" value="t-closed"><span>进入「任务已关闭」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>样例中同 Feature 的其他任务都已关闭或取消。</p><span class="refs">M07-F09</span></details></section>
+<section tabindex="-1" id="t-closed" aria-labelledby="title-t-closed" class="screen ">
+<div class="cap"><strong><span class="nav-current">任务验收</span> / TASK-31</strong><small>项目管理员 · 周岚</small></div>
+<div class="main"><div><span class="status">已交付<span class="statecode">closed</span></span><h2 id="title-t-closed">任务已关闭</h2><p>任务关闭并记录审计。示例中 Feature 没有其他未完结任务，随之从 active 变为 delivered。</p></div>
+<dl class="facts"><dt>任务</dt><dd>TASK-31 · closed</dd><dt>Feature</dt><dd>订单导出 · delivered</dd><dt>可追溯内容</dt><dd>Run、产物、自测、验证及关闭审计</dd></dl></div>
+<div class="actions"><details name="route-operation"><summary>重看任务验收</summary><label class="confirm"><input class="route-choice go-t-building" type="radio" name="route-state" value="t-building"><span>进入「提交产物和自测证据」</span></label></details><details name="route-operation"><summary>查看缺陷回归</summary><label class="confirm"><input class="route-choice go-q-failed" type="radio" name="route-state" value="q-failed"><span>进入「从失败结果发起修复」</span></label></details></div>
+<details><summary>查看操作条件与依据</summary><p>关闭任务和关闭缺陷有不同入口和状态条件。</p><span class="refs">M07-F09</span></details></section></div></main></body></html>

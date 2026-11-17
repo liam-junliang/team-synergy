@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { createHandoverUseCases, resolveSessionToken } from '@team-synergy/application';
 import { HandoverSummarySchema, WorkspaceManifestSchema, PublicCodeSchema } from '@team-synergy/contracts';
 import type { Db } from '@team-synergy/persistence';
-import { unauthorized } from '../auth.js';
+import { hasAuthenticatedSession, unauthorized } from '../auth.js';
 
 /** Only middleware-resolved credentials can bind a device or an execution lease. */
 export async function executionIdentity(request: FastifyRequest, db: Db) {
@@ -74,7 +74,7 @@ export function registerHandoverRoutes(app: FastifyInstance, db: Db): void {
   });
 
   app.post<{ Params: { task_code: string }; Body: Body }>('/tasks/:task_code/handovers/prepare', async (request, reply) => {
-    if (request.authKind !== 'bearer') return unauthorized(reply);
+    if (!hasAuthenticatedSession(request)) return unauthorized(reply);
     const key = idempotencyKey(request);
     if (key === null) return invalid('幂等键必须为非空字符串且不超过 128 个字符');
     const body = validateBody(request.body, 'prepare');
@@ -89,7 +89,7 @@ export function registerHandoverRoutes(app: FastifyInstance, db: Db): void {
       method: action === 'draft' ? ['PUT', 'POST'] : 'POST',
       url: `/handovers/:handover_code/${action}`,
       handler: async (request, reply) => {
-      if (request.authKind !== 'bearer') return unauthorized(reply);
+      if (!hasAuthenticatedSession(request)) return unauthorized(reply);
       const key = idempotencyKey(request);
       if (key === null) return invalid('幂等键必须为非空字符串且不超过 128 个字符');
       const body = validateBody(request.body, action === 'source-stop-ack' ? 'stop-ack' : action);
@@ -109,7 +109,7 @@ export function registerHandoverRoutes(app: FastifyInstance, db: Db): void {
     });
   }
   app.post<{ Params: { run_code: string }; Body: Body }>('/runs/:run_code/resume', async (request, reply) => {
-    if (request.authKind !== 'bearer') return unauthorized(reply);
+    if (!hasAuthenticatedSession(request)) return unauthorized(reply);
     const key = idempotencyKey(request);
     if (key === null) return invalid('幂等键必须为非空字符串且不超过 128 个字符');
     const body = validateBody(request.body, 'resume');

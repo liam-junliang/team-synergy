@@ -30,7 +30,7 @@ export async function projectSkillManifest(db: AccessDb, projectId: bigint, prin
     const pack = JSON.parse(rev.package_json) as SkillPackage;
     const source = await skillSourceAccess(db, skill, principalId);
     skills.push({ skill_code: skill.code, revision: rev.revision, alias: install.alias, name: pack.name, description: pack.description,
-      scope_type: skill.scope_type, scope_code: source.code, package_sha256: pack.package_sha256, files: pack.files });
+      scope_type: skill.scope_type, scope_code: source.code, package_sha256: pack.package_sha256, files: pack.files, release_version: rev.release_version });
   }
   return { project_code: project.code, generation: state?.generation ?? 0, skills };
 }

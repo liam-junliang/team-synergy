@@ -1,4 +1,9 @@
 const testing: Record<string, string> = {
+  '查看交付原件': 'View delivered artifact',
+  '所请求的资料版本不存在。': 'The requested asset revision does not exist.',
+  '资料版本必须为正整数。': 'The asset revision must be a positive integer.',
+  '这里收录测试策略、验收矩阵与环境说明。源码包、日志和单次验收报告请在关联任务或测试执行中查看。': 'Test strategies, acceptance matrices, and environment guides are collected here. Find source archives, logs, and one-off reports in their linked tasks or test executions.',
+  '前往原始测试资料': 'Open original test asset',
   '全部模块': 'All modules', '保存': 'Save', '变更说明': 'Change summary', '关联任务': 'Linked task', '关联缺陷': 'Linked defect', '严重程度': 'Severity',
   '无法读取执行时的文件版本，请重试。': 'Unable to read the file revision used in this execution. Try again.', '正在下载…': 'Downloading…', '下载执行时的文件': 'Download executed file revision',
   '测试': 'Testing', '项目测试': 'Project testing', '测试用例': 'Test cases', '测试资料': 'Test assets', '执行记录': 'Executions',

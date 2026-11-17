@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
+import { PgDialect } from 'drizzle-orm/pg-core';
 import { schema } from '@team-synergy/persistence';
-import { createOwnershipUseCases, createMemberUseCases, createTeamUseCases } from '../dist/index.js';
+import { createOwnershipUseCases, createMemberUseCases, createTeamUseCases, createProjectUseCasesProject } from '../dist/index.js';
 import { useTestDb, insertUser, insertTeam, insertProject, addTeamMember, addProjectMember, insertFeature, insertTask } from './test-db.mjs';
 
 const fixture = useTestDb(import.meta.url);
@@ -258,3 +259,68 @@ test('concurrent platform administrator closures retain one active administrator
   const active = await ctx.db.select().from(schema.users).where(and(eq(schema.users.is_system_admin, true), eq(schema.users.status, 'active')));
   assert.equal(active.length, 1);
 });
+
+
+for (const operation of ['accept', 'resolve']) {
+  test(`project ${operation} and old-owner rename acquire the project fence before user row locks`, async () => {
+    const ctx = await setup();
+    let pending;
+    if (operation === 'accept') {
+      pending = await ctx.uc.requestTransfer(request(ctx));
+      succeeded(pending);
+    } else {
+      await ctx.db.update(schema.projects).set({ owner_principal_id: null }).where(eq(schema.projects.id, ctx.project.id));
+      await ctx.db.update(schema.members).set({ role: 'owner' }).where(eq(schema.members.project_id, ctx.project.id));
+    }
+    const originalTransaction = ctx.db.transaction.bind(ctx.db);
+    const dialect = new PgDialect();
+    let signal, release;
+    const acquired = new Promise(resolve => { signal = resolve; });
+    const barrier = new Promise(resolve => { release = resolve; });
+    let first = true, rename, governance;
+    ctx.db.transaction = (fn, ...args) => originalTransaction(async tx => {
+      if (first) {
+        first = false;
+        const execute = tx.execute.bind(tx);
+        let fenced = false;
+        tx.execute = async statement => {
+          const result = await execute(statement);
+          if (!fenced && dialect.sqlToQuery(statement).sql.includes('pg_advisory_xact_lock')) {
+            fenced = true;
+            const pid = await execute(sql`select pg_backend_pid() as pid`);
+            signal(pid.rows[0].pid);
+            await barrier;
+          }
+          return result;
+        };
+      }
+      return fn(tx);
+    }, ...args);
+    try {
+      rename = createProjectUseCasesProject(ctx.db).updateProject({ projectCode: ctx.project.code,
+        principalCode: ctx.users.owner.code, name: 'Renamed concurrently' });
+      const pid = await acquired;
+      governance = operation === 'accept' ? accept(ctx, pending)
+        : ctx.uc.resolveOwnership({ scope: 'project', scopeCode: ctx.project.code,
+          actorPrincipalCode: ctx.users.owner.code, ownerUserCode: ctx.users.owner.code });
+      let waiting = false;
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        const locks = await ctx.db.execute(sql`select 1 from pg_locks where locktype = 'advisory' and not granted and ${pid}::integer = any(pg_blocking_pids(pid))`);
+        if (locks.rows.length) { waiting = true; break; }
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      assert.equal(waiting, true, 'governance must wait for the actual project fence');
+      release();
+      const results = await Promise.all([rename, governance]);
+      for (const result of results) succeeded(result);
+      const [project] = await ctx.db.select().from(schema.projects).where(eq(schema.projects.id, ctx.project.id));
+      assert.equal(project.name, 'Renamed concurrently');
+      assert.equal(project.owner_principal_id, operation === 'accept' ? ctx.users.next.id : ctx.users.owner.id);
+    } finally {
+      release();
+      await Promise.allSettled([rename, governance].filter(Boolean));
+      ctx.db.transaction = originalTransaction;
+    }
+  });
+}

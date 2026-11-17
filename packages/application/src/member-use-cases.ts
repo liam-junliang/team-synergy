@@ -6,6 +6,7 @@ import type { MemberRole } from '@team-synergy/contracts';
 import { fail, insertAudit, now } from './task-service.js';
 import { createPublicCode, findProjectByCode, findUserByCode } from './public-code.js';
 import { isProjectManager, projectCapabilities, resolveProjectAccess } from './project-access.js';
+import { lockAggregate } from './aggregate-lock.js';
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 type MemberCommand = { userCode: string; actorPrincipalCode: string; projectCode: string };
@@ -49,6 +50,7 @@ export function createMemberUseCases(db: Db) {
       if (!actor) throw new DomainError('user_not_found', `用户不存在：${cmd.actorPrincipalCode}`);
       if (!user) throw new DomainError('member_not_found', `成员不存在：${cmd.userCode}`);
       const data = await db.transaction(async tx => {
+        await lockAggregate(tx, 'project', project.id);
         const lockedUsers = await tx.select().from(schema.users).where(inArray(schema.users.id, [...new Set([actor.id, user.id])])).orderBy(asc(schema.users.id)).for('update');
         const activeActor = lockedUsers.find(row => row.id === actor.id);
         const targetUser = lockedUsers.find(row => row.id === user.id);

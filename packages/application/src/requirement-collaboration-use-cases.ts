@@ -1,4 +1,5 @@
 import { assertProjectAccess, effectiveProjectMember, isProjectManager } from './project-access.js';
+import { lockAggregate } from './aggregate-lock.js';
 import { and, asc, desc, eq, ilike, inArray, isNull, or } from 'drizzle-orm';
 import type { Db } from '@team-synergy/persistence';
 import { schema } from '@team-synergy/persistence';
@@ -306,9 +307,12 @@ export function createRequirementCollaborationUseCases(db: Db) {
       if (!title) throw new DomainError('requirement_topic_title_required', '议题标题不能为空');
       if (cmd.status && !TOPIC_STATUSES.has(cmd.status)) throw new DomainError('requirement_topic_status_invalid', `非法议题状态：${cmd.status}`);
       const [row] = await db.transaction(async tx => {
-        const access = await assertProjectAccess(tx, topic.project_id, principal.id, cmd.status !== undefined && cmd.status !== topic.status ? 'manage' : 'write');
+        await lockAggregate(tx, 'project', topic.project_id);
+        const [current] = await tx.select().from(schema.requirementTopics).where(eq(schema.requirementTopics.id, topic.id));
+        if (!current) throw new DomainError('requirement_topic_not_found', '议题不存在');
+        const access = await assertProjectAccess(tx, topic.project_id, principal.id, cmd.status !== undefined && cmd.status !== current.status ? 'manage' : 'write');
         if (!isProjectManager(access.role) && topic.created_by !== principal.id) throw new DomainError('requirement_topic_forbidden', '只有议题创建人或项目管理者可以修改');
-        return tx.update(schema.requirementTopics).set({ title, problem_statement: cmd.problemStatement === undefined ? topic.problem_statement : cmd.problemStatement.trim(), goal: cmd.goal === undefined ? topic.goal : cmd.goal.trim(), status: cmd.status ?? topic.status, updated_at: now() }).where(eq(schema.requirementTopics.id, topic.id)).returning();
+        return tx.update(schema.requirementTopics).set({ title: cmd.title?.trim(), problem_statement: cmd.problemStatement?.trim(), goal: cmd.goal?.trim(), status: cmd.status, updated_at: now() }).where(eq(schema.requirementTopics.id, topic.id)).returning();
       });
       return { ok: true, data: await topicSummary(db, row!) };
     } catch (error) { return fail(error); }
@@ -328,6 +332,9 @@ export function createRequirementCollaborationUseCases(db: Db) {
       if (supersedes && (supersedes.topic_id !== topic.id || supersedes.entry_type !== 'decision')) throw new DomainError('requirement_topic_supersedes_invalid', '只能替代当前议题中的历史决策');
       const createdAt = now();
       const row = await db.transaction(async (tx) => {
+        await lockAggregate(tx, 'project', topic.project_id);
+        const [current] = await tx.select().from(schema.requirementTopics).where(eq(schema.requirementTopics.id, topic.id));
+        if (!current || current.status === 'archived') throw new DomainError('requirement_topic_archived', '已归档议题不能继续讨论');
         await assertProjectAccess(tx, topic.project_id, principal.id, cmd.entryType === 'decision' ? 'manage' : 'write');
         const [entry] = await tx.insert(schema.requirementTopicEntries).values({
           code: createPublicCode(), topic_id: topic.id, entry_type: cmd.entryType, content, rationale: cmd.rationale?.trim() || null,
@@ -339,7 +346,7 @@ export function createRequirementCollaborationUseCases(db: Db) {
           code: createPublicCode(), entry_id: entry.id, file_name: image.fileName, mime_type: image.mimeType, byte_size: image.byteSize,
           data_url: image.dataUrl, sort_order: image.sortOrder, created_at: createdAt,
         }))).returning() : [];
-        const nextStatus: RequirementTopicStatus = cmd.entryType === 'decision' ? 'decided' : topic.status === 'decided' && cmd.entryType === 'feedback' ? 'reopened' : topic.status;
+        const nextStatus: RequirementTopicStatus = cmd.entryType === 'decision' ? 'decided' : current.status === 'decided' && cmd.entryType === 'feedback' ? 'reopened' : current.status;
         await tx.update(schema.requirementTopics).set({ status: nextStatus, updated_at: createdAt }).where(eq(schema.requirementTopics.id, topic.id));
         const audit = { entity_type: 'requirement_topic_entry', entity_id: entry.id, principal_id: principal.id, base_snapshot: 0, to: cmd.entryType, action: `requirement_topic.${cmd.entryType}_added`, payload: { topic_code: topic.code, supersedes_entry_code: supersedes?.code ?? null, image_count: insertedImages.length } };
         assertAuditedChange(audit); await insertAudit(tx, toAuditEvent(audit, createPublicCode(), createdAt));
@@ -364,6 +371,11 @@ export function createRequirementCollaborationUseCases(db: Db) {
       if (reason && reason.length > 500) throw new DomainError('requirement_topic_entry_withdraw_reason_too_long', '撤回原因不能超过 500 个字符');
       const withdrawnAt = now();
       await db.transaction(async (tx) => {
+        await lockAggregate(tx, 'project', topic.project_id);
+        const [current] = await tx.select().from(schema.requirementTopics).where(eq(schema.requirementTopics.id, topic.id));
+        if (!current || current.status === 'archived') throw new DomainError('requirement_topic_archived', '已归档议题不能撤回记录');
+        const [currentEntry] = await tx.select().from(schema.requirementTopicEntries).where(eq(schema.requirementTopicEntries.id, entry.id));
+        if (!currentEntry || currentEntry.withdrawn_at) throw new DomainError('requirement_topic_entry_already_withdrawn', '该记录已经撤回');
         const access = await assertProjectAccess(tx, topic.project_id, principal.id, 'write');
         if (!isProjectManager(access.role) && entry.author_principal_id !== principal.id) throw new DomainError('requirement_topic_entry_withdraw_forbidden', '只有记录作者或项目管理者可以撤回');
         await tx.update(schema.requirementTopicEntries).set({ withdrawn_at: withdrawnAt, withdrawn_by: principal.id, withdrawal_reason: reason }).where(eq(schema.requirementTopicEntries.id, entry.id));

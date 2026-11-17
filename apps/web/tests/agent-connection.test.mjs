@@ -82,26 +82,28 @@ test('device list displays actual last sign-in and treats unknown historical tim
   assert.match(account, /<DeviceManagement key=\{selectedUser.code\} userCode=\{selectedUser.code\}/);
 });
 
-test('browser identity is random and stable across login/logout, while session credentials are separate', async () => {
+test('browser sends only display metadata and keeps session credentials out of JavaScript storage', async () => {
   const previousWindow = globalThis.window; const previousFetch = globalThis.fetch;
-  const values = new Map(); const calls = [];
+  const values = new Map([['acp.device_token', 'legacy-secret'], ['tsp:web:client-identity:v1', 'legacy-installation-secret']]); const calls = [];
   globalThis.window = { localStorage: { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) }, dispatchEvent() {} };
   globalThis.fetch = async (url, init) => {
-    calls.push({ url, body: init?.body ? JSON.parse(init.body) : null, authorization: new Headers(init?.headers).get('Authorization') });
-    return new Response(JSON.stringify({ ok: true, data: url.endsWith('/auth/password-login') ? { device_token: 'only-session-token' } : url.endsWith('/auth/whoami') ? user : {} }), { status: 200 });
+    calls.push({ url, body: init?.body ? JSON.parse(init.body) : null, authorization: new Headers(init?.headers).get('Authorization'), csrf: new Headers(init?.headers).get('X-CSRF-Token'), credentials: init?.credentials });
+    return new Response(JSON.stringify({ ok: true, data: url.endsWith('/auth/web/login') || url.endsWith('/auth/web/session') ? { user, csrf_token: 'signed-csrf-fixture' } : {} }), { status: 200 });
   };
   try {
     const first = identity.webClientIdentity();
-    assert.match(first.installation_id, /^[a-f0-9-]{36}$/i); assert.match(first.installation_secret, /^[a-z0-9_-]{43}$/i);
+    assert.deepEqual(Object.keys(first).sort(), ['client_type', 'platform']); assert.equal(first.client_type, 'web');
     await api.loginWebSession({ account: 'liam', password: 'test-password', device_name: 'Chrome · Windows' });
     assert.deepEqual(calls[0].body.device_identity, first);
-    assert.equal(calls[1].authorization, 'Bearer only-session-token');
+    assert.equal(calls[0].url, '/api/auth/web/login'); assert.equal(calls[0].authorization, null); assert.equal(calls[0].credentials, 'same-origin');
     await api.restoreWebSession();
-    assert.deepEqual(calls.find(call => call.url.endsWith('/auth/device-identity')).body, { device_identity: first });
+    assert.equal(calls[1].url, '/api/auth/web/session'); assert.equal(calls[1].authorization, null);
     await api.logoutWebSession();
     assert.deepEqual(identity.webClientIdentity(), first);
-    assert.equal(api.hasWebAuthToken(), false);
-    assert.equal(values.has(identity.CLIENT_IDENTITY_STORAGE_KEY), true);
+    assert.equal(calls[2].url, '/api/auth/web/logout'); assert.equal(calls[2].csrf, 'signed-csrf-fixture');
+    assert.equal(api.storedAuthUser(), null);
+    assert.equal(values.has('acp.device_token'), false); assert.equal(values.has('tsp:web:client-identity:v1'), false);
+    assert.equal([...values.values()].some(value => value.includes('signed-csrf-fixture')), false);
     assert.equal(identity.browserClientInfo('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0 Edg/130.0').name, 'Edge · Windows');
   } finally { globalThis.window = previousWindow; globalThis.fetch = previousFetch; }
 });

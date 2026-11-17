@@ -156,3 +156,34 @@ test('device routes expose public fields and revoke by device_code', async () =>
   assert.equal(audit.action, 'device.revoked');
   assert.equal(audit.principal_id, owner.id);
 });
+
+test('device list uses a fixed query count and counts only live unrevoked sessions', async () => {
+  const { app, db, deviceUser, device } = await createFixture();
+  const query = db.$client.query.bind(db.$client);
+  async function measured() {
+    let calls = 0;
+    db.$client.query = (...args) => { calls += 1; return query(...args); };
+    try {
+      const response = await app.inject({ method: 'GET', url: `/devices?user_code=${deviceUser.code}`, headers: { authorization: 'Bearer admin-device-token' } });
+      assert.equal(response.statusCode, 200, response.body);
+      return { calls, data: response.json().data };
+    } finally { db.$client.query = query; }
+  }
+  // Initial legacy-token authentication performs a one-time credential upgrade.
+  await measured();
+  const first = await measured();
+  const devices = await db.insert(schema.devices).values(Array.from({ length: 30 }, (_, i) => ({ principal_id: deviceUser.id,
+    device_name: `bulk-${i}`, credential_hash: hashToken(`bulk-device-${i}`), created_at: '2026-10-23T00:00:00Z' }))).returning();
+  await db.insert(schema.deviceSessions).values([
+    { device_id: device.id, token_hash: hashToken('session-live'), created_at: '2026-10-23T00:00:00Z', expires_at: '2099-01-01T00:00:00Z' },
+    { device_id: device.id, token_hash: hashToken('session-expired'), created_at: '2026-10-23T00:00:00Z', expires_at: '2000-01-01T00:00:00Z' },
+    { device_id: device.id, token_hash: hashToken('session-revoked'), created_at: '2026-10-23T00:00:00Z', revoked_at: '2026-10-23T00:00:00Z' },
+    { device_id: devices[0].id, token_hash: hashToken('session-unbounded'), created_at: '2026-10-23T00:00:00Z' },
+  ]);
+  const bulk = await measured();
+  assert.equal(bulk.calls, first.calls, 'query count must be independent of device count');
+  assert.equal(bulk.data.length, 31);
+  assert.equal(bulk.data.find(item => item.device_code === device.code).session_count, 1);
+  assert.equal(bulk.data.find(item => item.device_code === devices[0].code).session_count, 1);
+  console.log(`A-01 devices: ${bulk.calls} DB calls for 1 and 31 devices`);
+});

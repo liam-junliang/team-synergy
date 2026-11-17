@@ -7,8 +7,10 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { bindProject } from '../dist/project-binding.js';
-import { intakeManifestText } from '@team-synergy/contracts';
+import { INTAKE_SKILL_VERSION, evaluateIntakeQuality, intakeManifestText } from '@team-synergy/contracts';
 import { sha256, normalizeIntakeScopes, scanIntakeSource } from '../dist/intake-source.js';
+import { parseIntakeMaterials, scanIntakeInputs } from '../dist/intake-materials.js';
+import { intakeSkillReferences, intakeSkillText } from '../dist/intake-skill.js';
 
 const cli = fileURLToPath(new URL('../dist/index.js', import.meta.url));
 const projectCode = 'A'.repeat(20);
@@ -42,7 +44,7 @@ async function setup(t) {
   git(source, ['add', '--all']);
   git(source, ['-c', 'user.name=Intake Test', '-c', 'user.email=intake@example.invalid', 'commit', '-m', 'Fixture']);
   write(source, 'src/untracked.ts', 'not included in the first version');
-  const calls = []; const state = { skill_version: '1.0.0', denied: false, creates: new Map(), apply: new Map() };
+  const calls = []; const state = { skill_version: INTAKE_SKILL_VERSION, denied: false, creates: new Map(), apply: new Map() };
   const server = createServer(async (req, res) => {
     let raw = ''; for await (const chunk of req) raw += chunk;
     const body = raw ? JSON.parse(raw) : undefined;
@@ -91,7 +93,7 @@ test('prepare uses bound tracked text only, stable namespace and pinned instruct
   assert.equal(first.data.source.dirty, true); assert.equal(first.data.source.complete, false);
   assert.equal(first.data.source.manifest_sha256, sha256(intakeManifestText(first.data.source.files)));
   const text = readFileSync(path.join(root, 'out', 'SKILL.md'), 'utf8');
-  assert.match(text, /version: 1\.0\.0/); assert.match(text, /client-reported/); assert.match(text, /Do not fabricate/);
+  assert.ok(text.includes(`version: ${INTAKE_SKILL_VERSION}`)); assert.equal(text, intakeSkillText());
   assert.equal((await run(['validate', path.join(root, 'out', 'intake.json')])).error.code, 'intake_candidates_required');
   const { file } = fill(); assert.equal((await run(['validate', file])).status, 0);
   assert.equal((await prepare()).error.code, 'intake_output_exists');
@@ -120,6 +122,47 @@ test('submit/replace recheck local fingerprints and never upload a stale or cros
   assert.equal((await run(args)).error.code, 'intake_source_changed');
   assert.equal((await run(['replace', batchCode, file, '--base-revision', '1'])).error.code, 'intake_source_changed');
   assert.equal(calls.length, count, 'No network request on local safety failure');
+});
+
+test('enterprise validate preserves full shared quality report while submit/replace allow protocol-valid drafts', async t => {
+  const { calls, run, fill, prepare } = await setup(t); await prepare();
+  const { file, bundle } = fill(); bundle.profile = 'enterprise'; writeFileSync(file, JSON.stringify(bundle));
+  const before = calls.length;
+  const result = await run(['validate', file, '--profile', 'enterprise']);
+  assert.equal(result.ok, true, 'The protocol/source checks completed; findings are structured data');
+  assert.equal(result.status, 1, 'Blockers remain visible to shell automation');
+  assert.equal(result.data.protocol_valid, true);
+  assert.equal(result.data.quality_valid, false);
+  assert.equal(result.data.valid, false);
+  assert.equal(result.data.quality_status, 'blocked');
+  assert.deepEqual(result.data.quality, evaluateIntakeQuality(bundle));
+  assert.equal(result.data.quality.artifacts.missing.length, 11);
+  assert.ok(result.data.quality.summary.warnings >= 2, 'Source warnings must survive blocking failures');
+  assert.equal(calls.length, before, 'Local validation makes no API request');
+  assert.equal((await run(['submit', file, '--idempotency-key', 'enterprise-draft-1'])).status, 0);
+  assert.deepEqual(calls.at(-1).body.bundle, bundle);
+  assert.equal((await run(['replace', batchCode, file, '--base-revision', '1'])).status, 0);
+  assert.deepEqual(calls.at(-1).body.bundle, bundle);
+  bundle.source.manifest_sha256 = '0'.repeat(64); writeFileSync(file, JSON.stringify(bundle));
+  const sent = calls.length;
+  assert.equal((await run(['submit', file, '--idempotency-key', 'enterprise-draft-2'])).error.code, 'intake_manifest_invalid');
+  assert.equal(calls.length, sent, 'Draft quality tolerance never bypasses source validation');
+});
+
+test('enterprise prepare guides incremental evidence review and keeps target measurements honest', async t => {
+  const { root, run } = await setup(t);
+  const result = await run(['prepare', '--repository', repositoryCode, '--scope', '.', '--out', 'enterprise-out', '--profile', 'enterprise']);
+  assert.equal(result.status, 0);
+  const directory = path.join(root, 'enterprise-out');
+  const skill = readFileSync(path.join(directory, 'SKILL.md'), 'utf8');
+  const plan = readFileSync(path.join(directory, 'dossier-plan.md'), 'utf8');
+  const nfr = readFileSync(path.join(directory, 'templates', 'nfr.md'), 'utf8');
+  assert.equal(skill, intakeSkillText('enterprise'));
+  for (const [name, content] of Object.entries(intakeSkillReferences())) assert.equal(readFileSync(path.join(directory, 'references', name), 'utf8'), content);
+  assert.match(plan, /不同位置/);
+  assert.match(plan, /允许|即可/);
+  assert.match(nfr, /未测量/);
+  assert.match(nfr, /运行实测/);
 });
 
 test('validate rejects unsafe schema, manifest tampering, invalid line anchors and new tracked source files', async t => {
@@ -213,4 +256,146 @@ test('read-only intake does not execute repository fsmonitor or clean filter com
   const result = await prepare('out-filter');
   assert.equal(result.status, 0, JSON.stringify(result));
   assert.equal(existsSync(marker), false);
+});
+
+function fillMaterials(directory) {
+  const file = path.join(directory, 'intake.json');
+  const bundle = JSON.parse(readFileSync(file, 'utf8'));
+  const evidence = [{ ...bundle.source.files.find(file => file.path.startsWith('materials/')), line_start: 1, line_end: 2 }];
+  bundle.items = [{ key: 'module-approval', kind: 'module', title: '审批', summary: '团队说明的审批能力', content_markdown: '来自团队说明，尚未运行验证。', evidence, assessment: 'documented', tests: [], gaps: ['尚无代码或实测证据。'] }];
+  writeFileSync(file, JSON.stringify(bundle));
+  return { file, bundle };
+}
+
+test('material-only prepare works without a repository, excludes secrets and keeps machine roots local', async t => {
+  const { root, source, run, calls } = await setup(t);
+  rmSync(source, { recursive: true, force: true });
+  rmSync(path.join(root, '.agent', 'repositories.local.yaml'));
+  write(root, 'inputs/process.md', '# Approval\nThe manager reviews the request.\n');
+  write(root, 'inputs/.env', 'TOKEN=do-not-read');
+  write(root, 'inputs/secret.txt', '-----BEGIN PRIVATE KEY-----\nnot-real-test-key\n');
+  write(root, 'inputs/deck.pdf', Buffer.from([0, 1, 2]));
+  write(root, 'inputs/.omx/local.txt', 'must not be included');
+  const first = await run(['prepare', '--material', 'policy=inputs', '--out', 'materials-out']);
+  assert.equal(first.status, 0, JSON.stringify(first));
+  assert.equal(first.data.source.mode, 'materials');
+  assert.equal(first.data.source.commit, null);
+  assert.equal(first.data.source.dirty, false);
+  assert.deepEqual(first.data.source.files.map(file => file.path), ['materials/policy/process.md']);
+  assert.match(readFileSync(path.join(root, 'materials-out/intake.sources.local.json'), 'utf8'), /inputs/);
+  const { file, bundle } = fillMaterials(path.join(root, 'materials-out'));
+  assert.equal(bundle.repository_code, null);
+  assert.equal(JSON.stringify(bundle).includes(root.replaceAll('\\', '\\\\')), false);
+  assert.equal((await run(['validate', file])).status, 0);
+  assert.equal((await run(['submit', file, '--idempotency-key', 'materials-submit-1'])).status, 0);
+  const posted = calls.at(-1).body.bundle;
+  assert.equal(posted.repository_code, null);
+  assert.deepEqual(posted.source.inputs, [{ key: 'policy', kind: 'document', label: 'policy', prefix: 'materials/policy' }]);
+  assert.equal(JSON.stringify(posted).includes('intake.sources.local'), false);
+  const second = await run(['prepare', '--material', 'policy=inputs', '--out', 'materials-out-two']);
+  assert.equal(second.data.namespace, first.data.namespace);
+  write(root, 'team-note.txt', 'An additional team explanation.\nNo approval is implied.\n');
+  const expanded = await run(['prepare', '--material', 'policy=inputs', '--team-note', 'review=team-note.txt', '--namespace', first.data.namespace, '--out', 'materials-expanded']);
+  assert.equal(expanded.status, 0, JSON.stringify(expanded));
+  assert.equal(expanded.data.namespace, first.data.namespace);
+  const count = calls.length;
+  write(root, 'inputs/process.md', '# Approval\nNew decision requiring two reviewers.\n');
+  assert.equal((await run(['submit', file, '--idempotency-key', 'materials-submit-2'])).error.code, 'intake_source_changed');
+  assert.equal(calls.length, count);
+});
+
+test('mixed capture includes explicit untracked files and team notes and rechecks their anchors', async t => {
+  const { root, source, run, fill } = await setup(t);
+  write(root, 'team-note.txt', 'The manager approves.\nA rejected request retains its history.\n');
+  assert.equal((await run(['prepare', '--repository', repositoryCode, '--scope', '.', '--include-untracked', '--out', 'code/generated'])).error.code, 'intake_output_in_source');
+  const result = await run(['prepare', '--repository', repositoryCode, '--scope', '.', '--include-untracked', '--team-note', 'interview=team-note.txt', '--out', 'mixed']);
+  assert.equal(result.status, 0, JSON.stringify(result));
+  assert.equal(result.data.source.mode, 'mixed');
+  assert.equal(result.data.source.include_untracked, true);
+  assert.deepEqual(result.data.source.files.map(file => file.path), ['materials/interview/team-note.txt', 'src/service.ts', 'src/untracked.ts', 'tests/service.test.ts']);
+  const { file, bundle } = fill(path.join(root, 'mixed'));
+  assert.equal((await run(['validate', file])).status, 0);
+  const material = bundle.source.files.find(file => file.path.startsWith('materials/'));
+  bundle.source.production = { version: '1.0', scope_statement: 'Approval', discovery_status: 'partial', capabilities: [{ key: 'cap-approval', title: 'Approval', disposition: 'unknown', reason: 'Requires review', requirement_keys: [], evidence: [{ ...material, line_start: 1, line_end: 1000 }] }], conflicts: [] };
+  writeFileSync(file, JSON.stringify(bundle));
+  assert.equal((await run(['validate', file])).error.code, 'intake_evidence_invalid', 'Production-only anchors are checked against real text');
+  bundle.source.production.capabilities[0].evidence[0].line_end = 2;
+  bundle.source.production.conflicts = [{ key: 'conflict-1', summary: 'Team and code differ', status: 'open', resolution: '', evidence: [{ ...material, line_start: 1, line_end: 1000 }] }];
+  writeFileSync(file, JSON.stringify(bundle));
+  assert.equal((await run(['validate', file])).error.code, 'intake_evidence_invalid', 'Conflict-only anchors are checked');
+  delete bundle.source.production; writeFileSync(file, JSON.stringify(bundle));
+  write(source, 'src/untracked.ts', 'changed untracked content');
+  assert.equal((await run(['validate', file])).error.code, 'intake_source_changed');
+});
+
+test('source maps, duplicate material keys, reserved prefixes and output recursion fail closed', async t => {
+  const { root, source, run, fill } = await setup(t);
+  write(root, 'inputs/info.md', '# Source\nBusiness information.\n');
+  const args = ['prepare', '--material', 'policy=inputs', '--out', 'materials'];
+  assert.equal((await run(['prepare', '--material', 'policy=inputs', '--team-note', 'policy=inputs', '--out', 'duplicates'])).error.code, 'intake_material_collision');
+  assert.equal((await run(['prepare', '--material', 'policy=inputs', '--out', 'inputs/generated'])).error.code, 'intake_output_in_materials');
+  assert.equal((await run(args)).status, 0);
+  const { file, bundle } = fillMaterials(path.join(root, 'materials'));
+  const mapping = path.join(root, 'materials', 'intake.sources.local.json');
+  const saved = readFileSync(mapping, 'utf8');
+  rmSync(mapping);
+  assert.equal((await run(['validate', file])).error.code, 'intake_local_sources_required');
+  writeFileSync(mapping, saved);
+  const invalid = JSON.parse(saved); invalid.materials[0].prefix = 'materials/other';
+  writeFileSync(mapping, JSON.stringify(invalid));
+  assert.equal((await run(['validate', file])).error.code, 'intake_local_sources_invalid');
+  writeFileSync(mapping, saved);
+  bundle.source.files[0].sha256 = '0'.repeat(64); bundle.items[0].evidence[0].sha256 = '0'.repeat(64);
+  writeFileSync(file, JSON.stringify(bundle));
+  assert.equal((await run(['validate', file])).error.code, 'intake_manifest_invalid');
+  write(source, 'materials/policy/info.md', 'A code path colliding with material namespace'); git(source, ['add', 'materials']);
+  assert.equal((await run(['prepare', '--repository', repositoryCode, '--scope', '.', '--material', 'policy=inputs', '--out', 'collision'])).error.code, 'intake_material_collision');
+  const old = await run(['prepare', '--repository', repositoryCode, '--scope', 'src', '--out', 'legacy']); assert.equal(old.status, 0);
+  const legacy = fill(path.join(root, 'legacy')); legacy.bundle.items[0].tests = []; delete legacy.bundle.source.mode; delete legacy.bundle.source.inputs;
+  writeFileSync(legacy.file, JSON.stringify(legacy.bundle)); rmSync(path.join(root, 'legacy', 'intake.sources.local.json'));
+  assert.equal((await run(['validate', legacy.file])).status, 0, 'Old packages still use the legacy bound-repository validator');
+  const legacyAnchor = { ...legacy.bundle.items[0].evidence[0], line_end: 999999 };
+  legacy.bundle.source.production = { version: '1.0', scope_statement: 'Legacy source with new inventory', discovery_status: 'partial', capabilities: [{ key: 'cap-legacy', title: 'Legacy capability', disposition: 'unknown', reason: 'Awaiting analysis', requirement_keys: [], evidence: [legacyAnchor] }], conflicts: [] };
+  writeFileSync(legacy.file, JSON.stringify(legacy.bundle));
+  assert.equal((await run(['validate', legacy.file])).error.code, 'intake_evidence_invalid', 'Legacy source branch validates capability anchors');
+  legacy.bundle.source.production.capabilities[0].evidence = legacy.bundle.items[0].evidence;
+  legacy.bundle.source.production.conflicts = [{ key: 'conflict-legacy', summary: 'Unresolved expectation', status: 'open', resolution: '', evidence: [legacyAnchor] }];
+  writeFileSync(legacy.file, JSON.stringify(legacy.bundle));
+  assert.equal((await run(['validate', legacy.file])).error.code, 'intake_evidence_invalid', 'Legacy source branch validates conflict anchors');
+});
+
+test('intake diff compares historical content deterministically and export retains structured acceptance plans', async t => {
+  const { root, run, calls } = await setup(t);
+  write(root, 'inputs/approval.md', '# Approval\nThe manager can approve a pending request.\nDenied requests remain pending.\n');
+  assert.equal((await run(['prepare', '--material', 'rules=inputs', '--out', 'snapshot-one'])).status, 0);
+  const previous = fillMaterials(path.join(root, 'snapshot-one'));
+  const evidence = previous.bundle.items[0].evidence;
+  previous.bundle.items.push({ key: 'req-approve', kind: 'requirement', module_key: 'module-approval', title: 'Approve a request', summary: 'Stated workflow', content_markdown: 'A manager may approve a pending request. No test run claimed.', assessment: 'documented', evidence, tests: [], gaps: ['Implementation not provided.'], acceptance_criteria: [{ id: 'AC-1', text: 'Authorized manager changes pending to approved.' }, { id: 'AC-2', text: 'Denied actor leaves state unchanged.' }], specification: { actor: 'Manager', trigger: 'Approve action', preconditions: ['Pending request exists'], main_flow: ['Check actor permission', 'Record approval'], exceptions: [{ condition: 'Actor lacks permission', handling: 'Deny and preserve state' }], business_rules: ['Only a manager approves'], state_changes: ['pending → approved'], data_contracts: ['request ID and current status are required'] }, verification_plan: [{ ac_id: 'AC-1', method: 'manual', preconditions: 'Manager and pending request', steps: ['Approve request'], expected: 'Approved state recorded' }, { ac_id: 'AC-2', method: 'manual', preconditions: 'Viewer and pending request', steps: ['Attempt approval'], expected: 'Permission denied and state unchanged' }] });
+  writeFileSync(previous.file, JSON.stringify(previous.bundle));
+  const current = structuredClone(previous.bundle); current.source.analyzed_at = '2026-10-22T00:00:00.000Z'; current.items.reverse(); current.items[0].acceptance_criteria.reverse(); current.items[0].verification_plan.reverse();
+  const currentFile = write(root, 'snapshot-two.json', JSON.stringify(current));
+  const count = calls.length;
+  rmSync(path.join(root, 'inputs'), { recursive: true, force: true });
+  const same = await run(['diff', previous.file, currentFile]); assert.equal(same.status, 0, JSON.stringify(same)); assert.equal(same.data.unchanged, true); assert.deepEqual(same.data.affected_keys, []);
+  current.items[0].acceptance_criteria.find(ac => ac.id === 'AC-1').text = 'Authorized manager records approval and audit time.';
+  writeFileSync(currentFile, JSON.stringify(current));
+  const changed = await run(['diff', previous.file, currentFile]); assert.equal(changed.data.unchanged, false); assert.deepEqual(changed.data.acceptance_criteria.changed, ['req-approve/AC-1']); assert.deepEqual(changed.data.affected_keys, ['req-approve']);
+  const exported = await run(['export', currentFile, '--out', 'readable']); assert.equal(exported.status, 0, JSON.stringify(exported)); assert.equal(exported.data.document_count, 1);
+  const document = readFileSync(path.join(root, 'readable', exported.data.files[0].file), 'utf8');
+  assert.match(document, /AC-1/); assert.match(document, /audit time/); assert.match(document, /Permission denied and state unchanged/); assert.match(document, /未执行的计划不代表通过/);
+  assert.equal((await run(['export', currentFile, '--out', 'readable'])).error.code, 'intake_output_exists');
+  assert.equal(calls.length, count, 'Historical diff/export do not contact the API or need current sources');
+});
+
+test('material tables preserve UTF-8 bytes and exclude unsupported or invalid text inputs', t => {
+  const root = mkdtempSync(path.join(tmpdir(), 'tsp-intake-tables-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const text = '角色,能力\n经理,审批\n';
+  write(root, 'roles.csv', text);
+  write(root, 'invalid.txt', Buffer.from([0xc3, 0x28]));
+  write(root, 'report.pdf', 'A binary document extension is not a supported text source.');
+  const materials = parseIntakeMaterials([`roles=${root}`]);
+  const source = scanIntakeInputs({ version: 1, project_code: projectCode, repository_code: null, code_scopes: [], include_untracked: false, materials }, root);
+  assert.deepEqual(source.files, [{ path: 'materials/roles/roles.csv', sha256: sha256(text) }]);
+  assert.equal(source.mode, 'materials');
 });

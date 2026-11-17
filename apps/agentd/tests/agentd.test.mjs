@@ -11,11 +11,12 @@ import { buildServer } from '../../core-api/dist/server.js';
 import { eq } from 'drizzle-orm';
 import { Pool } from 'pg';
 import { closeDb, openDb, schema } from '@team-synergy/persistence';
+import { assertOwnedTestDatabase, requireTestContext } from '../../../scripts/test-database-guard.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const cliEntry = path.resolve(here, '../dist/index.js');
 const migrationsFolder = path.resolve(here, '../../../packages/persistence/drizzle');
-const testDatabaseUrl = process.env.ACP_TEST_DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/acp_test';
+const testDatabaseUrl = requireTestContext().databaseUrl;
 let databaseEnsured = false;
 const code = (value) => String(value).padStart(20, '0');
 const IDS = Object.freeze({ team: 1n, user: 2n, project: 3n, feature: 4n, task: 5n, workspace: 6n, run: 7n });
@@ -24,29 +25,11 @@ const CODES = Object.freeze({
   task: code(5), workspace: code(6), run: code(7),
 });
 
-function databaseNameOf(databaseUrl) {
-  const databaseName = new URL(databaseUrl).pathname.replace(/^\/+/, '');
-  if (!/^[A-Za-z0-9_]+$/.test(databaseName)) {
-    throw new Error(`Unsupported test database name: ${databaseName}`);
-  }
-  return databaseName;
-}
-
-function adminDatabaseUrl(databaseUrl) {
-  const url = new URL(databaseUrl);
-  url.pathname = '/postgres';
-  return url.toString();
-}
-
 async function ensureTestDatabase() {
   if (databaseEnsured) return;
-  const databaseName = databaseNameOf(testDatabaseUrl);
-  const pool = new Pool({ connectionString: adminDatabaseUrl(testDatabaseUrl) });
+  const pool = new Pool({ connectionString: testDatabaseUrl });
   try {
-    const result = await pool.query('SELECT 1 FROM pg_database WHERE datname = $1', [databaseName]);
-    if (result.rowCount === 0) {
-      await pool.query(`CREATE DATABASE "${databaseName}"`);
-    }
+    await assertOwnedTestDatabase(pool);
     databaseEnsured = true;
   } finally {
     await pool.end();
@@ -54,6 +37,7 @@ async function ensureTestDatabase() {
 }
 
 async function truncateAllTables(db) {
+  await assertOwnedTestDatabase(db.$client);
   const result = await db.$client.query(
     "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> '__drizzle_migrations'",
   );
@@ -112,7 +96,7 @@ async function fixture() {
   await db.insert(schema.devices).values({ code: code(8), principal_id: IDS.user, credential_hash: createHash('sha256').update(deviceToken).digest('hex'), created_at: '2026-01-01T00:00:00.000Z' });
   const app = await buildServer({ db, logger: false });
   const apiUrl = await app.listen({ host: '127.0.0.1', port: 0 });
-  const env = { ...process.env, ACP_DATABASE_URL: 'postgres://invalid:invalid@127.0.0.1:1/must_not_connect', ACP_API_URL: apiUrl, ACP_DEVICE_TOKEN: deviceToken, AGENTCTL_HOME: path.join(root, 'auth'), AGENTD_HOME: path.join(root, 'journal'), AGENTD_WATCHDOG_INTERVAL_MS: '250' };
+  const env = { ...process.env, TSP_DATABASE_URL: 'postgres://invalid:invalid@127.0.0.1:1/must_not_connect', ACP_API_URL: apiUrl, ACP_DEVICE_TOKEN: deviceToken, AGENTCTL_HOME: path.join(root, 'auth'), AGENTD_HOME: path.join(root, 'journal'), AGENTD_WATCHDOG_INTERVAL_MS: '250' };
   const run = (args, overrides = {}) => new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cliEntry, ...args], {
     cwd: repo,

@@ -69,8 +69,11 @@ test('project create：注册用户成为 Owner 并写入审计；非注册用�
   assert.equal(audit.action, 'project.created');
   assert.equal(audit.principal_id, creator.id);
   const folders = await db.select().from(schema.projectDocumentFolders).where(eq(schema.projectDocumentFolders.project_id, projectRow.id));
-  assert.deepEqual(folders.map(folder => folder.system_role).sort(), ['architecture', 'requirements', 'standards', 'testing']);
-  assert.equal(folders.every(folder => folder.parent_id === null && folder.status === 'active' && folder.created_by === null), true);
+  const root = folders.find(folder => folder.system_role === 'root');
+  assert.deepEqual(folders.map(folder => folder.system_role).sort(), ['architecture', 'overview', 'requirements', 'root', 'standards', 'testing']);
+  assert.equal(root.parent_id, null);
+  assert.equal(folders.every(folder => folder.status === 'active' && folder.created_by === null), true);
+  assert.equal(folders.filter(folder => folder.system_role !== 'root').every(folder => folder.parent_id === root.id), true);
 
   const rejected = await projects.createProject({ teamCode: createdTeam.data.team_code, name: 'Ghost', principalCode: '00000000000000000000' });
   assert.equal(rejected.ok, false);

@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "export-change",
+      "input_directory": "export-change/sources",
+      "prompt": "Use the supplied spec-production skill to produce a reviewable enterprise specification change for the export capability from these raw inputs and baseline. This run asks for specification content only: write a Markdown draft and review notes locally, without preparing/submitting an intake batch or implementing code. Preserve useful baseline identities, include observable acceptance checks, and identify the decisions still needed. Stay within the requested export scope.",
+      "rubric": [
+        { "id": "scope", "criterion": "Keeps exports as the change slice; leaves billing unchanged; does not claim complete project inventory." },
+        { "id": "current_target", "criterion": "Separates code behavior (admin-only, 10000 limit, no visible workspace check) from approved EP-7 targets and records implementation gaps without treating bugs as approved business rules." },
+        { "id": "precedence", "criterion": "Uses the explicit EP-7 supersession, keeps later unapproved auditor/20000 suggestions as pending, and does not treat recency as authority." },
+        { "id": "identity_delta", "criterion": "Preserves CREATE/LIMIT/RETRY requirement and existing acceptance IDs when revising their meaning; records SYNC removal as a specification delta without deleting stored entities/history; identifies additions." },
+        { "id": "cross_workspace", "criterion": "Specifies forbidden cross-workspace access and retry identity scoped by workspace; checks both duplicate prevention and absence of another workspace's data." },
+        { "id": "recovery", "criterion": "Observes persisted queued job before failed publish, distinguishes observed behavior from target recoverability, and leaves mechanism proposed/undecided instead of asserting an outbox already exists." },
+        { "id": "controlled_checks", "criterion": "Verification plans give actor/workspace/job setup, independent/reset state for 5000/5001 boundaries, operation and observable result including unchanged state on rejection." },
+        { "id": "cross_document", "criterion": "Lists affected API/permissions/data/operations/testing specifications, without asserting their unseen contents; keeps roles/limits consistent across its output." },
+        { "id": "evidence_limits", "criterion": "Uses accurate file/line citations for consequential facts and states missing schema/queue/runtime/test evidence; does not infer absence outside supplied files." },
+        { "id": "honesty", "criterion": "Does not invent executed tests, SLO/retention numbers, overall standards compliance or human approval of the generated draft; clearly states unresolved decisions and review limits." }
+      ]
+    }
+  ],
+  "protocol": "Run the same case in fresh isolated writer contexts with the frozen baseline skill and current skill. Supply only the prompt, selected skill, raw inputs and output directory. A separate evaluator reads both outputs and the raw inputs and records pass/partial/fail with artifact evidence per criterion. Preserve versions, hashes, prompts, outputs and verdicts. One paired case is a smoke evaluation, not a measured cross-project success rate. Do not use this rubric as writer context or an exact output template."
+}

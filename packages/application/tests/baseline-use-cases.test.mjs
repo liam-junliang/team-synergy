@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { eq, sql } from 'drizzle-orm';
 import { schema } from '@team-synergy/persistence';
 import { createRequirementBaselineUseCases } from '../dist/index.js';
-import { insertFeature, insertRequirement, insertTask, seedWorkspaceProject, useTestDb } from './test-db.mjs';
+import { addProjectMember, insertFeature, insertProject, insertRequirement, insertTask, seedWorkspaceProject, useTestDb } from './test-db.mjs';
 
 const fixture = useTestDb(import.meta.url);
 
@@ -103,7 +103,7 @@ test('基线拒绝草稿、空选择、重复、未知修订和跨项目内容�
   assert.equal((await c.uc.create({ ...c.args, requirements: [...c.args.requirements, ...c.args.requirements] })).error.code, 'baseline_invalid_selection');
   assert.equal((await c.uc.create({ ...c.args, requirements: [{ requirement_code: draft.requirement.code, revision: 1 }] })).error.code, 'baseline_requirement_not_approved');
   assert.equal((await c.uc.create({ ...c.args, requirements: [{ requirement_code: c.first.requirement.code, revision: 99 }] })).error.code, 'baseline_revision_not_found');
-  const [otherProject] = await c.db.insert(schema.projects).values({ team_id: c.team.id, name: 'Other', created_at: 't0' }).returning();
+  const [otherProject] = await c.db.insert(schema.projects).values({ team_id: c.team.id, name: 'Other', created_at: '2026-01-01T00:00:00.000Z' }).returning();
   const feature = await insertFeature(c.db, { projectId: otherProject.id, title: 'Other' });
   const other = await c.add('Other requirement', 'confirmed', feature.id);
   assert.equal((await c.uc.create({ ...c.args, requirements: [{ requirement_code: other.requirement.code, revision: 1 }] })).error.code, 'baseline_requirement_project_mismatch');
@@ -126,7 +126,7 @@ test('并发确认必须匹配最新父基线；首次显式空父级也防止�
 test('项目隔离：基线代码不能越项目读取或比较；内容哈希检测存储损坏', async () => {
   const c = await seeded();
   const created = await c.uc.create(c.args);
-  const [otherProject] = await c.db.insert(schema.projects).values({ team_id: c.team.id, name: 'Other', created_at: 't0' }).returning();
+  const [otherProject] = await c.db.insert(schema.projects).values({ team_id: c.team.id, name: 'Other', created_at: '2026-01-01T00:00:00.000Z' }).returning();
   await c.db.insert(schema.members).values({ project_id: otherProject.id, principal_id: c.users.owner.id, role: 'owner', display_name: 'Owner', created_at: 't0' });
   const otherArgs = { ...c.args, projectCode: otherProject.code, baselineCode: created.data.baseline_code };
   assert.equal((await c.uc.get(otherArgs)).error.code, 'baseline_not_found');
@@ -165,7 +165,7 @@ test('演进图绑定保留未绑定任务和交接，交接采用冻结基线�
   const unbound = await make({ title: 'No baseline', published: true });
   const hidden = await make({ title: 'Private owner draft', frozen: first.data });
   const own = await make({ title: 'Private source draft', principal: c.users.member, frozen: first.data });
-  const [otherProject] = await c.db.insert(schema.projects).values({ team_id: c.team.id, name: 'Other', created_at: 't0' }).returning();
+  const [otherProject] = await c.db.insert(schema.projects).values({ team_id: c.team.id, name: 'Other', created_at: '2026-01-01T00:00:00.000Z' }).returning();
   const otherFeature = await insertFeature(c.db, { projectId: otherProject.id, title: 'Other' });
   const other = await make({ title: 'Other project', project: otherProject, feature: otherFeature, frozen: first.data, published: true });
   const foreignContext = await make({ title: 'Mismatched context', contextProject: otherProject, frozen: first.data, published: true });
@@ -192,4 +192,25 @@ test('演进图绑定保留未绑定任务和交接，交接采用冻结基线�
   assert.equal((await c.uc.bindings(memberArgs)).error.code, 'baseline_access_denied');
   await c.db.delete(schema.members).where(eq(schema.members.principal_id, c.users.owner.id));
   assert.equal((await c.uc.bindings(c.args)).error.code, 'baseline_access_denied');
+});
+
+test('concurrent baseline creation serializes one project and preserves parent conflict', async () => {
+  const c = await seeded();
+  const results = await Promise.all([c.uc.create(c.args), c.uc.create(c.args)]);
+  assert.equal(results.filter(result => result.ok).length, 1);
+  assert.equal(results.find(result => !result.ok).error.code, 'baseline_parent_conflict');
+  assert.equal((await c.db.select().from(schema.requirementBaselines)).length, 1);
+});
+
+
+test('concurrent baseline creation in different projects succeeds independently', async () => {
+  const c = await seeded();
+  const other = await insertProject(c.db, { teamId: c.team.id, name: 'Independent baseline' });
+  await addProjectMember(c.db, { projectId: other.id, principalId: c.users.owner.id, role: 'owner', displayName: 'Owner' });
+  const feature = await insertFeature(c.db, { projectId: other.id, title: 'Independent feature' });
+  const item = await c.add('Independent requirement', 'confirmed', feature.id);
+  const otherArgs = { ...c.args, projectCode: other.code, requirements: [{ requirement_code: item.requirement.code, revision: 1 }] };
+  const results = await Promise.all([c.uc.create(c.args), c.uc.create(otherArgs)]);
+  for (const result of results) assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal((await c.db.select().from(schema.requirementBaselines)).length, 2);
 });

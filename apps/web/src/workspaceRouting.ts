@@ -1,6 +1,6 @@
-export const PROJECT_SECTIONS = ['overview', 'documents', 'plan', 'requirements', 'design', 'board', 'testing', 'defects', 'handovers'] as const;
+export const PROJECT_SECTIONS = ['overview', 'documents', 'understanding', 'plan', 'requirements', 'design', 'board', 'testing', 'defects', 'handovers'] as const;
 export type ProjectSection = (typeof PROJECT_SECTIONS)[number];
-export type WorkspaceView = 'teams' | 'account' | 'agent' | 'admin' | ProjectSection;
+export type WorkspaceView = 'teams' | 'account' | 'personal-memory' | 'agent' | 'admin' | ProjectSection;
 export type AdminSection = 'teams' | 'users' | 'settings';
 export type ProjectWorkspaceTab = 'overview' | 'structure' | 'architecture' | 'intake';
 
@@ -15,11 +15,17 @@ export interface WorkspaceRoute {
   requirementsTab?: 'ideas' | 'topics' | 'documents' | 'checklist';
   testingTab?: 'cases' | 'assets' | 'executions';
   testingCode?: string;
+  testingRevision?: string;
   agentTab?: 'connect' | 'skills' | 'authorize';
   authorizationCode?: string;
   teamCode?: string;
   agentReturnPath?: string;
   adminTab?: AdminSection;
+  personalMemoryProject?: string;
+  understandingRepository?: string;
+  understandingRun?: string;
+  understandingNode?: string;
+  understandingView?: string;
 }
 
 export function parseWorkspacePath(pathname: string): WorkspaceRoute {
@@ -48,12 +54,20 @@ export function parseWorkspacePath(pathname: string): WorkspaceRoute {
     }
     const section = PROJECT_SECTIONS.includes(parts[2] as ProjectSection) ? parts[2] as ProjectSection : 'overview';
     const route: WorkspaceRoute = { view: section, projectCode };
+    if (section === 'understanding') {
+      const params = new URLSearchParams(query);
+      route.understandingRepository = params.get('repository') || undefined;
+      route.understandingRun = params.get('run') || undefined;
+      route.understandingNode = params.get('node') || undefined;
+      route.understandingView = params.get('view') || undefined;
+    }
     if (section === 'testing') {
       const params = new URLSearchParams(query);
       const tab = params.get('tab');
       route.testingTab = tab === 'assets' || tab === 'executions' ? tab : 'cases';
       const itemCode = params.get('item');
       if (itemCode) route.testingCode = itemCode;
+      if (route.testingTab === 'assets' && itemCode && params.has('revision')) route.testingRevision = params.get('revision') ?? '';
     }
     if (section === 'overview') {
       const params = new URLSearchParams(query);
@@ -93,12 +107,26 @@ export function parseWorkspacePath(pathname: string): WorkspaceRoute {
     }
     return route;
   }
+  if (parts[0] === 'account' && parts[1] === 'memory' && parts.length === 2) {
+    const project = new URLSearchParams(query).get('project') || undefined;
+    return { view: 'personal-memory', ...(project ? { personalMemoryProject: project } : {}) };
+  }
   if (parts[0] === 'account') return { view: 'account' };
   return { view: 'teams' };
 }
 
 export function projectWorkspacePath(projectCode: string, section: ProjectSection = 'overview'): string {
   return `/projects/${encodeURIComponent(projectCode)}/${section}`;
+}
+
+export function personalMemoryWorkspacePath(projectCode?: string): string {
+  return `/account/memory${projectCode ? `?${new URLSearchParams({ project: projectCode })}` : ''}`;
+}
+
+export function codeUnderstandingPath(projectCode: string, selection: { repository?: string; run?: string; node?: string; view?: string } = {}): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(selection)) if (value) params.set(key, value);
+  return `${projectWorkspacePath(projectCode, 'understanding')}${params.size ? `?${params}` : ''}`;
 }
 
 export function safeAgentReturnPath(path?: string | null, projectCode?: string): string {
@@ -117,10 +145,22 @@ export function agentWorkspacePath(tab: 'connect' | 'skills' = 'connect', contex
   return `/agent/${tab}${params.size ? `?${params}` : ''}`;
 }
 
-export function testingWorkspacePath(projectCode: string, tab: 'cases' | 'assets' | 'executions' = 'cases', code?: string): string {
+export function testingWorkspacePath(projectCode: string, tab: 'cases' | 'assets' | 'executions' = 'cases', code?: string, revision?: number): string {
   const params = new URLSearchParams({ tab });
   if (code) params.set('item', code);
+  if (revision !== undefined) params.set('revision', String(revision));
   return `${projectWorkspacePath(projectCode, 'testing')}?${params}`;
+}
+
+export function taskArtifactTestingPath(artifact: { project_code: string; uri: string }, projectCode: string): string | undefined {
+  if (artifact.project_code !== projectCode) return undefined;
+  const asset = /^tsp:test-asset\/([0-9A-HJKMNP-TV-Z]{20})@([1-9]\d*)$/.exec(artifact.uri);
+  if (asset) {
+    const revision = Number(asset[2]);
+    return Number.isSafeInteger(revision) ? testingWorkspacePath(projectCode, 'assets', asset[1], revision) : undefined;
+  }
+  const execution = /^tsp:test-execution\/([0-9A-HJKMNP-TV-Z]{20})$/.exec(artifact.uri);
+  return execution ? testingWorkspacePath(projectCode, 'executions', execution[1]) : undefined;
 }
 
 export function projectHomeWorkspacePath(projectCode: string, tab: ProjectWorkspaceTab = 'overview', documentCode?: string): string {
@@ -163,6 +203,7 @@ export function requirementWorkspacePath(projectCode: string, options: { documen
 export function isWorkspacePath(path: string): boolean {
   const pathname = path.split(/[?#]/, 1)[0];
   if (/^\/(?:teams\/?|account\/?)?$/.test(pathname)) return true;
+  if (/^\/account\/memory\/?$/.test(pathname)) return true;
   if (/^\/agent\/(?:connect|skills|authorize)\/?$/.test(pathname)) return true;
   if (/^\/admin(?:\/(?:teams|users|settings))?\/?$/.test(pathname)) return true;
   const match = /^\/projects\/([^/]+)(?:\/([^/]+))?\/?$/.exec(pathname);

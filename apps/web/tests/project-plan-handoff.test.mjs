@@ -20,11 +20,27 @@ after(async () => {
   await vite?.close();
 });
 
+test('旧执行证据文档链接定位原测试资产，可复用指南仍在文档库阅读', async () => {
+  const { testingEvidencePath } = await vite.ssrLoadModule('/src/ProjectDocumentsWorkbench.tsx');
+  const doc = { source_kind: 'testing', document_code: 'ASSET-A', project_code: 'PROJECT-A',
+    testing_asset: { code: 'ASSET-A', project_code: 'PROJECT-A', purpose: 'data' } };
+  for (const purpose of ['data', 'script', 'report']) {
+    assert.equal(testingEvidencePath({ ...doc, testing_asset: { ...doc.testing_asset, purpose } }),
+      '/projects/PROJECT-A/testing?tab=assets&item=ASSET-A');
+  }
+  for (const purpose of ['guide', 'environment']) {
+    assert.equal(testingEvidencePath({ ...doc, testing_asset: { ...doc.testing_asset, purpose } }), null);
+  }
+  assert.equal(testingEvidencePath({ ...doc, testing_asset: { ...doc.testing_asset, project_code: 'OTHER' } }), null);
+  assert.equal(testingEvidencePath({ ...doc, source_kind: 'project' }), null);
+  assert.equal(testingEvidencePath(), null);
+});
+
 test('导航命名：文档库与跨人交接具有独立入口', async () => {
   const { PROJECT_VIEWS } = await vite.ssrLoadModule('/src/App.tsx');
   const labels = Object.fromEntries(PROJECT_VIEWS.map((item) => [item.id, item.label]));
 
-  assert.deepEqual(PROJECT_VIEWS.map((item) => item.id), ['overview', 'documents', 'plan', 'requirements', 'design', 'board', 'testing', 'defects', 'handovers']);
+  assert.deepEqual(PROJECT_VIEWS.map((item) => item.id), ['overview', 'documents', 'understanding', 'plan', 'requirements', 'design', 'board', 'testing', 'defects', 'handovers']);
   assert.equal(labels.overview, '项目');
   assert.equal(labels.baselines, undefined);
   assert.ok(PROJECT_VIEWS.every((item) => item.label !== '项目理解'));
@@ -32,6 +48,7 @@ test('导航命名：文档库与跨人交接具有独立入口', async () => {
   assert.equal(labels.plan, '计划');
   assert.equal(labels.board, '任务');
   assert.equal(labels.documents, '文档');
+  assert.equal(labels.understanding, '规格');
   assert.equal(labels.handovers, '交接');
   assert.equal(labels.testing, '测试');
   assert.equal(labels.orchestration, undefined);

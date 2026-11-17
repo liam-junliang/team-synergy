@@ -100,7 +100,7 @@ async function seedAssignedRunTask(db, taskCode = testCode(210), status = 'assig
     assignee_principal_id: status === 'assigned' ? builder.id : null,
     acceptance: JSON.stringify([{ id: 'AC-1', text: '执行循环' }]),
     base_snapshot: status === 'assigned' ? 1 : 0,
-    created_at: 't0',
+    created_at: '2026-01-01T00:00:00.000Z',
   }).returning();
 
   return { owner, builder, project, task };

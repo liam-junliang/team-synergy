@@ -1,13 +1,14 @@
 import { buildServer } from './server.js';
+import { installShutdown, startupFailure } from './lifecycle.js';
 
-const app = await buildServer();
-const port = Number(process.env.PORT ?? 8080);
-const host = process.env.HOST ?? '0.0.0.0';
-
+let app: Awaited<ReturnType<typeof buildServer>> | undefined;
 try {
-  await app.listen({ port, host });
-  app.log.info(`Core API listening on http://${host}:${port}`);
-} catch (err) {
-  app.log.error(err);
-  process.exit(1);
+  app = await buildServer();
+  const removeSignals = installShutdown(app);
+  app.addHook('onClose', async () => { removeSignals(); });
+  await app.listen({ port: Number(process.env.PORT ?? 8080), host: process.env.HOST ?? '0.0.0.0' });
+} catch (error) {
+  process.stderr.write(`${startupFailure(error)}\n`);
+  if (app) await app.close().catch(() => undefined);
+  process.exitCode = 1;
 }

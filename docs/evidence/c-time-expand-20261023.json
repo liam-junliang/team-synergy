@@ -1,0 +1,114 @@
+{
+  "checks": [
+    {
+      "checked_at": "2026-10-23T09:04:01.743Z",
+      "stage": "runtime_expand",
+      "source_commit": "a8ce425d9ff9a777b0c5efb70c5975d4092fa954",
+      "checks": [
+        {
+          "table": "projects",
+          "column": "created_at",
+          "rows": 3,
+          "null_mirrors": 0,
+          "mismatches": 0
+        },
+        {
+          "table": "tasks",
+          "column": "created_at",
+          "rows": 64,
+          "null_mirrors": 0,
+          "mismatches": 0
+        },
+        {
+          "table": "audit_events",
+          "column": "timestamp",
+          "rows": 859,
+          "null_mirrors": 0,
+          "mismatches": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "conname": "fk_device_sessions_device",
+          "convalidated": true,
+          "confdeltype": "r"
+        },
+        {
+          "conname": "fk_features_project",
+          "convalidated": true,
+          "confdeltype": "r"
+        },
+        {
+          "conname": "fk_members_project",
+          "convalidated": true,
+          "confdeltype": "r"
+        },
+        {
+          "conname": "fk_runs_task",
+          "convalidated": true,
+          "confdeltype": "r"
+        },
+        {
+          "conname": "fk_tasks_feature",
+          "convalidated": true,
+          "confdeltype": "r"
+        }
+      ]
+    },
+    {
+      "checked_at": "2026-10-23T09:14:34.119Z",
+      "stage": "runtime_expand",
+      "source_commit": "a8ce425d9ff9a777b0c5efb70c5975d4092fa954",
+      "checks": [
+        {
+          "table": "projects",
+          "column": "created_at",
+          "rows": 3,
+          "null_mirrors": 0,
+          "mismatches": 0
+        },
+        {
+          "table": "tasks",
+          "column": "created_at",
+          "rows": 64,
+          "null_mirrors": 0,
+          "mismatches": 0
+        },
+        {
+          "table": "audit_events",
+          "column": "timestamp",
+          "rows": 859,
+          "null_mirrors": 0,
+          "mismatches": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "conname": "fk_device_sessions_device",
+          "convalidated": true,
+          "confdeltype": "r"
+        },
+        {
+          "conname": "fk_features_project",
+          "convalidated": true,
+          "confdeltype": "r"
+        },
+        {
+          "conname": "fk_members_project",
+          "convalidated": true,
+          "confdeltype": "r"
+        },
+        {
+          "conname": "fk_runs_task",
+          "convalidated": true,
+          "confdeltype": "r"
+        },
+        {
+          "conname": "fk_tasks_feature",
+          "convalidated": true,
+          "confdeltype": "r"
+        }
+      ]
+    }
+  ]
+}

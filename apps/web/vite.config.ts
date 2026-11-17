@@ -1,12 +1,14 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import { webSecurityHeaders } from './security-headers.mjs';
 
 export default defineConfig({
   appType: 'spa',
   plugins: [react(), tailwindcss()],
   server: {
     port: 5173,
+    headers: webSecurityHeaders({ development: true }),
     // 页面使用正常路径；接口统一放在 /api，避免 /projects、/teams 冲突。
     proxy: {
       '^/api(?:/|$)': {
@@ -16,6 +18,7 @@ export default defineConfig({
       },
     },
   },
+  preview: { headers: webSecurityHeaders() },
   build: {
     outDir: 'dist',
   },

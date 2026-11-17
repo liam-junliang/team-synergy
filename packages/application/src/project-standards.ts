@@ -26,7 +26,7 @@ export function collectProjectStandardsDocuments<T extends StandardsDocument>(
   documents: readonly T[],
 ): T[] {
   const activeFolders = folders.filter(folder => folder.project_id === projectId && folder.status === 'active');
-  const root = activeFolders.find(folder => folder.system_role === 'standards' && folder.parent_id === null);
+  const root = activeFolders.find(folder => folder.system_role === 'standards');
   if (!root) return [];
   const included = new Set([root.id]);
   // Following only active parents excludes entire archived branches. The set

@@ -56,7 +56,7 @@ test('agentctl auth login/whoami/logout completes against a real core-api', asyn
         assignee_principal_id: cliUser.id,
         acceptance: JSON.stringify([{ id: 'AC-1', text: 'mine' }]),
         base_snapshot: 0,
-        created_at: 't0',
+        created_at: '2026-01-01T00:00:00.000Z',
       },
       {
         code: testCode(306),
@@ -69,7 +69,7 @@ test('agentctl auth login/whoami/logout completes against a real core-api', asyn
         assignee_principal_id: otherUser.id,
         acceptance: JSON.stringify([{ id: 'AC-1', text: 'other' }]),
         base_snapshot: 0,
-        created_at: 't0',
+        created_at: '2026-01-01T00:00:00.000Z',
       },
     ]);
 

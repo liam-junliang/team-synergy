@@ -54,7 +54,7 @@ async function seedTaskFixture(db) {
     status: 'draft',
     acceptance: JSON.stringify([{ id: 'AC-1', text: '验收标准' }]),
     base_snapshot: 0,
-    created_at: 't0',
+    created_at: '2026-01-01T00:00:00.000Z',
   }).returning();
   return { owner, member, project, feature, task };
 }

@@ -53,7 +53,7 @@ test('testing system root rejects folder mutation, nesting and unrelated documen
   const library = data(await ctx.docs.listLibrary(base));
   const folder = library.folders.find(row => row.system_role === 'testing');
   assert.equal(folder.name, '测试资料');
-  assert.equal(folder.parent_folder_code, null);
+  assert.equal(folder.parent_folder_code, library.folders.find(row => row.system_role === 'root').folder_code);
   assert.equal(folder.can_edit, false);
   assert.equal(folder.can_create_folder, false);
   const ordinary = data(await ctx.docs.createFolder({ ...base, name: 'Manuals' }));

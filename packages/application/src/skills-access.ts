@@ -25,6 +25,8 @@ export async function skillScope(db: AccessDb, type: SkillScope, code: string) {
   return { id: row.id, code: row.code, type };
 }
 export async function skillSourceAccess(db: AccessDb, row: Pick<SkillRow, 'scope_type' | 'scope_id'>, principalId: bigint) {
+  if (row.scope_type === 'platform') return { read: false, write: false, manage: false, code: 'platform' };
+  if (row.scope_id === null) throw new DomainError('skill_scope_not_found', '技能来源不存在');
   if (row.scope_type === 'team') {
     const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, row.scope_id)).limit(1);
     const role = await resolveTeamRole(db, row.scope_id, principalId);
@@ -54,7 +56,9 @@ export async function skillByCode(db: AccessDb, code: string) {
 /** Hold the membership scopes used by a detail download until its bytes have been selected. */
 export async function lockSkillReadScopes(db: AccessDb, skill: SkillRow, principalId: bigint, projectCode?: string) {
   const teamIds = new Set<bigint>(); const projectIds = new Set<bigint>();
-  if (skill.scope_type === 'team') teamIds.add(skill.scope_id); else projectIds.add(skill.scope_id);
+  if (skill.scope_id !== null) {
+    if (skill.scope_type === 'team') teamIds.add(skill.scope_id); else projectIds.add(skill.scope_id);
+  }
   if (projectCode) {
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.code, projectCode)).limit(1);
     if (!project) throw new DomainError('project_not_found', '项目不存在');
@@ -91,6 +95,7 @@ export async function projectHasExternalMembers(db: AccessDb, project: SkillProj
 /** A grant authorizes delivery to the project, independently of the requesting user's source memberships. */
 export async function skillProjectGrant(db: AccessDb, skill: SkillRow, revision: SkillRevisionRow, project: SkillProject): Promise<boolean> {
   if (skill.archived || !revision.published_at) return false;
+  if (skill.scope_type === 'platform') return true;
   if (skill.scope_type === 'project' && skill.scope_id === project.id) return true;
   const external = await projectHasExternalMembers(db, project);
   if (skill.scope_type === 'team' && skill.scope_id === project.team_id && !external) return true;
@@ -102,6 +107,7 @@ export async function skillProjectGrant(db: AccessDb, skill: SkillRow, revision:
 }
 export async function skillVisibleRevisions(db: AccessDb, skill: SkillRow, principalId: bigint, projectCode?: string): Promise<SkillRevisionRow[]> {
   const revisions = await db.select().from(schema.skillRevisions).where(eq(schema.skillRevisions.skill_id, skill.id));
+  if (skill.scope_type === 'platform' && !projectCode) return revisions.filter(revision => !skill.archived && revision.published_at);
   const source = await skillSourceAccess(db, skill, principalId);
   // Source membership is independent of a target-project context; authors retain their maintenance rights.
   if (source.read) return revisions.filter(rev => !!rev.published_at || source.manage || (source.write && skill.owner_principal_id === principalId));

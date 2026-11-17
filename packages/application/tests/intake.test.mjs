@@ -5,7 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { and, eq, sql } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import { schema } from '@team-synergy/persistence';
-import { intakeManifestText } from '@team-synergy/contracts';
+import { intakeManifestText, IntakeBundleSchema, ENTERPRISE_ARTIFACTS, INTAKE_QUALITY_RULE_VERSION } from '@team-synergy/contracts';
 import { createIntakeUseCases } from '../dist/index.js';
 import { seedWorkspaceProject, useTestDb, insertUser } from './test-db.mjs';
 
@@ -43,6 +43,207 @@ async function reviewed(ctx, batch, decisions) { return ok(await ctx.uc.review({
   input: { base_revision: batch.revision, decisions: decisions ?? batch.items.map(({ item }) => ({ key: item.key, action: 'create' })) } })); }
 async function publish(ctx, batch, key = 'apply') { return ctx.uc.apply({ ...ctx.command, code: batch.code, input: { plan_hash: batch.plan_hash, idempotency_key: key } }); }
 async function count(db, table) { return (await db.select().from(table)).length; }
+
+function materialBundle(ctx) {
+  const material = { path: 'materials/team/access.md', sha256: hash('Team access decisions') };
+  return { ...ctx.bundle, repository_code: null, namespace: 'team-materials', source: { ...ctx.bundle.source,
+    mode: 'materials', commit: null, dirty: false, scope: ['materials/team'], files: [material],
+    manifest_sha256: hash(intakeManifestText([material])),
+    inputs: [{ key: 'team', kind: 'team_note', label: 'Access decisions', prefix: 'materials/team', revision: '2026-10-21' }],
+  }, items: ctx.bundle.items.map(item => ({ ...item, assessment: 'documented', evidence: [{ ...material, line_start: 1, line_end: 3 }],
+    ...(item.kind === 'requirement' ? { acceptance_criteria: [{ id: 'AC-ACCESS-001', text: 'Given a viewer, when editing a document, then reject the change and retain its revision.' }] } : {}),
+  })) };
+}
+
+test('material-only intake preserves source provenance and structured acceptance through publication and exact replay', async () => {
+  const ctx = await seeded();
+  ctx.bundle = materialBundle(ctx);
+  // A project needs no repository registration to produce specifications from team material.
+  await ctx.db.delete(schema.projectRepositories).where(eq(schema.projectRepositories.id, ctx.repo.id));
+  const staged = await draft(ctx);
+  assert.equal(staged.repository_code, null); assert.deepEqual(staged.source.inputs, ctx.bundle.source.inputs);
+  assert.equal(staged.source.mode, 'materials'); assert.equal(staged.source.commit, null);
+  assert.equal(ok(await ctx.uc.list(ctx.command)).batches[0].repository_code, null);
+  assert.deepEqual(ok(await ctx.uc.context(ctx.command)).repositories, []);
+  const frozen = await reviewed(ctx, staged), done = ok(await publish(ctx, frozen));
+  assert.equal(done.status, 'applied'); assert.equal(done.publication.created, 5);
+  assert.deepEqual(done.source, ctx.bundle.source);
+  const requirement = done.items.find(row => row.item.kind === 'requirement');
+  const [stored] = await ctx.db.select().from(schema.requirements).where(eq(schema.requirements.code, requirement.target_code));
+  const [revision] = await ctx.db.select().from(schema.requirementRevisions).where(eq(schema.requirementRevisions.requirement_id, stored.id));
+  assert.deepEqual(JSON.parse(revision.acceptance_criteria), ctx.bundle.items.find(item => item.kind === 'requirement').acceptance_criteria);
+  assert.equal(stored.state, 'draft', 'publication does not manufacture requirement approval');
+  assert.equal((await draft(ctx)).code, staged.code);
+  assert.equal(ok(await publish(ctx, frozen)).code, staged.code);
+  assert.equal(await count(ctx.db, schema.requirements), 1); assert.equal(await count(ctx.db, schema.intakeBindings), 5);
+  const context = ok(await ctx.uc.context(ctx.command));
+  assert.equal(context.bindings.length, 5); assert(context.bindings.every(binding => binding.repository_code === null));
+  assert.deepEqual(new Set(context.bindings.map(binding => binding.key)), new Set(ctx.bundle.items.map(item => item.key)));
+});
+
+test('material identities prevent duplicate publication and remain isolated from repository identities', async () => {
+  const ctx = await seeded(); ctx.bundle = materialBundle(ctx);
+  const first = ok(await publish(ctx, await reviewed(ctx, await draft(ctx))));
+  const repeated = await draft(ctx, 'repeat-materials');
+  assert(repeated.items.every(row => row.existing_binding !== null));
+  bad(await ctx.uc.review({ ...ctx.command, code: repeated.code, input: { base_revision: repeated.revision,
+    decisions: repeated.items.map(({ item }) => ({ key: item.key, action: 'create' })) } }), 'intake_conflict');
+  const decisions = repeated.items.map(row => ({ key: row.item.key, action: 'bind', target_code: row.existing_binding.code, target_fingerprint: row.existing_binding.fingerprint }));
+  const rebound = ok(await publish(ctx, await reviewed(ctx, repeated, decisions), 'bind-materials'));
+  assert.equal(rebound.publication.bound, 5); assert.equal(await count(ctx.db, schema.requirements), 1);
+  assert.deepEqual(rebound.items.map(row => row.target_code), first.items.map(row => row.target_code));
+  const repositoryBundle = { ...ctx.bundle, repository_code: ctx.repo.code, source: { ...ctx.bundle.source, mode: 'mixed',
+    inputs: [...ctx.bundle.source.inputs, { key: 'code', kind: 'code', label: 'Code', prefix: '.' }] } };
+  const other = ok(await ctx.uc.submit({ ...ctx.command, bundle: repositoryBundle, idempotencyKey: 'repository-identity' }));
+  assert(other.items.every(row => row.existing_binding === null));
+  assert.equal(other.repository_code, ctx.repo.code);
+  bad(await ctx.uc.replace({ ...ctx.command, code: other.code, baseRevision: other.revision, bundle: ctx.bundle }), 'intake_invalid');
+});
+
+function enterpriseBundle(ctx) {
+  const testPath = { path: 'src/auth.test.ts', sha256: hash('test source') };
+  const sourceFiles = [...files, testPath];
+  const items = [candidate('auth', 'module'), ...ENTERPRISE_ARTIFACTS.map(artifact => candidate(`doc.${artifact.type}`, artifact.kind, {
+    artifact_type: artifact.type, title: artifact.title, ...(artifact.kind === 'architecture' ? { diagram_source: 'flowchart LR\nClient --> API' } : { module_key: 'auth' }),
+    evidence: [...evidence, { ...files[0], line_start: 10, line_end: 15, symbol: 'rejectForbidden' }],
+    tests: [{ path: testPath.path, name: 'denies unauthorized document mutation', status: 'defined' }],
+    content_markdown: `# ${artifact.title}\n\n${artifact.sections.map(section => `## ${section}\n用户认证后按项目角色访问资料。无权限操作应返回 403，已保存版本和审计记录必须保留。此处为测试场景，运行性能未测，目标和业务取舍需负责人确认。${section === '功能需求' ? '\nREQ-DOC-001 定义项目文档访问行为。' : ''}${section === '验收场景' ? '\nGiven 非项目成员，When 尝试修改文档，Then 应拒绝请求且不得写入正文。' : ''}`).join('\n\n')}`,
+  }))];
+  return { ...ctx.bundle, namespace: 'enterprise', profile: 'enterprise', source: { ...ctx.bundle.source, files: sourceFiles, manifest_sha256: hash(intakeManifestText(sourceFiles)) }, items };
+}
+
+test('enterprise quality gaps save as drafts but cannot freeze, publish, or downgrade the persisted profile', async () => {
+  const ctx = await seeded(); ctx.bundle.profile = 'enterprise';
+  const batch = await draft(ctx);
+  assert.equal(batch.profile, 'enterprise'); assert.equal(batch.quality_gate.status, 'blocked');
+  assert.equal(batch.quality_rule_version, INTAKE_QUALITY_RULE_VERSION);
+  assert.equal(batch.quality_report.batch_revision, batch.revision);
+  assert(batch.quality_report.summary.blockers > 0);
+  const decisions = batch.items.map(({ item }) => ({ key: item.key, action: 'create' }));
+  bad(await ctx.uc.review({ ...ctx.command, code: batch.code, input: { base_revision: batch.revision, decisions } }), 'intake_conflict');
+  bad(await ctx.uc.review({ ...ctx.command, code: batch.code, input: { base_revision: batch.revision, decisions, profile: 'pilot' } }), 'intake_conflict');
+  bad(await ctx.uc.replace({ ...ctx.command, code: batch.code, baseRevision: batch.revision, bundle: { ...ctx.bundle, profile: 'pilot' } }), 'intake_conflict');
+  bad(await publish(ctx, { ...batch, plan_hash: 'a'.repeat(64) }), 'intake_conflict');
+  const current = ok(await ctx.uc.detail({ ...ctx.command, code: batch.code }));
+  assert.equal(current.revision, batch.revision); assert.equal(current.plan_hash, null);
+  assert(current.items.every(row => row.decision === null));
+  assert.equal(await count(ctx.db, schema.intakeAttempts), 0); assert.equal(await count(ctx.db, schema.projectModules), 0);
+});
+
+test('quality-valid enterprise freeze binds the report, while skip and bind receipts do not certify a complete dossier or approval', async () => {
+  const ctx = await seeded();
+  const prior = ok(await publish(ctx, await reviewed(ctx, await draft(ctx))));
+  const architecture = prior.items.find(row => row.item.kind === 'architecture');
+  const target = ok(await ctx.uc.context(ctx.command)).targets.find(row => row.code === architecture.target_code);
+  ctx.bundle = enterpriseBundle(ctx);
+  const draftBatch = await draft(ctx, 'enterprise-valid');
+  assert.equal(draftBatch.quality_report.summary.blockers, 0, JSON.stringify(draftBatch.quality_report));
+  assert.equal(draftBatch.quality_gate.status, 'eligible'); assert(draftBatch.quality_report.summary.needs_review >= 3);
+  const decisions = draftBatch.items.map(({ item }) => item.kind === 'architecture'
+    ? { key: item.key, action: 'bind', target_code: target.code, target_fingerprint: target.fingerprint } : { key: item.key, action: 'skip' });
+  const frozen = await reviewed(ctx, draftBatch, decisions);
+  assert.equal(frozen.quality_report.batch_revision, frozen.revision);
+  const done = ok(await publish(ctx, frozen, 'enterprise-execute'));
+  assert.equal(done.publication.status, 'completed'); assert.equal(done.publication.created, 0); assert.equal(done.publication.bound, 1);
+  assert.equal(done.dossier.complete, true, 'candidate inventory is complete'); assert.equal(done.dossier.all_required_published, false);
+  assert.equal(done.dossier.published, 0); assert.equal(done.dossier.bound, 1); assert.equal(done.dossier.content_verified, false);
+  assert.equal(done.approval.status, 'not_requested');
+  const unchanged = ok(await ctx.uc.context(ctx.command)).targets.find(row => row.code === target.code);
+  assert.deepEqual(unchanged, target, 'binding cannot rewrite or certify the existing target');
+});
+
+test('new apply rejects changed content, report, rule version and decisions before starting an attempt', async () => {
+  const ctx = await seeded(), frozen = await reviewed(ctx, await draft(ctx));
+  const [batch] = await ctx.db.select().from(schema.intakeBatches);
+  const [item] = await ctx.db.select().from(schema.intakeItems);
+  for (const change of [
+    { quality_rule_version: 'obsolete' },
+    { quality_report_json: JSON.stringify({ ...JSON.parse(batch.quality_report_json), summary: { blockers: 0, warnings: 0, needs_review: 0 } }) },
+    { profile: 'enterprise' },
+    { frozen_quality_json: '{}' },
+  ]) {
+    await ctx.db.update(schema.intakeBatches).set(change).where(eq(schema.intakeBatches.id, batch.id));
+    bad(await publish(ctx, frozen, `tamper-${Object.keys(change)[0]}`), 'intake_conflict');
+    await ctx.db.update(schema.intakeBatches).set({ quality_rule_version: batch.quality_rule_version, quality_report_json: batch.quality_report_json,
+      frozen_quality_json: batch.frozen_quality_json, profile: batch.profile }).where(eq(schema.intakeBatches.id, batch.id));
+  }
+  await ctx.db.update(schema.intakeItems).set({ item_json: JSON.stringify({ ...JSON.parse(item.item_json), title: 'Changed outside frozen candidate' }) }).where(eq(schema.intakeItems.id, item.id));
+  bad(await publish(ctx, frozen, 'tamper-content'), 'intake_conflict');
+  await ctx.db.update(schema.intakeItems).set({ item_json: item.item_json, decision_json: JSON.stringify({ key: item.item_key, action: 'skip' }) }).where(eq(schema.intakeItems.id, item.id));
+  bad(await publish(ctx, frozen, 'tamper-decision'), 'intake_conflict');
+  assert.equal(await count(ctx.db, schema.intakeAttempts), 0); assert.equal(await count(ctx.db, schema.projectModules), 0);
+});
+
+test('legacy profile stays unknown until explicitly selected for a new freeze; historical running requests can resume', async () => {
+  const ctx = await seeded(), batch = await draft(ctx);
+  await ctx.db.update(schema.intakeBatches).set({ profile: null, quality_rule_version: null, quality_report_json: null, frozen_quality_json: null }).where(eq(schema.intakeBatches.code, batch.code));
+  const legacy = ok(await ctx.uc.detail({ ...ctx.command, code: batch.code }));
+  assert.equal(legacy.profile, null); assert.equal(legacy.quality_report, null); assert.equal(legacy.quality_gate.status, 'unknown');
+  const decisions = legacy.items.map(({ item }) => ({ key: item.key, action: 'create' }));
+  bad(await ctx.uc.review({ ...ctx.command, code: batch.code, input: { base_revision: legacy.revision, decisions } }), 'intake_conflict');
+  const frozen = ok(await ctx.uc.review({ ...ctx.command, code: batch.code, input: { base_revision: legacy.revision, decisions, profile: 'pilot' } }));
+  assert.equal(frozen.profile, 'pilot'); assert.equal(frozen.quality_gate.status, 'eligible');
+  // Simulate an already-created pre-migration running attempt; old idempotency and plan identity stay authoritative.
+  const [stored] = await ctx.db.select().from(schema.intakeBatches);
+  await ctx.db.update(schema.intakeBatches).set({ profile: null, quality_rule_version: null, quality_report_json: null, frozen_quality_json: null, status: 'applying' }).where(eq(schema.intakeBatches.id, stored.id));
+  await ctx.db.insert(schema.intakeAttempts).values({ batch_id: stored.id, principal_id: ctx.users.owner.id, plan_hash: frozen.plan_hash, idempotency_key: 'legacy-resume', status: 'running', created_at: 't0' });
+  bad(await publish(ctx, frozen, 'new-legacy-attempt'), 'intake_conflict');
+  const done = ok(await publish(ctx, frozen, 'legacy-resume'));
+  assert.equal(done.status, 'applied'); assert.equal(done.profile, null); assert.equal(done.quality_gate.status, 'unknown');
+});
+
+test('replacement refreshes quality and invalidates the frozen plan even when candidate order changes', async () => {
+  const ctx = await seeded(), frozen = await reviewed(ctx, await draft(ctx));
+  const replacement = { ...ctx.bundle, items: [...ctx.bundle.items].reverse() };
+  const replaced = ok(await ctx.uc.replace({ ...ctx.command, code: frozen.code, baseRevision: frozen.revision, bundle: replacement }));
+  assert.equal(replaced.plan_hash, null); assert.equal(replaced.quality_gate.status, 'eligible');
+  assert.equal(replaced.quality_report.batch_revision, replaced.revision);
+  const [batch] = await ctx.db.select().from(schema.intakeBatches); assert.equal(batch.frozen_quality_json, null);
+  bad(await publish(ctx, frozen, 'old-after-replace'), 'intake_conflict');
+  assert.equal(ok(await publish(ctx, await reviewed(ctx, replaced), 'new-after-replace')).status, 'applied');
+});
+
+test('known-profile same-key running resumption freshly validates quality and durably stops rejected attempts', async () => {
+  const ctx = await seeded(), frozen = await reviewed(ctx, await draft(ctx));
+  const [batch] = await ctx.db.select().from(schema.intakeBatches);
+  await ctx.db.update(schema.intakeBatches).set({ status: 'applying' }).where(eq(schema.intakeBatches.id, batch.id));
+  await ctx.db.insert(schema.intakeAttempts).values({ batch_id: batch.id, principal_id: ctx.users.owner.id, plan_hash: frozen.plan_hash, idempotency_key: 'known-resume', status: 'running', created_at: 't0' });
+  // Forge a self-consistent frozen signature around a false report. Rule evaluation must still reject it.
+  const report = { ...JSON.parse(batch.quality_report_json), issues: [], summary: { blockers: 0, warnings: 0, needs_review: 0 }, status: 'eligible' };
+  const { batch_revision: _revision, ...material } = report;
+  const basis = { ...JSON.parse(batch.frozen_quality_json), report_hash: hash(JSON.stringify(material)) };
+  const decisions = frozen.items.map(row => row.decision).sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+  const forgedPlan = hash(JSON.stringify({ batch: batch.code, revision: basis.plan_revision, payload: batch.payload_hash, decisions, quality: basis }));
+  await ctx.db.update(schema.intakeBatches).set({ quality_report_json: JSON.stringify(report), frozen_quality_json: JSON.stringify(basis), plan_hash: forgedPlan }).where(eq(schema.intakeBatches.id, batch.id));
+  await ctx.db.update(schema.intakeAttempts).set({ plan_hash: forgedPlan }).where(eq(schema.intakeAttempts.batch_id, batch.id));
+  bad(await publish(ctx, { ...frozen, plan_hash: forgedPlan }, 'known-resume'), 'intake_conflict');
+  assert.equal(await count(ctx.db, schema.projectModules), 0);
+  assert.equal((await ctx.db.select().from(schema.intakeAttempts))[0].status, 'stopped');
+  assert.equal((await ctx.db.select().from(schema.intakeBatches))[0].status, 'stopped');
+});
+
+test('pre-profile submit hashes replay only the exact original legacy payload without changing later explicit profiles or plans', async () => {
+  const ctx = await seeded(), batch = await draft(ctx);
+  // The original protocol omitted profile; its old schema still canonicalized key ordering.
+  const { profile: _profile, ...legacyPayload } = IntakeBundleSchema.parse(ctx.bundle);
+  const submitHash = hash(JSON.stringify(legacyPayload));
+  await ctx.db.update(schema.intakeBatches).set({ profile: null, quality_rule_version: null, quality_report_json: null, frozen_quality_json: null,
+    submit_hash: submitHash, payload_hash: submitHash }).where(eq(schema.intakeBatches.code, batch.code));
+  const replay = await draft(ctx);
+  assert.equal(replay.code, batch.code); assert.equal(replay.profile, null); assert.equal(replay.quality_gate.status, 'unknown');
+  bad(await ctx.uc.submit({ ...ctx.command, principalCode: ctx.users.member.code, bundle: { ...ctx.bundle, profile: 'enterprise' }, idempotencyKey: 'submit' }), 'intake_conflict');
+  const changed = structuredClone(ctx.bundle); changed.items[0].title = 'Different original submission';
+  bad(await ctx.uc.submit({ ...ctx.command, principalCode: ctx.users.member.code, bundle: changed, idempotencyKey: 'submit' }), 'intake_conflict');
+  const replacement = enterpriseBundle(ctx);
+  const upgraded = ok(await ctx.uc.replace({ ...ctx.command, code: batch.code, baseRevision: replay.revision, bundle: { ...replacement, namespace: ctx.bundle.namespace } }));
+  const frozen = await reviewed(ctx, upgraded, upgraded.items.map(({ item }) => ({ key: item.key, action: 'skip' })));
+  const [beforeReplay] = await ctx.db.select().from(schema.intakeBatches);
+  const afterConfirmation = await draft(ctx);
+  assert.equal(afterConfirmation.code, frozen.code); assert.equal(afterConfirmation.profile, 'enterprise');
+  assert.equal(afterConfirmation.revision, frozen.revision); assert.equal(afterConfirmation.plan_hash, frozen.plan_hash);
+  assert.deepEqual((await ctx.db.select().from(schema.intakeBatches))[0], beforeReplay, 'original request replay cannot downgrade or mutate the confirmed plan');
+  assert.equal(await count(ctx.db, schema.intakeBatches), 1);
+});
 
 test('submitting candidates is isolated, member-visible, and source manifest facts remain explicit', async () => {
   const ctx = await seeded(), batch = await draft(ctx);
@@ -153,7 +354,7 @@ test('material fence contention releases governance rows before retrying against
   let intercept = true, running;
   try {
     await blocker.query('BEGIN');
-    await blocker.query('SELECT pg_advisory_xact_lock(1094930512::bigint)');
+    await blocker.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [`project:${ctx.project.id}`]);
     ctx.db.transaction = (fn, ...args) => originalTransaction(tx => {
       const execute = tx.execute.bind(tx);
       tx.execute = async statement => {
@@ -198,7 +399,7 @@ test('a busy material fence returns a bounded retry response and preserves the r
   const ctx = await seeded(), frozen = await reviewed(ctx, await draft(ctx));
   const blocker = await ctx.db.$client.connect();
   try {
-    await blocker.query('BEGIN'); await blocker.query('SELECT pg_advisory_xact_lock(1094930512::bigint)');
+    await blocker.query('BEGIN'); await blocker.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [`project:${ctx.project.id}`]);
     bad(await publish(ctx, frozen), 'intake_conflict');
     const current = ok(await ctx.uc.detail({ ...ctx.command, code: frozen.code }));
     assert.equal(current.status, 'applying'); assert.equal(current.stop_requested, false);

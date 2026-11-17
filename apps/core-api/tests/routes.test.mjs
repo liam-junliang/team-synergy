@@ -1,5 +1,6 @@
 import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { schema } from '@team-synergy/persistence';
 import { buildServer } from '../dist/server.js';
@@ -503,7 +504,7 @@ test('handoff routes expose nested folders, API documents, search and immutable 
     headers: { 'x-principal-code': owner.code },
   });
   assert.equal(library.json().ok, true, library.body);
-  assert.deepEqual(library.json().data.folders.map((folder) => folder.name), ['项目规范', '需求文档', '架构设计', '测试资料', '接口与联调', '前后端对接']);
+  assert.deepEqual(library.json().data.folders.map((folder) => folder.name), ['项目资料', '项目说明', '项目规范', '需求文档', '架构设计', '测试资料', '接口与联调', '前后端对接']);
   assert.deepEqual(library.json().data.documents.map((document) => document.document_code), [documentCode]);
 
   const revised = await app.inject({
@@ -976,6 +977,60 @@ test('project structure routes expose modules, phases, milestones, and feature b
   assert.deepEqual(reorderedFeatureList.json().data.map((item) => item.feature_code), [secondFeature.json().data.feature_code, feature.code]);
 });
 
+test('defect report persists mixed evidence, lists metadata and downloads exact bytes with project access', async () => {
+  const { app, db, owner, other, feature } = await createFixture();
+  const headers = { authorization: 'Bearer evidence-download-owner' };
+  await db.insert(schema.devices).values({ principal_id: owner.id, device_name: 'evidence client',
+    credential_hash: createHash('sha256').update('evidence-download-owner').digest('hex'), created_at: '2026-10-30T00:00:00Z' });
+  const bytes = Buffer.alloc(1024 * 1024, 255);
+  const file = { kind: 'file', file_name: '录屏.webm', mime_type: 'video/webm', content_base64: bytes.toString('base64') };
+  const log = { kind: 'text', text: 'GET /home\nHTTP 500' };
+  const link = { kind: 'link', url: 'https://example.com/report' };
+  const report = { feature_code: feature.code, title: 'Home fails', severity: 'high', action_steps: 'Open home', expected_result: 'Welcome',
+    actual_result: 'Error', evidence: [log, link, file] };
+  const created = await app.inject({ method: 'POST', url: '/defects', headers, payload: report });
+  assert.equal(created.statusCode, 200, created.body);
+  const code = created.json().data.defect_code;
+  const list = await app.inject({ method: 'GET', url: '/defects', headers });
+  const record = list.json().data.find(row => row.defect_code === code);
+  assert.deepEqual([record.action_steps, record.expected_result, record.actual_result], ['Open home', 'Welcome', 'Error']);
+  assert.deepEqual(record.evidence, [log, link, { kind: 'file', file_name: file.file_name, mime_type: file.mime_type,
+    size_bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }]);
+  assert.equal(list.body.includes('content_base64'), false);
+  const url = `/defects/${code}/evidence/2/file`;
+  const result = await app.inject({ method: 'GET', url, headers });
+  assert.equal(result.statusCode, 200);
+  assert.deepEqual(result.rawPayload, bytes);
+  assert.equal(result.headers['content-type'], 'application/octet-stream');
+  assert.match(result.headers['content-disposition'], /^attachment;.*filename\*=UTF-8''%/);
+  assert.equal(result.headers['x-content-type-options'], 'nosniff');
+  assert.equal(result.headers['cache-control'], 'private, no-store');
+  assert.equal((await app.inject({ method: 'GET', url })).statusCode, 401);
+  assert.equal((await app.inject({ method: 'GET', url, headers: { 'x-principal-code': other.code } })).statusCode, 403);
+  for (const index of ['0', '1', '-1', '1.5', '3']) {
+    const missing = await app.inject({ method: 'GET', url: `/defects/${code}/evidence/${index}/file`, headers });
+    assert.equal(missing.statusCode, 404);
+  }
+});
+
+test('defect report rejects incomplete facts and invalid evidence without writing a defect', async () => {
+  const { app, db, owner, feature } = await createFixture();
+  const log = { kind: 'text', text: 'stderr: 500' };
+  const file = { kind: 'file', file_name: 'capture.png', mime_type: 'image/png', content_base64: 'YQ==' };
+  const payload = { feature_code: feature.code, title: 'Login issue', severity: 'high', action_steps: 'Submit', expected_result: 'Success', actual_result: 'Error', evidence: [log] };
+  for (const fields of [{ action_steps: '  ' }, { expected_result: undefined }, { actual_result: 0 }, { evidence: [] }, { evidence: Array(21).fill(log) },
+    { evidence: [{ kind: 'text', text: ' ' }] }, { evidence: [{ kind: 'link', url: 'javascript:alert(1)' }] }, { evidence: [{ kind: 'link', url: 'https://u:p@example.com' }] },
+    { evidence: [{ ...file, file_name: '../upload.png' }] }, { evidence: [{ ...file, mime_type: 'image/png\r\nX:' }] },
+    { evidence: [{ ...file, content_base64: 'AB==' }] }, { evidence: [{ ...file, content_base64: '' }] },
+    { evidence: [{ ...file, content_base64: Buffer.alloc(6 * 1024 * 1024).toString('base64') }, file] }]) {
+    const response = await app.inject({ method: 'POST', url: '/defects', headers: { 'x-principal-code': owner.code }, payload: { ...payload, ...fields } });
+    assert.equal(response.statusCode, 422, response.body);
+    assert.equal(response.json().error.code, 'defect_report_invalid');
+  }
+  assert.equal((await db.select().from(schema.defects)).length, 0);
+  assert.equal((await db.select().from(schema.defectEvidenceFiles)).length, 0);
+});
+
 test('defect routes use feature and task public codes across report, transition, fixing, retest, close, and list', async () => {
   const { app, db, owner, builder, feature } = await createFixture();
 
@@ -983,7 +1038,8 @@ test('defect routes use feature and task public codes across report, transition,
     method: 'POST',
     url: '/defects',
     headers: { 'x-principal-code': builder.code },
-    payload: { feature_code: feature.code, title: 'Broken flow', severity: 'high', description: 'Route breaks' },
+    payload: { feature_code: feature.code, title: 'Broken flow', severity: 'high', description: 'Route breaks',
+      action_steps: 'Open home', expected_result: 'Content appears', actual_result: 'Blank page', evidence: [{ kind: 'text', text: 'GET /home 500' }] },
   });
   assert.equal(reported.json().ok, true, reported.body);
   assert.equal(reported.json().data.status, 'reported');

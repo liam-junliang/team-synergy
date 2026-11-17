@@ -1,4 +1,5 @@
-import { assertProjectAccess, effectiveProjectMember, isProjectManager } from './project-access.js';
+import { lockAggregate } from './aggregate-lock.js';
+import { assertProjectAccess, effectiveProjectMember, isProjectManager, type AccessDb } from './project-access.js';
 import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
 import type { Db } from '@team-synergy/persistence';
 import { schema } from '@team-synergy/persistence';
@@ -8,7 +9,9 @@ import { ensureProjectSystemFolders, PROJECT_SYSTEM_FOLDER_NAMES } from './proje
 import { createRequirementDocumentUseCases, type RequirementDocumentSummary } from './requirement-document-use-cases.js';
 import { createArchitectureDocumentUseCases, type ArchitectureDocumentSummary } from './architecture-document-use-cases.js';
 import { createTestingUseCases } from './testing-use-cases.js';
+import { enqueueProjectDocumentMemory } from './project-document-memory.js';
 import type { TestAssetSummary } from '@team-synergy/contracts';
+import { isDocumentLibraryTestAsset } from '@team-synergy/contracts';
 import { projectDocumentKindView, type ProjectDocumentInputKind } from './project-document-kinds.js';
 export { PROJECT_DOCUMENT_KINDS, PROJECT_DOCUMENT_INPUT_KINDS, LEGACY_PROJECT_DOCUMENT_KINDS, projectDocumentKindView } from './project-document-kinds.js';
 export type { ProjectDocumentKind, ProjectDocumentInputKind } from './project-document-kinds.js';
@@ -61,8 +64,9 @@ export function createProjectDocumentUseCases(db: Db) {
   const architectureDocuments = createArchitectureDocumentUseCases(db);
   const testing = createTestingUseCases(db);
 
+  const writableSystemRoles = new Set(['standards', 'overview']);
   function assertWritableFolder(folder: FolderRow | undefined) {
-    if (folder?.system_role === 'requirements' || folder?.system_role === 'architecture' || folder?.system_role === 'testing') {
+    if (folder?.system_role && !writableSystemRoles.has(folder.system_role)) {
       throw new DomainError('project_document_folder_read_only', `“${folder.name}”目录自动关联原始资料，请在对应业务页面创建和编辑，不能放入其他文档或子目录`);
     }
   }
@@ -73,13 +77,13 @@ export function createProjectDocumentUseCases(db: Db) {
     if (project?.status === 'archived') throw new DomainError('project_archived', '已归档项目不能修改文档库');
   }
 
-  async function systemAncestor(folder: FolderRow | undefined): Promise<FolderRow | undefined> {
+  async function systemAncestor(folder: FolderRow | undefined, conn: AccessDb = db): Promise<FolderRow | undefined> {
     const visited = new Set<bigint>();
     let cursor = folder;
     while (cursor && !visited.has(cursor.id)) {
       visited.add(cursor.id);
       if (cursor.system_role) return cursor;
-      cursor = cursor.parent_id ? await db.select().from(schema.projectDocumentFolders).where(and(
+      cursor = cursor.parent_id ? await conn.select().from(schema.projectDocumentFolders).where(and(
         eq(schema.projectDocumentFolders.id, cursor.parent_id), eq(schema.projectDocumentFolders.project_id, cursor.project_id),
       )).limit(1).then(rows => rows[0]) : undefined;
     }
@@ -143,12 +147,12 @@ export function createProjectDocumentUseCases(db: Db) {
     };
   }
 
-  function requirementSummary(document: RequirementDocumentSummary, folder: FolderRow, sourceCanEdit: boolean) {
+  function requirementSummary(document: RequirementDocumentSummary, folder: FolderRow | undefined, sourceCanEdit: boolean) {
     return {
       ...document,
       source_kind: 'requirement' as const,
-      folder_code: folder.code,
-      folder_name: folder.name,
+      folder_code: folder?.code ?? null,
+      folder_name: folder?.name ?? null,
       kind: 'doc' as const,
       status: document.state,
       updated_by_user_code: null,
@@ -157,15 +161,15 @@ export function createProjectDocumentUseCases(db: Db) {
     };
   }
 
-  function architectureSummary(document: ArchitectureDocumentSummary, folder: FolderRow) {
+  function architectureSummary(document: ArchitectureDocumentSummary, folder: FolderRow | undefined) {
     return {
       document_code: document.document_code, project_code: document.project_code,
       title: document.title, summary: document.summary, current_revision: document.current_revision,
       content_kind: document.content_kind, owner_principal_code: document.owner_principal_code,
       updated_at: document.updated_at,
       source_kind: 'architecture' as const,
-      folder_code: folder.code,
-      folder_name: folder.name,
+      folder_code: folder?.code ?? null,
+      folder_name: folder?.name ?? null,
       kind: 'diagram' as const,
       status: 'active' as const,
       updated_by_user_code: null,
@@ -174,13 +178,13 @@ export function createProjectDocumentUseCases(db: Db) {
     };
   }
 
-  function testingSummary(asset: TestAssetSummary, folder: FolderRow) {
+  function testingSummary(asset: TestAssetSummary, folder: FolderRow | undefined) {
     return {
       document_code: asset.code, project_code: asset.project_code,
       title: asset.title, summary: asset.summary, current_revision: asset.current_revision,
       updated_at: asset.updated_at, owner_principal_code: asset.owner_user_code,
       source_kind: 'testing' as const, storage_kind: asset.storage_kind, purpose: asset.purpose,
-      folder_code: folder.code, folder_name: folder.name, kind: 'doc' as const,
+      folder_code: folder?.code ?? null, folder_name: folder?.name ?? null, kind: 'doc' as const,
       status: 'active' as const, updated_by_user_code: null,
       source_can_edit: asset.can_edit, can_edit: false,
     };
@@ -225,7 +229,7 @@ export function createProjectDocumentUseCases(db: Db) {
         project.status === 'active' && document.state === 'active' && (member.role !== 'viewer' && (isProjectManager(member.role) || document.owner_principal_code === principal.code)),
       ));
       const architectureSummaries = architectureResult.data.map(document => architectureSummary(document, systemFolders.architecture));
-      const testingSummaries = testingResult.data.map(asset => testingSummary(asset, systemFolders.testing));
+      const testingSummaries = testingResult.data.filter(isDocumentLibraryTestAsset).map(asset => testingSummary(asset, systemFolders.testing));
       const compare = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0;
       return {
         ok: true,
@@ -256,6 +260,9 @@ export function createProjectDocumentUseCases(db: Db) {
       await assertFolderParent(parent);
       const name = cmd.name.trim();
       if (!name) return fail(new DomainError('project_document_folder_name_required', '交接文件夹名称不能为空'));
+      if (!parent && Object.values(PROJECT_SYSTEM_FOLDER_NAMES).some(reserved => reserved === name)) {
+        return fail(new DomainError('project_document_folder_duplicate', `根目录名称“${name}”保留给固定目录`));
+      }
       const siblings = await db.select().from(schema.projectDocumentFolders).where(and(
         eq(schema.projectDocumentFolders.project_id, project.id),
         parent ? eq(schema.projectDocumentFolders.parent_id, parent.id) : sql`${schema.projectDocumentFolders.parent_id} is null`,
@@ -265,7 +272,9 @@ export function createProjectDocumentUseCases(db: Db) {
         return fail(new DomainError('project_document_folder_duplicate', `同级文件夹已存在：${name}`));
       }
       const createdAt = now();
-      const sortOrder = siblings.reduce((maximum, folder) => Math.max(maximum, folder.sort_order), -1) + 1;
+      const sortOrder = siblings
+        .filter((folder) => parent !== undefined || !folder.system_role)
+        .reduce((maximum, folder) => Math.max(maximum, folder.sort_order), -1) + 1;
       const [folder] = await db.insert(schema.projectDocumentFolders).values({
         code: createPublicCode(),
         project_id: project.id,
@@ -351,6 +360,7 @@ export function createProjectDocumentUseCases(db: Db) {
       const summary = cmd.summary?.trim() || summaryOf(content, title);
       const createdAt = now();
       const created = await db.transaction(async (tx) => {
+        await lockAggregate(tx, 'project', project.id);
         await assertProjectAccess(tx, project.id, principal.id, 'write');
         const [document] = await tx.insert(schema.projectDocuments).values({
           code: createPublicCode(),
@@ -368,7 +378,7 @@ export function createProjectDocumentUseCases(db: Db) {
           updated_at: createdAt,
         }).returning();
         if (!document) throw new DomainError('internal_error', '交接文档创建失败');
-        await tx.insert(schema.projectDocumentRevisions).values({
+        const [revision] = await tx.insert(schema.projectDocumentRevisions).values({
           code: createPublicCode(),
           document_id: document.id,
           revision: 1,
@@ -378,7 +388,9 @@ export function createProjectDocumentUseCases(db: Db) {
           change_summary: '创建交接文档',
           created_by: principal.id,
           created_at: createdAt,
-        });
+        }).returning({ id: schema.projectDocumentRevisions.id });
+        if (!revision) throw new DomainError('internal_error', '文档修订创建失败');
+        await enqueueProjectDocumentMemory(tx, revision.id);
         const audit = {
           entity_type: 'project_document', entity_id: document.id, principal_id: principal.id,
           base_snapshot: 0, to: 'active', action: 'project_document.created',
@@ -395,7 +407,15 @@ export function createProjectDocumentUseCases(db: Db) {
     }
   }
 
-  async function getDocument(documentCode: string, principalCode: string): Promise<TaskResult<Record<string, unknown>>> {
+  async function sourceFolder(projectId: bigint, role: 'requirements' | 'architecture' | 'testing', readOnly: boolean) {
+    if (!readOnly) return db.transaction(async tx => (await ensureProjectSystemFolders(tx, projectId))[role]);
+    const [folder] = await db.select().from(schema.projectDocumentFolders).where(and(
+      eq(schema.projectDocumentFolders.project_id, projectId), eq(schema.projectDocumentFolders.system_role, role),
+    )).limit(1);
+    return folder;
+  }
+
+  async function getDocument(documentCode: string, principalCode: string, options: { readOnly?: boolean } = {}): Promise<TaskResult<Record<string, unknown>>> {
     try {
       const [document, principal] = await Promise.all([
         findProjectDocumentByCode(db, documentCode),
@@ -413,9 +433,9 @@ export function createProjectDocumentUseCases(db: Db) {
               ? fail(new DomainError('project_document_not_found', `交接文档不存在：${documentCode}`)) : asset;
             const project = await findProjectByCode(db, asset.data.project_code);
             if (!project) return fail(new DomainError('project_not_found', `项目不存在：${asset.data.project_code}`));
-            const folders = await db.transaction(tx => ensureProjectSystemFolders(tx, project.id));
+            const folder = await sourceFolder(project.id, 'testing', options.readOnly === true);
             return { ok: true, data: {
-              ...testingSummary(asset.data, folders.testing),
+              ...testingSummary(asset.data, folder),
               content: asset.data.content, outline: outlineOf(asset.data.content), testing_asset: asset.data,
               revisions: asset.data.revisions.map(revision => ({
                 revision_code: revision.revision_code, revision: revision.revision, title: revision.title,
@@ -427,9 +447,9 @@ export function createProjectDocumentUseCases(db: Db) {
           }
           const project = await findProjectByCode(db, architecture.data.project_code);
           if (!project) return fail(new DomainError('project_not_found', `项目不存在：${architecture.data.project_code}`));
-          const folders = await db.transaction(tx => ensureProjectSystemFolders(tx, project.id));
+          const folder = await sourceFolder(project.id, 'architecture', options.readOnly === true);
           return { ok: true, data: {
-            ...architectureSummary(architecture.data, folders.architecture),
+            ...architectureSummary(architecture.data, folder),
             content: architecture.data.notes_markdown,
             outline: outlineOf(architecture.data.notes_markdown),
             architecture_document: architecture.data,
@@ -443,9 +463,9 @@ export function createProjectDocumentUseCases(db: Db) {
         }
         const project = await findProjectByCode(db, source.data.project_code);
         if (!project) return fail(new DomainError('project_not_found', `项目不存在：${source.data.project_code}`));
-        const folders = await db.transaction(tx => ensureProjectSystemFolders(tx, project.id));
+        const folder = await sourceFolder(project.id, 'requirements', options.readOnly === true);
         return { ok: true, data: {
-          ...requirementSummary(source.data, folders.requirements, project.status === 'active' && source.data.can_edit),
+          ...requirementSummary(source.data, folder, project.status === 'active' && source.data.can_edit),
           content: source.data.content,
           outline: source.data.outline,
           linked_requirements: source.data.linked_requirements,
@@ -509,6 +529,7 @@ export function createProjectDocumentUseCases(db: Db) {
     content: string;
     changeSummary: string;
     status?: ProjectDocumentStatus;
+    baseRevision?: number;
   }): Promise<TaskResult<Record<string, unknown>>> {
     try {
       const [document, principal] = await Promise.all([
@@ -535,32 +556,47 @@ export function createProjectDocumentUseCases(db: Db) {
       if (!content) return fail(new DomainError('project_document_content_required', '交接文档正文不能为空'));
       if (!changeSummary) return fail(new DomainError('project_document_change_summary_required', '修订说明不能为空'));
       const summary = cmd.summary?.trim() || summaryOf(content, title);
-      const revision = document.revision + 1;
+      if (cmd.baseRevision !== undefined && (!Number.isSafeInteger(cmd.baseRevision) || cmd.baseRevision < 1)) {
+        throw new DomainError('project_document_base_revision_invalid', 'base_revision 必须是正整数');
+      }
       const updatedAt = now();
       await db.transaction(async (tx) => {
+        await lockAggregate(tx, 'project', document.project_id);
+        const [locked] = await tx.select().from(schema.projectDocuments).where(eq(schema.projectDocuments.id, document.id)).for('update');
+        if (!locked) throw new DomainError('project_document_not_found', '文档不存在');
+        if (cmd.baseRevision !== undefined && locked.revision !== cmd.baseRevision) {
+          throw new DomainError('project_document_revision_conflict', '文档已更新，请重新加载后合并修改');
+        }
+        const currentFolder = cmd.folderCode === undefined && locked.folder_id
+          ? await tx.select().from(schema.projectDocumentFolders).where(eq(schema.projectDocumentFolders.id, locked.folder_id)).limit(1).then(rows => rows[0])
+          : folder;
+        assertWritableFolder(await systemAncestor(currentFolder, tx));
+        const revision = locked.revision + 1;
         const access = await assertProjectAccess(tx, document.project_id, principal.id, 'write');
-        if (!isProjectManager(access.role) && document.created_by !== principal.id) {
+        if (!isProjectManager(access.role) && locked.created_by !== principal.id) {
           throw new DomainError('project_document_forbidden', '只有文档创建者或项目管理者可以修订文档');
         }
         await tx.update(schema.projectDocuments).set({
-          folder_id: folder?.id ?? null,
-          kind: cmd.kind ?? document.kind,
+          folder_id: cmd.folderCode === undefined ? locked.folder_id : folder?.id ?? null,
+          kind: cmd.kind ?? locked.kind,
           title,
           summary,
           content,
           revision,
-          status: cmd.status ?? document.status,
+          status: cmd.status ?? locked.status,
           updated_by: principal.id,
           updated_at: updatedAt,
         }).where(eq(schema.projectDocuments.id, document.id));
-        await tx.insert(schema.projectDocumentRevisions).values({
+        const [storedRevision] = await tx.insert(schema.projectDocumentRevisions).values({
           code: createPublicCode(), document_id: document.id, revision, title, summary, content,
           change_summary: changeSummary, created_by: principal.id, created_at: updatedAt,
-        });
+        }).returning({ id: schema.projectDocumentRevisions.id });
+        if (!storedRevision) throw new DomainError('internal_error', '文档修订创建失败');
+        await enqueueProjectDocumentMemory(tx, storedRevision.id);
         const audit = {
           entity_type: 'project_document', entity_id: document.id, principal_id: principal.id,
-          base_snapshot: document.revision, action: 'project_document.revised',
-          payload: { document_code: document.code, folder_code: folder?.code ?? null, kind: cmd.kind ?? document.kind, revision, change_summary: changeSummary },
+          base_snapshot: locked.revision, action: 'project_document.revised',
+          payload: { document_code: document.code, folder_code: folder?.code ?? null, kind: cmd.kind ?? locked.kind, revision, change_summary: changeSummary },
         };
         assertAuditedChange(audit);
         await insertAudit(tx, toAuditEvent(audit, createPublicCode(), updatedAt));

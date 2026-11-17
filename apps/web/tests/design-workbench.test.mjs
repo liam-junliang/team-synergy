@@ -264,7 +264,8 @@ test('文件下载构造本地版本路径并禁止携带凭据跟随重定向�
   assert.deepEqual([...new Uint8Array(await blob.arrayBuffer())], [0, 1, 255]);
   assert.equal(calls[0].path, '/api/design-prototypes/https%3A%2F%2Fother.example%2Ffile%3Ftoken%3Dx/file?revision=3');
   assert.equal(new URL(calls[0].path, globalThis.window.location.href).href, 'https://workspace.test/api/design-prototypes/https%3A%2F%2Fother.example%2Ffile%3Ftoken%3Dx/file?revision=3');
-  assert.equal(calls[0].init.headers.get('Authorization'), 'Bearer test-token');
+  assert.equal(calls[0].init.headers.get('Authorization'), null);
+  assert.equal(calls[0].init.credentials, 'same-origin');
   assert.equal(calls[0].init.redirect, 'error');
   await assert.rejects(getDesignPrototypeFile('PROTO-FILE', NaN), /版本无效/);
   assert.equal(calls.length, 1);

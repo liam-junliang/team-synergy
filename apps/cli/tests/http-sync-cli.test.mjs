@@ -42,7 +42,7 @@ test('HTTP 同步模式：agentctl 经 core-api 完成状态同步与 requiremen
       assignee_principal_id: builder.id,
       acceptance: JSON.stringify([{ id: 'AC-1', text: '同步' }]),
       base_snapshot: 1,
-      created_at: 't0',
+      created_at: '2026-01-01T00:00:00.000Z',
     }).returning();
     const [externalTask] = await ctx.db.insert(schema.tasks).values({
       code: testCode(506),
@@ -56,7 +56,7 @@ test('HTTP 同步模式：agentctl 经 core-api 完成状态同步与 requiremen
       assignee_principal_id: builder.id,
       acceptance: JSON.stringify([{ id: 'AC-1', text: '绑定' }]),
       base_snapshot: 1,
-      created_at: 't0',
+      created_at: '2026-01-01T00:00:00.000Z',
     }).returning();
 
     const remoteUrl = 'git@example.com:team/http-sync-repo.git';
@@ -235,7 +235,7 @@ test('HTTP 同步模式：agentctl 经 core-api 完成状态同步与 requiremen
       assignee_principal_id: builder.id,
       acceptance: JSON.stringify([{ id: 'AC-DESIGN', text: '实现与原型一致' }]),
       base_snapshot: 1,
-      created_at: 't0',
+      created_at: '2026-01-01T00:00:00.000Z',
     }).returning();
     const designClaim = await ctx.runCli([
       'task', 'claim', designTask.code, '--profile', 'builder', '--repo', repoDir,

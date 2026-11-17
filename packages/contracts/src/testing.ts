@@ -1,6 +1,11 @@
 export type TestPriority = 'low' | 'medium' | 'high' | 'critical';
 export type TestMethod = 'manual' | 'automated';
 export type TestAssetPurpose = 'guide' | 'script' | 'data' | 'environment' | 'report';
+export const DOCUMENT_LIBRARY_TEST_PURPOSES = ['guide', 'environment'] as const;
+/** Reusable project references belong in the library; execution evidence stays in its original records. */
+export function isDocumentLibraryTestAsset(asset: { purpose: TestAssetPurpose }): boolean {
+  return DOCUMENT_LIBRARY_TEST_PURPOSES.some(purpose => purpose === asset.purpose);
+}
 export type TestAssetStorage = 'markdown' | 'file' | 'url' | 'git';
 export type TestResultStatus = 'not_run' | 'pass' | 'fail' | 'blocked' | 'skipped';
 export interface TestStep { action: string; expected: string }

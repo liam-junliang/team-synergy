@@ -1,0 +1,475 @@
+{
+  "schema_version": 1,
+  "commit": "c87aefbbece35c0bf9ccad32a5084ad85b4edb9d",
+  "purpose": "Independent held-out handoff questions, frozen from source before reviewing the whole-repository UA result. Do not use as generation prompts.",
+  "scope": "Generated UA graph only; original source is the oracle, and is not counted as information the graph already explains.",
+  "scoring": {
+    "0": "Missing or materially wrong: the graph cannot locate the relevant responsibility or contradicts the source.",
+    "1": "Navigation only: relevant files/modules exist, but listing a responsibility or a term does not explain the actual rule.",
+    "2": "Substantive: graph text explains a correct concrete rule and a rejection/constraint, with source-backed responsible files. Some downstream or verification detail remains missing.",
+    "3": "Handoff ready: explains concrete normal/rejected behavior, traces the important downstream/state consequence, and identifies a source-backed verification approach without claiming unexecuted tests passed."
+  },
+  "quality_target": {
+    "minimum_points": 27,
+    "maximum_points": 36,
+    "minimum_questions_scoring_at_least_2": 9,
+    "critical_false_claims_allowed": 0,
+    "interpretation": "A declared acceptance target for this benchmark, not a general claim of enterprise correctness or 95% understanding."
+  },
+  "cases": [
+    {
+      "id": "Q01",
+      "question": "Why does this platform separate Core API from member CLI/agentd, and where does a task command cross that boundary?",
+      "expected_facts": [
+        "Core API owns shared project/task facts and writes persistent state.",
+        "CLI accesses the shared API; filesystem/process supervision remains on the execution side.",
+        "Task HTTP routes call application services; agentd supervises a child process and lease/session lifecycle rather than replacing task authority."
+      ],
+      "pitfalls": [
+        "Do not claim Core API can browse arbitrary member checkout paths.",
+        "A package dependency or import alone is not proof of business authority."
+      ],
+      "evidence": [
+        {
+          "path": "README.md",
+          "start": 1,
+          "end": 78,
+          "sha256": "6482488133b7043bd800684efb95f174965535968d214a1fc54b595872d82733",
+          "excerpt_sha256": "812f1b79fde44beadec260bd92dcd513985f3062039c701aaf6c054784330c6f"
+        },
+        {
+          "path": "apps/cli/src/api-client.ts",
+          "start": 1,
+          "end": 94,
+          "sha256": "094941b7a8840324afee08642a0c12e1ec04a0b557584b44d38b15af5e8907ad",
+          "excerpt_sha256": "a611ee3101ef6b21066fd53d49e7d9c257db306d426e740f08ebdb11ecdebcf4"
+        },
+        {
+          "path": "apps/core-api/src/routes/tasks.ts",
+          "start": 58,
+          "end": 100,
+          "sha256": "6f2d84890691c986276e07d85b382923cf43042c42f5f355238266c5d8da99c8",
+          "excerpt_sha256": "eec70d0a3f3ab3d573c13ac5d679fb62281c3f42837afe32b27cd70aae099ae8"
+        },
+        {
+          "path": "apps/agentd/src/supervisor.ts",
+          "start": 1,
+          "end": 85,
+          "sha256": "4ad1a569dcf3f395fe770baf7cb6ad8b3718ad55a9680c0cd1395b6d62f03498",
+          "excerpt_sha256": "4ad1a569dcf3f395fe770baf7cb6ad8b3718ad55a9680c0cd1395b6d62f03498"
+        }
+      ],
+      "verification_plan": "Trace a CLI task call to its HTTP route/use case, then inspect agentd supervision tests separately; source inspection does not prove process execution."
+    },
+    {
+      "id": "Q02",
+      "question": "When can a Builder claim a task, and why can an assigned task still be rejected?",
+      "expected_facts": [
+        "Builder claim requires assigned state, matching assignee/profile and base_snapshot, plus project write access.",
+        "A current active Run or unresolved handover blocks another claim.",
+        "All predecessor tasks must be closed; successful claim changes task to running and creates a Run/workspace with an audit entry."
+      ],
+      "pitfalls": [
+        "Do not generalize Builder claim guards to the separate verifier claim path for submitted tasks.",
+        "Assigned does not mean immediately runnable when predecessors remain open."
+      ],
+      "evidence": [
+        {
+          "path": "packages/application/src/task-service.ts",
+          "start": 396,
+          "end": 552,
+          "sha256": "96162a2ee92195539a443c3ae34c3313a8a3cdf45fa428e42ea89b5ffd435da7",
+          "excerpt_sha256": "7f4893e49b68abb55ced258f1fc7fcfe9f671528c5c5980d564bd26588f90b8d"
+        },
+        {
+          "path": "packages/application/src/execution-guard.ts",
+          "start": 9,
+          "end": 17,
+          "sha256": "c989d140cfdd3a417dc83dda7deaf8128db0bfb4fbf666f1b90643c118d48c75",
+          "excerpt_sha256": "9dd30086c91d39d5874b3e7e6fd2edfc24e29ab4d5c96bc5f5c4304e0a6d7b3e"
+        }
+      ],
+      "verification_plan": "Define normal assigned/owner match and negative dependency-not-closed, stale snapshot, wrong assignee and active-Run cases from task-service tests."
+    },
+    {
+      "id": "Q03",
+      "question": "Why does a passing Builder submission not close a task, and who can verify and close it?",
+      "expected_facts": [
+        "Submission requires passing self_test evidence with valid acceptance references and moves through self_tested to submitted.",
+        "An active verifier Run with matching identity supplies verifier_review; passing evidence must cover all acceptance IDs, while fail/inconclusive returns failed.",
+        "Closing requires verified state, matching base_snapshot and project management authority; isProjectManager includes owner and admin despite an error message saying Owner."
+      ],
+      "pitfalls": [
+        "Builder self-test is not independent verification or project closure.",
+        "Do not infer a strict unique-owner-only close rule from the error text when the actual helper accepts admin too."
+      ],
+      "evidence": [
+        {
+          "path": "packages/application/src/task-service.ts",
+          "start": 797,
+          "end": 879,
+          "sha256": "96162a2ee92195539a443c3ae34c3313a8a3cdf45fa428e42ea89b5ffd435da7",
+          "excerpt_sha256": "af02143e6d8b28a27c71427bee51b9955073115b506554aea025015919c23be2"
+        },
+        {
+          "path": "packages/application/src/project-use-cases.ts",
+          "start": 572,
+          "end": 655,
+          "sha256": "52f16ff2f3ba46630941100a1ae4f01169ce7cfc490b1accdc6354e205865385",
+          "excerpt_sha256": "74641140bf2a08afef3d0872e8166be0e8d1de40229def2bfc310d328b2e9ae1"
+        },
+        {
+          "path": "packages/application/src/project-use-cases.ts",
+          "start": 702,
+          "end": 748,
+          "sha256": "52f16ff2f3ba46630941100a1ae4f01169ce7cfc490b1accdc6354e205865385",
+          "excerpt_sha256": "06ac5456f09573203f37024295f4f3b3eeae3c0a3d5dcefb10cb85ff78b9a290"
+        },
+        {
+          "path": "packages/application/src/project-access.ts",
+          "start": 9,
+          "end": 14,
+          "sha256": "8497c1f539f20bea95358734037f08bff35a48209c5bea5824563b4ee1f84875",
+          "excerpt_sha256": "a88f45ee7ff0d5332a171efce0ed6df029c2bd1219b3784b1aa8a5edba898425"
+        },
+        {
+          "path": "packages/domain/src/task-state-machine.ts",
+          "start": 96,
+          "end": 129,
+          "sha256": "440ecaf8f62a881864463a2102b9b10602adcf89f11872e943f154a2d28f34b9",
+          "excerpt_sha256": "20085220efffa0cc7629ea0e5df04e5efd126b72c9ee6dac13d998429bae9a6d"
+        }
+      ],
+      "verification_plan": "Check builder terminal rejection, partial acceptance coverage rejection, pass/fail verification state changes, and admin/owner close versus member close."
+    },
+    {
+      "id": "Q04",
+      "question": "What stops a stale device or old Run from writing after execution ownership changes?",
+      "expected_facts": [
+        "Every write checks active matching Run identity, current project write access and no pending handover.",
+        "Once execution_epoch advances, task/run epoch must match the presented device lease, which must be unrevoked and unexpired.",
+        "Untouched legacy task/run with epoch zero follows an explicit compatibility exception after the identity/access/handover checks."
+      ],
+      "pitfalls": [
+        "Do not claim all historical Runs require a lease without mentioning the epoch-zero compatibility path.",
+        "A stored token does not override revoked project membership."
+      ],
+      "evidence": [
+        {
+          "path": "packages/application/src/execution-guard.ts",
+          "start": 19,
+          "end": 55,
+          "sha256": "c989d140cfdd3a417dc83dda7deaf8128db0bfb4fbf666f1b90643c118d48c75",
+          "excerpt_sha256": "8b9925b5647b5e0d6d4522ff3bdbc9c03133f1a0bfbc8eeaa49089bd91eaebab"
+        },
+        {
+          "path": "packages/application/src/execution-use-cases.ts",
+          "start": 1,
+          "end": 128,
+          "sha256": "9d3f67f4a9c18874adcb97aac1dcb2efc95ea62c3a3d8944a64f628ee0e5ea80",
+          "excerpt_sha256": "9d3f67f4a9c18874adcb97aac1dcb2efc95ea62c3a3d8944a64f628ee0e5ea80"
+        },
+        {
+          "path": "apps/agentd/src/supervisor.ts",
+          "start": 1,
+          "end": 85,
+          "sha256": "4ad1a569dcf3f395fe770baf7cb6ad8b3718ad55a9680c0cd1395b6d62f03498",
+          "excerpt_sha256": "4ad1a569dcf3f395fe770baf7cb6ad8b3718ad55a9680c0cd1395b6d62f03498"
+        }
+      ],
+      "verification_plan": "Use stale epoch, expired/revoked lease, revoked member, wrong device, pending handover and epoch-zero cases in permission/execution tests."
+    },
+    {
+      "id": "Q05",
+      "question": "How does handing a running task to another member prevent double execution while preserving attribution and current context?",
+      "expected_facts": [
+        "Prepare advances task epoch, suspends source Run and revokes source leases.",
+        "Publication by a project manager requires stop acknowledgement and a repository-backed workspace manifest; context drift is checked at publication/restoration/activation.",
+        "Target restores into a distinct workspace and new Run, validates the receipt/context and then activates; source Run becomes transferred while its principal attribution remains unchanged."
+      ],
+      "pitfalls": [
+        "Accepting the invitation alone does not grant active execution.",
+        "A confirmed stop may be client-reported; it is not universally a server-observed process kill.",
+        "Do not rewrite source Run authorship to the receiving member."
+      ],
+      "evidence": [
+        {
+          "path": "packages/application/src/handover-use-cases.ts",
+          "start": 204,
+          "end": 219,
+          "sha256": "d708897ea1de9d451777c771329f12924cd9090ad3d7076464d113cbbb07b5d0",
+          "excerpt_sha256": "a1eec77b10c9335dbc2cf56447b44a39369479ce4a8edb5f8f020bfe6ed8dcc6"
+        },
+        {
+          "path": "packages/application/src/handover-use-cases.ts",
+          "start": 314,
+          "end": 375,
+          "sha256": "d708897ea1de9d451777c771329f12924cd9090ad3d7076464d113cbbb07b5d0",
+          "excerpt_sha256": "3840bbd7c24b0a7531d6abb95646ff0f8fa3d2f1dc6652848ae77cc1cdddddf3"
+        },
+        {
+          "path": "packages/application/src/handover-use-cases.ts",
+          "start": 383,
+          "end": 447,
+          "sha256": "d708897ea1de9d451777c771329f12924cd9090ad3d7076464d113cbbb07b5d0",
+          "excerpt_sha256": "a08fd10fd723d03165d59f7e9fe00d04a7c3773528c40bcc81ae7fd4135beefe"
+        }
+      ],
+      "verification_plan": "Trace prepare→stop acknowledgement→publish→accept→restore→ready→activate, then reject changed source versions, wrong target/device or old-source writes."
+    },
+    {
+      "id": "Q06",
+      "question": "What exactly does a requirement-document review approve, and does that mean implementation is complete?",
+      "expected_facts": [
+        "A review is linked to a specific requirement document revision, and creating it uses the current revision.",
+        "An open review accepts valid votes from authorized members; closing it requires project management authority and stores a conclusion.",
+        "Closing the document review updates the review record, not task implementation or delivery state; document revisions and execution facts are separate."
+      ],
+      "pitfalls": [
+        "Do not treat an approved document revision as implemented software.",
+        "Do not claim all votes automatically close a review; the code has an explicit close operation."
+      ],
+      "evidence": [
+        {
+          "path": "packages/application/src/requirement-collaboration-use-cases.ts",
+          "start": 419,
+          "end": 486,
+          "sha256": "545a2c86432f2aac225ba9e51810092ddc88017ca9774616384a74ad1f114925",
+          "excerpt_sha256": "c775822cc28c54ac29ea96c29c58d2f28cefaeeda3c2f33faf3bffbeed5f5da1"
+        },
+        {
+          "path": "packages/application/src/requirement-document-use-cases.ts",
+          "start": 275,
+          "end": 354,
+          "sha256": "7ed3995867ecf5aaa18a77f69e53012f4c4f231c2e8d29d3b9555d6ea2cb038d",
+          "excerpt_sha256": "a98b44c221cb2e587aaaadedf3c42a8fb46eaa22950e59508a6205b70690b4b3"
+        }
+      ],
+      "verification_plan": "Start a review at revision N, create a later document revision, confirm the review remains attached to N, and test member vote versus manager close."
+    },
+    {
+      "id": "Q07",
+      "question": "Why can an account not simply be deleted after requesting ownership transfer?",
+      "expected_facts": [
+        "Transfer is a pending request, accepted only by the actual recipient, with expiry/current-owner and recipient eligibility checks.",
+        "Completing account closure requires a begun closure flow, no owned teams/projects, no open assigned tasks or active/preparing/suspended Runs, and preservation of another active system administrator.",
+        "Closure revokes devices/leases and disables the user while retaining historical responsibility and audit records."
+      ],
+      "pitfalls": [
+        "Requesting transfer is not completion of transfer.",
+        "Account closure is not deletion of historical documents/authors."
+      ],
+      "evidence": [
+        {
+          "path": "packages/application/src/ownership-use-cases.ts",
+          "start": 141,
+          "end": 181,
+          "sha256": "62dcf3698c5c146578b126fe1d2be7b8437867c2d4b333d44431db099e0ff432",
+          "excerpt_sha256": "2f05918538b0512fedff66793fa87fbb52c47220239bdb586696bfeea8e2163b"
+        },
+        {
+          "path": "packages/application/src/ownership-use-cases.ts",
+          "start": 224,
+          "end": 288,
+          "sha256": "62dcf3698c5c146578b126fe1d2be7b8437867c2d4b333d44431db099e0ff432",
+          "excerpt_sha256": "eca8ee9e6910c9a2a92df0441ed5fdcfad67ded639defe88841abe5c8a878a77"
+        }
+      ],
+      "verification_plan": "Try non-recipient acceptance, expired transfer, closure with outstanding ownership/task/Run, and closure as last active administrator; only then inspect revocations and history retention."
+    },
+    {
+      "id": "Q08",
+      "question": "How do explicit project membership and team inheritance affect read, write and management permissions?",
+      "expected_facts": [
+        "Current project owner takes precedence, then explicit project membership, then team membership if member_policy permits inheritance.",
+        "team_read inherits viewer and team_write inherits member; private does not inherit access.",
+        "Viewer cannot write, manager means owner/admin, and archived projects reject write/manage even when read access remains."
+      ],
+      "pitfalls": [
+        "Team membership does not grant write access to every project.",
+        "An explicit project role must not be silently replaced by inherited team policy."
+      ],
+      "evidence": [
+        {
+          "path": "packages/application/src/project-access.ts",
+          "start": 9,
+          "end": 63,
+          "sha256": "8497c1f539f20bea95358734037f08bff35a48209c5bea5824563b4ee1f84875",
+          "excerpt_sha256": "073a6cbf2c03ceffa0e4c12d707138a0edd4c585a4de6c23263d2a06c1943667"
+        },
+        {
+          "path": "packages/application/src/project-policy-use-cases.ts",
+          "start": 1,
+          "end": 77,
+          "sha256": "7c91d8920ae4fed7e462d371221c3a8ea6a57716307001656249387030d69c0a",
+          "excerpt_sha256": "7c91d8920ae4fed7e462d371221c3a8ea6a57716307001656249387030d69c0a"
+        }
+      ],
+      "verification_plan": "Exercise private/team_read/team_write with explicit viewer override and archived project mutation rejection."
+    },
+    {
+      "id": "Q09",
+      "question": "Does an existing Run silently get today's new skill installation, and what happens if access to its old skill is revoked?",
+      "expected_facts": [
+        "Run creation captures a project skill manifest with a generation, exact revision and package SHA.",
+        "Reading a Run resolves its saved versions rather than current installations; legacy Runs without a saved manifest intentionally get an empty manifest.",
+        "Saved versions still require current project/source grants and digest verification; revoked or archived access blocks delivery, and handover copies the fixed manifest within the same project."
+      ],
+      "pitfalls": [
+        "Pinning a revision does not grant permanent access after revocation.",
+        "A legacy Run is not upgraded by reading current project installations."
+      ],
+      "evidence": [
+        {
+          "path": "packages/application/src/skills-run.ts",
+          "start": 19,
+          "end": 85,
+          "sha256": "e729400d527fc87068fdc51e2d944983240d1e611896740d13e05c4f3bbb5967",
+          "excerpt_sha256": "ba162924e73377fab2cba6a5e3d2293439b3069b8fcf9983b8c82dd83418397f"
+        },
+        {
+          "path": "packages/application/src/skills-use-cases.ts",
+          "start": 1,
+          "end": 70,
+          "sha256": "be4b318c3e2e83c8ca1e5e59fc10bd3a9d6e5e607dadebb30e712c6477915389",
+          "excerpt_sha256": "ac04051b95baa3b80a2eda4f1a704ee5f44f6034cf42791e94b1bfec04303306"
+        },
+        {
+          "path": "packages/application/src/handover-use-cases.ts",
+          "start": 393,
+          "end": 402,
+          "sha256": "d708897ea1de9d451777c771329f12924cd9090ad3d7076464d113cbbb07b5d0",
+          "excerpt_sha256": "ecf17a877c7e9d574e09bad3a220eba83c2c639b9de39b1014c543c3cbff5eac"
+        }
+      ],
+      "verification_plan": "Change a project installation after starting a Run, check the old revision remains pinned, then revoke the share and verify delivery is blocked."
+    },
+    {
+      "id": "Q10",
+      "question": "When a test case changes later, how can a past test result remain meaningful and link to a defect?",
+      "expected_facts": [
+        "Execution records use exact case and asset revisions and save snapshots rather than substituting current definitions.",
+        "Reading a result reports is_outdated when the current case revision differs, while preserving the historical snapshot/result.",
+        "Only failed results may link to or create a defect; record definition or a testcase labeled automated is not proof a command executed."
+      ],
+      "pitfalls": [
+        "Do not present old test results as verification of a new revision.",
+        "Test source/case definition is not a passing test execution."
+      ],
+      "evidence": [
+        {
+          "path": "packages/application/src/testing-use-cases.ts",
+          "start": 186,
+          "end": 198,
+          "sha256": "a9a087824516593896bf5479062818458f25d1d51dec379b6126dea9129ddbd1",
+          "excerpt_sha256": "cc17313cdaaae3753ccc038ae94bde2450ba5dd168812905eb672c3cf3778f26"
+        },
+        {
+          "path": "packages/application/src/testing-use-cases.ts",
+          "start": 209,
+          "end": 260,
+          "sha256": "a9a087824516593896bf5479062818458f25d1d51dec379b6126dea9129ddbd1",
+          "excerpt_sha256": "02d930435df0b6b935c7c92ab54bbc21d8a0a861f387caaf0468df3e6f84be27"
+        },
+        {
+          "path": "packages/application/src/testing-use-cases.ts",
+          "start": 266,
+          "end": 306,
+          "sha256": "a9a087824516593896bf5479062818458f25d1d51dec379b6126dea9129ddbd1",
+          "excerpt_sha256": "26f88043c3b59d146a833591da0cdb0a599a617f7d9b94fdbcb38e16788dbd1e"
+        }
+      ],
+      "verification_plan": "Record execution for case r1, revise to r2, inspect is_outdated and unchanged stored snapshot, and reject linking pass/not_run to a defect."
+    },
+    {
+      "id": "Q11",
+      "question": "What is checked when uploading a test attachment, and why is a list response not a file download?",
+      "expected_facts": [
+        "Uploaded file uses a safe basename, valid MIME/base64 and decoded payload limit of 6 MiB.",
+        "The server calculates SHA-256 and byte size and rejects supplied mismatches.",
+        "Summary/list paths remove content_base64 while exact asset detail/revision retains the file; Git asset paths must remain repository-relative."
+      ],
+      "pitfalls": [
+        "Do not call a MIME label or filename proof that the content passed validation.",
+        "Do not infer missing bytes in a list means the attachment has been deleted."
+      ],
+      "evidence": [
+        {
+          "path": "packages/application/src/testing-content.ts",
+          "start": 32,
+          "end": 55,
+          "sha256": "9bbec74d7fa9034a20922d842ead46495f040a70d2c0d07309b3f6e8ba413dec",
+          "excerpt_sha256": "326b5ec041be26f61a2d95413686be0ea94ccade72b4527b4027dfb7872f3098"
+        },
+        {
+          "path": "packages/application/src/testing-content.ts",
+          "start": 71,
+          "end": 88,
+          "sha256": "9bbec74d7fa9034a20922d842ead46495f040a70d2c0d07309b3f6e8ba413dec",
+          "excerpt_sha256": "91dceb2caeef031becd6372278867e380ceb63bf76c000528f3f3bfca38154f3"
+        },
+        {
+          "path": "packages/application/src/testing-use-cases.ts",
+          "start": 106,
+          "end": 122,
+          "sha256": "a9a087824516593896bf5479062818458f25d1d51dec379b6126dea9129ddbd1",
+          "excerpt_sha256": "974a2fc723a0503342531bc9eda2c77f0289a130b75575ee424a7a973cdae2bd"
+        },
+        {
+          "path": "packages/application/src/testing-use-cases.ts",
+          "start": 311,
+          "end": 324,
+          "sha256": "a9a087824516593896bf5479062818458f25d1d51dec379b6126dea9129ddbd1",
+          "excerpt_sha256": "b5398d73858b5ae552ad5dafdb825978f8aec7afd18d74c78daf40e307f9910b"
+        }
+      ],
+      "verification_plan": "Reject path-like names, noncanonical base64, >6 MiB data and wrong hash/size; compare list metadata with exact version detail."
+    },
+    {
+      "id": "Q12",
+      "question": "Why can code-derived candidates not be pushed directly into live project records without review?",
+      "expected_facts": [
+        "Source capture excludes secrets/generated/dependency/binary paths and validates fixed source fingerprints; collected source is not trusted instructions.",
+        "Every candidate requires an explicit create/bind/skip decision, and skipped dependencies or changed binding fingerprints block the frozen publication plan.",
+        "Applying requires manage access, the current plan_hash and idempotency key; item-level progress is resumable, so a partially applied batch is not an all-or-nothing complete import."
+      ],
+      "pitfalls": [
+        "Do not claim model extraction alone publishes requirements.",
+        "Do not claim whole-batch atomicity when the implementation records per-item partial success."
+      ],
+      "evidence": [
+        {
+          "path": "apps/cli/src/intake-source.ts",
+          "start": 10,
+          "end": 28,
+          "sha256": "1b06b67434d47757650c35db94995eeaef73c42af93cceef6a9ae287294a7c6c",
+          "excerpt_sha256": "1c5ca216da4aa10cfc76d8dd17262f47717adcf86975ae1f745d8a7f8a842762"
+        },
+        {
+          "path": "apps/cli/src/intake-source.ts",
+          "start": 119,
+          "end": 161,
+          "sha256": "1b06b67434d47757650c35db94995eeaef73c42af93cceef6a9ae287294a7c6c",
+          "excerpt_sha256": "49966b6ff74c14b34ba277cc2d9d399968033d182b337ca5ea0474af898040dc"
+        },
+        {
+          "path": "packages/application/src/intake-use-cases.ts",
+          "start": 203,
+          "end": 234,
+          "sha256": "01cb52622985dbaed4923015dc4bc3a9723f95349ce9185ef8c2e2e7e9ee0f59",
+          "excerpt_sha256": "e4f0fc8271359fa1fc23432ed328ee3bf77993a3e1b5e9c0f3b74adf5c549199"
+        },
+        {
+          "path": "packages/application/src/intake-use-cases.ts",
+          "start": 256,
+          "end": 336,
+          "sha256": "01cb52622985dbaed4923015dc4bc3a9723f95349ce9185ef8c2e2e7e9ee0f59",
+          "excerpt_sha256": "a202721d04b9de87f021822b7197933c537abb73f6738364a008f43be19dbc51"
+        }
+      ],
+      "verification_plan": "Prepare candidates, reject unreviewed/stale plan hashes and skipped-parent bindings, then verify repeated application of the same key and partial publication recovery."
+    }
+  ],
+  "snapshot_id": "6ad78c2f560c323270d182a0b4fd10ed0d802591203e1ca48431c69060105bf8",
+  "benchmark_sha256": "54635c96fadee99597f14423b408fc72eed97da13a8751488be03a5205d183f4"
+}

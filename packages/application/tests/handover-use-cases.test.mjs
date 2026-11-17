@@ -28,6 +28,13 @@ function rejected(result, operation) {
   return result.error;
 }
 
+test('verified cookie sessions retain shared handover access while legacy declarations stay denied', async () => {
+  const ctx = await seededDb();
+  const identity = { ...ctx.identities.source, authKind: 'cookie' };
+  success(await ctx.handovers.list({ task_code: ctx.task.code, identity }), 'cookie shared handover access');
+  assert.equal(rejected(await ctx.handovers.list({ task_code: ctx.task.code, identity: { ...identity, authKind: 'legacy' } }), 'legacy handover access').code, 'handover_forbidden');
+});
+
 async function seededDb(options = {}) {
   const db = fixture.db;
   const seeded = await seedWorkspaceProject(db, {
@@ -340,7 +347,7 @@ test('handover: home document roles freeze in context and reassignment produces 
   const home = createProjectHomeUseCases(ctx.db);
   const homeView = success(await home.getHome(ctx.project.code, ctx.users.owner.code), 'standards folder');
   const overview = success(await documents.createDocument({ projectCode: ctx.project.code, principalCode: ctx.users.owner.code,
-    title: 'Overview and onboarding', content: 'Approved project introduction', kind: 'general' }), 'overview document');
+    folderCode: homeView.overview_folder_code, title: 'Overview and onboarding', content: 'Approved project introduction', kind: 'general' }), 'overview document');
   const standards = success(await documents.createDocument({ projectCode: ctx.project.code, principalCode: ctx.users.owner.code,
     title: 'Standards', content: 'Approved working rules', kind: 'general', folderCode: homeView.standards_folder_code }), 'standards document');
   // Preserve coverage of standards trees created before system folders disallowed children.
@@ -362,8 +369,10 @@ test('handover: home document roles freeze in context and reassignment produces 
   assert.deepEqual(sources.find(source => source.code === standards.document_code).home_roles, ['standards']);
   assert.deepEqual(sources.find(source => source.code === second.document_code).home_roles, ['standards']);
   assert.equal(sources.find(source => source.code === second.document_code).revision, 1);
+  const replacement = success(await documents.createDocument({ projectCode: ctx.project.code, principalCode: ctx.users.owner.code,
+    folderCode: homeView.overview_folder_code, title: 'Replacement guide', content: 'Replacement onboarding', kind: 'general' }), 'replacement overview document');
   success(await home.updateHome({ projectCode: ctx.project.code, principalCode: ctx.users.owner.code, bindings: {
-    guide_document_code: standards.document_code,
+    guide_document_code: replacement.document_code,
   } }), 'reassign home without changing document content');
   assert.deepEqual(success(await ctx.handovers.getContext(request), 'frozen home unchanged'), frozen);
   const drift = success(await ctx.handovers.diffContext({ identity: ctx.identities.target, handover_code: prepared.handover_code }), 'home drift');
@@ -716,7 +725,7 @@ test('handover: the target submit path requires its current lease and preserves 
   assert.deepEqual(JSON.parse(evidence.acceptance_refs), ['AC-1', 'AC-2']);
 });
 
-test('handover: the material statement trigger fences real concurrent writes until the context reader commits', async () => {
+test('handover: the project material trigger fences real concurrent writes until the context reader commits', async () => {
   const ctx = await seededDb();
   const handover = await restored(ctx);
   const reader = await ctx.db.$client.connect();
@@ -744,13 +753,13 @@ test('handover: the material statement trigger fences real concurrent writes unt
     ]);
     assert.equal(installed.rows.length, 13);
     for (const trigger of installed.rows) {
-      assert.equal(trigger.tgtype, 30, `${trigger.table_name} must use BEFORE STATEMENT INSERT/UPDATE/DELETE`);
+      assert.equal(trigger.tgtype, 31, `${trigger.table_name} must use BEFORE ROW INSERT/UPDATE/DELETE`);
       assert.equal(trigger.tgenabled, 'O');
     }
 
     await reader.query('begin');
     readerTransaction = true;
-    await reader.query('select pg_advisory_xact_lock_shared(1094930512::bigint)');
+    await reader.query("select pg_advisory_xact_lock_shared(hashtext($1)::bigint)", [`project:${ctx.project.id}`]);
     const baseline = await reader.query('select current_revision from requirements where id = $1', [ctx.requirement.id.toString()]);
     assert.equal(baseline.rows[0].current_revision, 1);
     const readerPid = (await reader.query('select pg_backend_pid() as pid')).rows[0].pid;
@@ -759,7 +768,7 @@ test('handover: the material statement trigger fences real concurrent writes unt
     writerTransaction = true;
     await writer.query("set local statement_timeout = '15000ms'");
     const writerPid = (await writer.query('select pg_backend_pid() as pid')).rows[0].pid;
-    const exclusiveProbe = await writer.query('select pg_try_advisory_xact_lock(1094930512::bigint) as acquired');
+    const exclusiveProbe = await writer.query("select pg_try_advisory_xact_lock(hashtext($1)::bigint) as acquired", [`project:${ctx.project.id}`]);
     assert.equal(exclusiveProbe.rows[0].acquired, false, 'the material writer lock must conflict with the context read lock');
 
     let writeSettled = false;
@@ -777,7 +786,7 @@ test('handover: the material statement trigger fences real concurrent writes unt
         select pg_blocking_pids($1::integer) as blockers
         from pg_locks
         where pid = $1::integer and locktype = 'advisory'
-          and objid = 1094930512::oid and not granted
+          and not granted
       `, [writerPid]);
       if (lock.rows.some((row) => row.blockers.includes(readerPid))) {
         waiting = true;

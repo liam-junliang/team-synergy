@@ -106,6 +106,7 @@ export interface RemoteProjectHome {
   overview: RemoteHomeDocument | null;
   guide: RemoteHomeDocument | null;
   standards: RemoteHomeDocument[];
+  overview_folder_code?: string;
   /** Older home responses predate the dedicated standards folder. */
   standards_folder_code?: string;
 }
@@ -149,6 +150,7 @@ export interface RemoteHandoffFolder {
   name: string;
   status: string;
   sort_order?: number;
+  system_role?: 'root' | 'overview' | 'standards' | 'requirements' | 'architecture' | 'testing' | null;
 }
 
 export interface RemoteHandoffDocumentSummary {

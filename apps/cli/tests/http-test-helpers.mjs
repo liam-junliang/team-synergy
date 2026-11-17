@@ -8,35 +8,26 @@ import { sql } from 'drizzle-orm';
 import { closeDb, openDb } from '@team-synergy/persistence';
 import { schema } from '@team-synergy/persistence';
 import { buildServer } from '../../core-api/dist/server.js';
+import { assertOwnedTestDatabase, requireTestContext } from '../../../scripts/test-database-guard.mjs';
 
-const DEFAULT_TEST_DATABASE_URL = process.env.ACP_TEST_DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/acp_test';
+const DEFAULT_TEST_DATABASE_URL = requireTestContext().databaseUrl;
 
 function quoteIdentifier(value) {
   return `"${value.replaceAll('"', '""')}"`;
 }
 
-function toAdminDatabaseUrl(databaseUrl) {
-  const url = new URL(databaseUrl);
-  const databaseName = url.pathname.replace(/^\//, '');
-  url.pathname = '/postgres';
-  return { adminUrl: url.toString(), databaseName };
-}
-
 async function ensureTestDatabase(databaseUrl) {
-  const { adminUrl, databaseName } = toAdminDatabaseUrl(databaseUrl);
-  const client = new Client({ connectionString: adminUrl });
+  const client = new Client({ connectionString: databaseUrl });
   await client.connect();
   try {
-    const { rows } = await client.query('SELECT 1 FROM pg_database WHERE datname = $1', [databaseName]);
-    if (rows.length === 0) {
-      await client.query(`CREATE DATABASE ${quoteIdentifier(databaseName)}`);
-    }
+    await assertOwnedTestDatabase(client);
   } finally {
     await client.end();
   }
 }
 
 async function truncateAllTables(db) {
+  await assertOwnedTestDatabase(db.$client);
   const result = await db.execute(sql`
     select tablename
     from pg_tables
@@ -189,7 +180,7 @@ export async function insertProject(db, {
   teamId,
   name = 'acp',
   currentSnapshot = 0,
-  createdAt = 't0',
+  createdAt = '2026-01-01T00:00:00.000Z',
 } = {}) {
   const [project] = await db.insert(schema.projects).values({
     code,

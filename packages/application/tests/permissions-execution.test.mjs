@@ -121,7 +121,8 @@ for (const operation of ['assign', 'claim']) {
 
 test('task and defect reads require caller access; inherited Viewer can read without explicit membership', async () => {
   const ctx = await setup('team_read');
-  const report = await ctx.defects.reportDefect({ featureCode: ctx.feature.code, principalCode: ctx.users.member.code, title: 'Bug', severity: 'low', description: 'Details' });
+  const report = await ctx.defects.reportDefect({ featureCode: ctx.feature.code, principalCode: ctx.users.member.code, title: 'Bug', severity: 'low',
+    actionSteps: 'Open view', expectedResult: 'Content', actualResult: 'Blank view', evidence: [{ kind: 'text', text: '404' }] });
   assert.equal(report.ok, true);
   for (const principalCode of [undefined, ctx.outsider.code]) {
     assert.deepEqual(await ctx.tasks.listTasks({ principalCode }), []);

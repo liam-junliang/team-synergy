@@ -1,0 +1,1 @@
+从以下软件团队会话提炼值得保留的记忆。区分项目知识 project、个人风格或隐私 private、当次操作 session。类别使用 idea（讨论或未核实）、decision（确认）、implemented（已落实）、preference（习惯或隐私）、instruction（当次指令）。每条填入来源 message ID 和一段逐字 quote。返回 items 数组。

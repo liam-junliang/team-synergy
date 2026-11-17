@@ -63,7 +63,7 @@ test('case, requirement, module, repository, asset and task references stay insi
   const requirement = await insertRequirement(c.db, { featureId: c.foreignFeature.id, title: 'Foreign requirement', ownerPrincipalId: c.users.owner.id });
   const [asset] = await c.db.insert(schema.testAssets).values({ project_id: c.foreign.id, title: 'Foreign asset', summary: '', current_revision: 1, owner_principal_id: c.users.owner.id, created_at: 't0', updated_at: 't0' }).returning();
   const [repository] = await c.db.insert(schema.projectRepositories).values({ project_id: c.foreign.id, name: 'Foreign repo', remote_url: 'https://example.com/foreign.git', created_by: c.users.owner.id, created_at: 't0', updated_at: 't0' }).returning();
-  const [task] = await c.db.insert(schema.tasks).values({ feature_id: c.foreignFeature.id, title: 'Foreign task', profile: 'builder', source: 'ad-hoc', status: 'draft', acceptance: '[]', base_snapshot: 0, created_at: 't0' }).returning();
+  const [task] = await c.db.insert(schema.tasks).values({ feature_id: c.foreignFeature.id, title: 'Foreign task', profile: 'builder', source: 'ad-hoc', status: 'draft', acceptance: '[]', base_snapshot: 0, created_at: '2026-01-01T00:00:00.000Z' }).returning();
   const [foreignCase] = await c.db.insert(schema.testCases).values({ project_id: c.foreign.id, title: 'Foreign case', summary: '', current_revision: 1, owner_principal_id: c.users.owner.id, created_at: 't0', updated_at: 't0' }).returning();
   for (const input of [{ module_code: module.code }, { requirement_codes: [requirement.code] }, { asset_codes: [asset.code] }]) rejected(await c.uc.createCase({ ...c.base, input: caseInput(input) }));
   rejected(await c.uc.createAsset({ ...c.base, input: { title: 'Foreign Git', storage_kind: 'git', git: { repository_code: repository.code } } }), 'testing_invalid');
@@ -134,6 +134,10 @@ test('failed results create one audited defect using saved reproduction and evid
   const [defect] = await c.db.select().from(schema.defects).where(eq(schema.defects.code, linked.results[0].defect_code));
   assert.match(defect.description, /Submit login/); assert.match(defect.description, /Open dashboard/); assert.match(defect.description, /HTTP 500/); assert.match(defect.description, /https:\/\/example.com\/report\/42/);
   assert.doesNotMatch(defect.description, /New action/);
+  assert.equal(defect.action_steps, '1. Submit login');
+  assert.equal(defect.expected_result, '1. Open dashboard');
+  assert.equal(defect.actual_result, 'HTTP 500');
+  assert.deepEqual(JSON.parse(defect.evidence_json), [{ kind: 'link', url: 'https://example.com/report/42' }]);
   assert.equal(defect.related_requirement, requirement.id);
   assert.ok(defect.description.includes(requirement.code));
   rejected(await c.uc.linkResultDefect({ ...cmd, input: { feature_code: c.feature.code } }), 'testing_defect_conflict');
@@ -144,6 +148,21 @@ test('failed results create one audited defect using saved reproduction and evid
   const passed = data(await c.uc.createExecution({ ...c.base, input: runInput(testCase, { results: [{ case_code: testCase.code, case_revision: 1, result: 'pass' }] }) }));
   rejected(await c.uc.linkResultDefect({ code: passed.code, resultCode: passed.results[0].result_code, principalCode: c.users.author.code, input: { defect_code: defect.code } }), 'testing_invalid');
   rejected(await c.uc.linkResultDefect({ ...cmd, resultCode: passed.results[0].result_code, input: { defect_code: defect.code } }), 'test_result_not_found');
+});
+
+test('conversion preserves result notes verbatim and leaves missing execution facts empty', async () => {
+  const c = await setup();
+  const testCase = data(await c.uc.createCase({ ...c.base, input: caseInput({ steps: [] }) }));
+  for (const notes of ['', 'stderr: service unavailable']) {
+    const execution = data(await c.uc.createExecution({ ...c.base, input: runInput(testCase, {
+      results: [{ case_code: testCase.code, case_revision: 1, result: 'fail', notes }],
+    }) }));
+    const linked = data(await c.uc.linkResultDefect({ code: execution.code, resultCode: execution.results[0].result_code,
+      principalCode: c.base.principalCode, input: { feature_code: c.feature.code } }));
+    const [defect] = await c.db.select().from(schema.defects).where(eq(schema.defects.code, linked.results[0].defect_code));
+    assert.deepEqual([defect.action_steps, defect.expected_result, defect.actual_result], [null, null, null]);
+    assert.deepEqual(JSON.parse(defect.evidence_json), notes ? [{ kind: 'text', text: notes }] : []);
+  }
 });
 
 test('file metadata is derived and bytes only returned for authenticated detail reads', async () => {
@@ -168,7 +187,7 @@ test('simultaneous case revision attempts create exactly one next revision', asy
 
 test('recording test evidence never verifies or closes the associated task', async () => {
   const c = await setup(); const testCase = data(await c.uc.createCase({ ...c.base, input: caseInput() }));
-  const [task] = await c.db.insert(schema.tasks).values({ feature_id: c.feature.id, title: 'Linked task', profile: 'builder', source: 'ad-hoc', status: 'running', acceptance: '[]', base_snapshot: 0, created_at: 't0' }).returning();
+  const [task] = await c.db.insert(schema.tasks).values({ feature_id: c.feature.id, title: 'Linked task', profile: 'builder', source: 'ad-hoc', status: 'running', acceptance: '[]', base_snapshot: 0, created_at: '2026-01-01T00:00:00.000Z' }).returning();
   data(await c.uc.createExecution({ ...c.base, input: runInput(testCase, { task_code: task.code, results: [{ case_code: testCase.code, case_revision: 1, result: 'pass' }] }) }));
   const [current] = await c.db.select().from(schema.tasks).where(eq(schema.tasks.id, task.id));
   assert.equal(current.status, 'running'); assert.equal(current.base_snapshot, 0);

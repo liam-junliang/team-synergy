@@ -94,6 +94,16 @@ test('Markdown renders normal links and image alternative text', () => {
   assert.match(image, /\balt="界面预览"/);
 });
 
+test('explicit image-disabled rendering emits placeholders without resource URLs and leaves default documents unchanged', () => {
+  const content = '![项目图](https://example.com/picture.png)\n\n![内联图](data:image/png;base64,aGVsbG8=)\n\n[参考](https://example.com/ref)';
+  const html = renderToStaticMarkup(createElement(MarkdownDocument, { content, allowImages: false }));
+  assert.doesNotMatch(html, /<(?:img|link)\b|\bsrc=|picture\.png|data:image/);
+  assert.match(html, /项目图/);
+  assert.match(html, /内联图/);
+  assert.match(html, /href="https:\/\/example\.com\/ref"[^>]*rel="noopener noreferrer"/);
+  assert.match(render(content), /<img[^>]*src="https:\/\/example\.com\/picture\.png"/);
+});
+
 test('Markdown never emits executable raw HTML or dangerous link and image protocols', () => {
   const html = render([
     '[危险链接](javascript:alert%281%29)',

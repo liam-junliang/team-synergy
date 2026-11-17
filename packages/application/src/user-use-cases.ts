@@ -7,6 +7,7 @@ import { hashPassword } from './password-auth.js';
 import { createPublicCode, findUserByCode } from './public-code.js';
 import { fail, insertAudit, now } from './task-service.js';
 import { revokeStableDevice } from './auth-device.js';
+import { bootstrapPasswordTtlMinutes } from './bootstrap-config.js';
 
 const BIND_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 const INITIAL_PASSWORD_TTL_MS = 15 * 60 * 1000;
@@ -35,6 +36,7 @@ async function systemAdminByCode(db: Db, principalCode: string) {
 }
 
 export async function ensureSystemAdmin(db: Db) {
+  const bootstrapTtlMs = bootstrapPasswordTtlMinutes(process.env.TSP_BOOTSTRAP_TTL_MINUTES) * 60_000;
   const [existing] = await db.select().from(schema.users).where(eq(schema.users.account, 'admin')).limit(1);
   const expired = existing?.must_change_password
     && (!existing.password_expires_at || Date.parse(existing.password_expires_at) <= Date.now());
@@ -46,7 +48,7 @@ export async function ensureSystemAdmin(db: Db) {
   }
 
   const initialPassword = generateInitialPassword();
-  const expiresAt = new Date(Date.now() + INITIAL_PASSWORD_TTL_MS).toISOString();
+  const expiresAt = new Date(Date.now() + bootstrapTtlMs).toISOString();
   const passwordHash = await hashPassword(initialPassword);
   if (existing) {
     await db.update(schema.users).set({
