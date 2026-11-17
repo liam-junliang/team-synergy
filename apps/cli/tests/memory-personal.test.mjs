@@ -24,7 +24,8 @@ async function fixture(t) {
     projection: { status: 'synced', operation: 'upsert', generation: 1, cleanupPending: false }, history: [] };
   row.history.push({ source: row.revisionSource, revision: row.revision, text: row.text, status: row.status, createdAt: row.createdAt });
   let malformed = false, forbidden = false, unavailableSource = false;
-  const evidence = () => row.status === 'active' && !unavailableSource ? [{ source: row.revisionSource, scope: 'personal', state: 'preference', text: row.text, sourceRevision: row.revision }] : [];
+  const evidence = () => row.status === 'active' && !unavailableSource && (row.applicability === 'account' || row.projectCode === project)
+    ? [{ source: row.revisionSource, scope: 'personal', state: 'preference', text: row.text, sourceRevision: row.revision }] : [];
   const server = createServer(async (request, response) => {
     assert.equal(request.headers.authorization, 'Bearer own-device');
     const url = new URL(request.url, 'http://fixture.local');
@@ -37,7 +38,8 @@ async function fixture(t) {
       assert.equal(request.method, 'GET');
       assert.ok([...url.searchParams.keys()].every(key => ['projectCode', 'status'].includes(key)));
       const status = url.searchParams.get('status') ?? 'active';
-      data = { items: status === 'all' || status === row.status ? [row] : [], truncated: false };
+      const origin = url.searchParams.get('projectCode');
+      data = { items: (status === 'all' || status === row.status) && (!origin || origin === row.projectCode) ? [row] : [], truncated: false };
     } else if (url.pathname.startsWith('/memory/personal/')) {
       const parts = url.pathname.split('/');
       assert.equal(parts[3], rootSource);
@@ -120,23 +122,49 @@ test('personal commands reject malformed input before network and surface unauth
   f.forbidden(); assert.equal((await f.run(['personal', 'read', rootSource])).error.code, 'memory_source_unavailable');
 });
 
-test('personal MCP reads are management-only, project-scoped and expose no model-callable mutations', async t => {
+test('personal MCP reads are management-only, applicability-scoped and expose no model-callable mutations', async t => {
   const f = await fixture(t);
   await f.withMcp(async rpc => {
     const tools = (await rpc('tools/list', {})).result.tools;
     assert.equal(tools.filter(tool => tool.name.includes('personal')).length, 2); assert.ok(!tools.some(tool => /edit|withdraw|capture/u.test(tool.name)));
     const listing = await rpc('tools/call', { name: 'list_personal_memories', arguments: {} });
     assert.deepEqual(JSON.parse(listing.result.content[1].text), { managementOnly: true, citationSourceField: 'revisionSource', currentSourcesVerified: true });
-    assert.deepEqual(f.requests.find(row => row.path === '/memory/personal').query, { projectCode: project, status: 'active' });
+    assert.deepEqual(f.requests.find(row => row.path === '/memory/personal').query, { status: 'active' });
     assert.equal('history' in JSON.parse(listing.result.content[0].text).items[0], false);
     for (const status of ['all', 'withdrawn']) assert.equal((await rpc('tools/call', { name: 'list_personal_memories', arguments: { status } })).error.code, -32602);
     assert.equal((await rpc('tools/call', { name: 'read_personal_memory', arguments: { source: rootSource, actor: 'someone' } })).error.code, -32602);
     assert.equal((await rpc('tools/call', { name: 'read_personal_memory', arguments: { source: rootSource } })).result.isError, undefined);
     f.change({ applicability: 'project', projectCode: foreignProject });
-    for (const [name, args] of [['read_personal_memory', { source: rootSource }], ['list_personal_memories', {}]]) {
-      const denied = await rpc('tools/call', { name, arguments: args }); assert.equal(denied.result.isError, true);
-      assert.match(denied.result.content[0].text, /memory_scope_mismatch/u); assert.doesNotMatch(JSON.stringify(denied), /推送仍/u);
-    }
+    const denied = await rpc('tools/call', { name: 'read_personal_memory', arguments: { source: rootSource } });
+    assert.equal(denied.result.isError, true); assert.match(denied.result.content[0].text, /memory_scope_mismatch/u);
+    assert.doesNotMatch(JSON.stringify(denied), /推送仍/u);
+    const excluded = await rpc('tools/call', { name: 'list_personal_memories', arguments: {} });
+    assert.deepEqual(JSON.parse(excluded.result.content[0].text).items, []);
+    assert.doesNotMatch(JSON.stringify(excluded), /推送仍/u);
+  });
+});
+
+test('MCP lists account preferences from another origin consistently with ID and brief while governance keeps origin filtering', async t => {
+  const f = await fixture(t);
+  f.change({ projectCode: foreignProject });
+  assert.deepEqual((await f.run(['personal', 'list', '--project', project])).data.items, []);
+  assert.equal((await f.run(['personal', 'list', '--project', foreignProject])).data.items[0].source, rootSource);
+  await f.withMcp(async rpc => {
+    const call = async (name, args = {}) => {
+      const result = await rpc('tools/call', { name, arguments: args });
+      assert.equal(result.result.isError, undefined, JSON.stringify(result));
+      return JSON.parse(result.result.content[0].text);
+    };
+    const listed = await call('list_personal_memories');
+    assert.equal(listed.items.length, 1);
+    const known = await call('read_personal_memory', { source: rootSource });
+    const brief = await call('read_memory_brief', { scope: 'personal' });
+    assert.equal(listed.items[0].revisionSource, known.revisionSource);
+    assert.equal(listed.items[0].revisionSource, brief[0].source);
+    assert.equal(listed.items[0].text, known.text);
+    assert.equal(listed.items[0].text, brief[0].text);
+    assert.equal('history' in listed.items[0], false);
+    assert.ok(f.sourceReads.some(sources => sources.includes(known.revisionSource)));
   });
 });
 
@@ -153,10 +181,16 @@ test('personal MCP never exposes old history or withdrawn text and rejects a rev
     const stale = await rpc('tools/call', { name: 'read_personal_memory', arguments: { source: rootSource } });
     assert.equal(stale.result.isError, true); assert.match(stale.result.content[0].text, /memory_source_unavailable/u);
     assert.doesNotMatch(JSON.stringify(stale), /当前有效新风格|推送仍按本次授权/u);
+    const staleList = await rpc('tools/call', { name: 'list_personal_memories', arguments: {} });
+    assert.equal(staleList.result.isError, true); assert.match(staleList.result.content[0].text, /memory_source_unavailable/u);
+    assert.doesNotMatch(JSON.stringify(staleList), /当前有效新风格|推送仍按本次授权/u);
     f.change({ status: 'withdrawn' });
     const withdrawn = await rpc('tools/call', { name: 'read_personal_memory', arguments: { source: rootSource } });
     assert.equal(withdrawn.result.isError, true); assert.match(withdrawn.result.content[0].text, /memory_source_unavailable/u);
     assert.doesNotMatch(JSON.stringify(withdrawn), /当前有效新风格|推送仍按本次授权/u);
+    const withdrawnList = await rpc('tools/call', { name: 'list_personal_memories', arguments: {} });
+    assert.deepEqual(JSON.parse(withdrawnList.result.content[0].text).items, []);
+    assert.doesNotMatch(JSON.stringify(withdrawnList), /当前有效新风格|推送仍按本次授权/u);
   });
 });
 

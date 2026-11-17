@@ -17,6 +17,11 @@ const personalAccount = { source: 'N'.repeat(20), revisionSource: 'V'.repeat(20)
   provenance: {}, projection: { status: 'pending', operation: 'upsert', cleanupPending: true }, history: [{ text: 'PRIVATE-HISTORY-SENTINEL' }] };
 const personalProject = { ...personalAccount, source: 'W'.repeat(20), revisionSource: 'X'.repeat(20),
   text: 'FOREIGN-PROJECT-PREFERENCE-SENTINEL', applicability: 'project', projectCode: projectB };
+const personalOriginProject = { ...personalProject, source: 'H'.repeat(20), revisionSource: 'J'.repeat(20),
+  text: 'ORIGIN-PROJECT-ONLY-SENTINEL', projectCode: projectA };
+const personalWithdrawn = { ...personalAccount, source: 'K'.repeat(20), revisionSource: 'M'.repeat(20),
+  text: 'WITHDRAWN-PRIVATE-SENTINEL', status: 'withdrawn' };
+const personalOtherAccount = { ...personalAccount, source: 'P'.repeat(20), revisionSource: 'Q'.repeat(20), text: 'OTHER-ACCOUNT-PRIVATE-SENTINEL' };
 const parseContent = reply => {
   assert.ok(reply.result && !reply.result.isError, JSON.stringify(reply));
   return reply.result.content.filter(block => block.type === 'text').map(block => JSON.parse(block.text));
@@ -31,6 +36,11 @@ async function fixture(t, { auth = true, bound } = {}) {
   const cwd = path.join(root, 'unbound-startup'), account = path.join(root, 'account');
   mkdirSync(cwd); mkdirSync(account);
   const requests = [], children = new Set();
+  const personalRecords = [personalAccount, personalProject, personalOriginProject, personalWithdrawn]
+    .map(row => ({ actor: 'member', row })).concat({ actor: 'another-member', row: personalOtherAccount });
+  const ownedPersonal = () => personalRecords.filter(entry => entry.actor === 'member').map(entry => entry.row);
+  const personalEvidence = code => ownedPersonal().filter(row => row.status === 'active' && (row.applicability === 'account' || row.projectCode === code))
+    .map(row => ({ source: row.revisionSource, scope: 'personal', state: 'preference', text: row.text, sourceRevision: row.revision }));
   const rows = {
     [projectA]: { source: sourceA, scope: 'project', state: 'confirmed', text: 'Alpha-only shared memory' },
     [projectB]: { source: sourceB, scope: 'project', state: 'discussed', text: 'Beta-only shared memory' },
@@ -46,9 +56,14 @@ async function fixture(t, { auth = true, bound } = {}) {
       res.statusCode = 401; res.end(JSON.stringify({ ok: false, error: { code: 'login_required', message: 'Login required' } })); return;
     }
     if (url.pathname === '/auth/whoami') { answer({ user_code: 'member', account: 'member', display_name: 'Member', status: 'active' }); return; }
-    if (url.pathname === '/memory/personal') { answer({ items: [personalAccount, personalProject], truncated: false }); return; }
-    if (url.pathname === '/memory/personal/' + personalAccount.source) { answer(personalAccount); return; }
-    if (url.pathname === '/memory/personal/' + personalProject.source) { answer(personalProject); return; }
+    if (url.pathname === '/memory/personal') {
+      const origin = url.searchParams.get('projectCode'), status = url.searchParams.get('status') ?? 'active';
+      answer({ items: ownedPersonal().filter(row => (!origin || row.projectCode === origin) && (status === 'all' || row.status === status)), truncated: false }); return;
+    }
+    if (url.pathname.startsWith('/memory/personal/')) {
+      const row = ownedPersonal().find(row => url.pathname === '/memory/personal/' + row.source);
+      if (row) { answer(row); return; }
+    }
     if (url.pathname === '/projects') {
       answer([{ project_code: projectA, name: 'Alpha', team_code: 'D'.repeat(20), status: 'active' },
         { project_code: projectB, name: 'Beta', team_code: 'D'.repeat(20), status: 'active' }]); return;
@@ -60,8 +75,8 @@ async function fixture(t, { auth = true, bound } = {}) {
       if (suffix === '/code-understanding/context') {
         answer({ project_code: code, repositories: [{ code: 'R'.repeat(20), name: code === projectA ? 'alpha-repo' : 'beta-repo' }], runs: [] }); return;
       }
-      if (suffix === '/memory/brief') { answer([rows[code]]); return; }
-      if (suffix === '/memory/sources') { answer(body.sources.includes(rows[code].source) ? [rows[code]] : []); return; }
+      if (suffix === '/memory/brief') { answer(body.scope === 'personal' ? personalEvidence(code) : [rows[code]]); return; }
+      if (suffix === '/memory/sources') { answer([rows[code], ...personalEvidence(code)].filter(row => body.sources.includes(row.source))); return; }
       if (suffix === '/materials/list') { answer({ project_code: code, items: [{ title: code === projectA ? 'Alpha guide' : 'Beta guide' }] }); return; }
     }
     res.statusCode = 403;
@@ -252,11 +267,28 @@ test('account-wide personal reads work unbound while project preferences and his
   const f = await fixture(t), client = await f.mcp();
   const listed = parseContent(await client.call('list_personal_memories', {}));
   assert.match(JSON.stringify(listed), /Account preference only/u);
-  assert.doesNotMatch(JSON.stringify(listed), /FOREIGN-PROJECT-PREFERENCE-SENTINEL|PRIVATE-HISTORY-SENTINEL/u);
+  assert.doesNotMatch(JSON.stringify(listed), /FOREIGN-PROJECT-PREFERENCE-SENTINEL|ORIGIN-PROJECT-ONLY-SENTINEL|PRIVATE-HISTORY-SENTINEL|WITHDRAWN-PRIVATE-SENTINEL|OTHER-ACCOUNT-PRIVATE-SENTINEL/u);
   const read = parseContent(await client.call('read_personal_memory', { source: personalAccount.source }));
   assert.match(JSON.stringify(read), /Account preference only/u);
   assert.doesNotMatch(JSON.stringify(read), /PRIVATE-HISTORY-SENTINEL/u);
   toolError(await client.call('read_personal_memory', { source: personalProject.source }), /memory_scope_mismatch|project_selection_required/u);
   assert.equal(f.requests.some(request => request.path.startsWith('/projects/')), false);
+  f.assertUnbound();
+});
+
+test('selected project personal lists include cross-origin account preferences and only its own project preferences', async t => {
+  const f = await fixture(t), client = await f.mcp();
+  const [listed] = parseContent(await client.call('list_personal_memories', { projectCode: projectB }));
+  assert.deepEqual(listed.items.map(row => row.source), [personalAccount.source, personalProject.source]);
+  assert.doesNotMatch(JSON.stringify(listed), /ORIGIN-PROJECT-ONLY-SENTINEL|PRIVATE-HISTORY-SENTINEL|WITHDRAWN-PRIVATE-SENTINEL|OTHER-ACCOUNT-PRIVATE-SENTINEL/u);
+  const [known] = parseContent(await client.call('read_personal_memory', { projectCode: projectB, source: personalAccount.source }));
+  const [brief] = parseContent(await client.call('read_memory_brief', { projectCode: projectB, scope: 'personal' }));
+  assert.deepEqual(listed.items.map(row => ({ source: row.revisionSource, text: row.text })), brief.map(row => ({ source: row.source, text: row.text })));
+  assert.equal(listed.items[0].revisionSource, known.revisionSource);
+  toolError(await client.call('read_personal_memory', { projectCode: projectB, source: personalOriginProject.source }), /memory_scope_mismatch/u);
+  toolError(await client.call('read_personal_memory', { projectCode: projectB, source: personalOtherAccount.source }), /project_forbidden/u);
+  const sourceRequests = f.requests.filter(request => request.path === `/projects/${projectB}/memory/sources`);
+  assert.deepEqual(sourceRequests[0].body.sources, [personalAccount.revisionSource, personalProject.revisionSource]);
+  assert.deepEqual(f.requests.filter(request => request.path === '/memory/personal').map(request => request.query), [{ status: 'active' }]);
   f.assertUnbound();
 });

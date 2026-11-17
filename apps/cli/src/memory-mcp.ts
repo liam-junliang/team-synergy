@@ -168,10 +168,11 @@ export function createAgentToolSession(options: AgentToolOptions = {}) {
         const account = personalMemoryContext();
         connection.assertAccount();
         if (context && account.actor !== context.actor) throw new DomainError('memory_binding_changed', '登录身份已切换，请重启工具会话');
-        const data = listing ? await listPersonalMemory(account, { ...(context ? { projectCode: context.projectCode } : {}), status: 'active' }) :
+        // Governance projectCode filters origin; applicability is evaluated here.
+        const data = listing ? await listPersonalMemory(account, { status: 'active' }) :
           await readPersonalMemory(account, String(args.source));
         const allRows = 'items' in data ? data.items : [data];
-        const rows = !context && listing ? allRows.filter(row => row.applicability === 'account') : allRows;
+        const rows = listing ? allRows.filter(row => row.applicability === 'account' || row.projectCode === context?.projectCode) : allRows;
         if (rows.some(row => row.applicability === 'project' && row.projectCode !== context?.projectCode)) {
           throw new DomainError('memory_scope_mismatch', '该偏好不适用于当前项目');
         }
