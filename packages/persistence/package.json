@@ -14,7 +14,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --test --test-concurrency=1 tests/*.test.mjs",
+    "test": "node ../../scripts/run-tests.mjs -- node --test --test-concurrency=1 tests/*.test.mjs",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {

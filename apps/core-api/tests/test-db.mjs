@@ -2,36 +2,20 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Pool } from 'pg';
 import { closeDb, openDb, schema } from '@team-synergy/persistence';
+import { assertDisposableTestDatabase, assertOwnedTestDatabase, requireTestContext } from '../../../scripts/test-database-guard.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = path.resolve(here, '../dist/migrations');
-const testDatabaseUrl = process.env.TSP_TEST_DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/team_synergy_test';
+const testDatabaseUrl = requireTestContext().databaseUrl;
+assertDisposableTestDatabase(testDatabaseUrl);
 
 let ensured = false;
 
-function databaseNameOf(databaseUrl) {
-  const pathname = new URL(databaseUrl).pathname.replace(/^\/+/, '');
-  if (!/^[A-Za-z0-9_]+$/.test(pathname)) {
-    throw new Error(`Unsupported test database name: ${pathname}`);
-  }
-  return pathname;
-}
-
-function adminDatabaseUrl(databaseUrl) {
-  const url = new URL(databaseUrl);
-  url.pathname = '/postgres';
-  return url.toString();
-}
-
 async function ensureTestDatabase() {
   if (ensured) return;
-  const databaseName = databaseNameOf(testDatabaseUrl);
-  const adminPool = new Pool({ connectionString: adminDatabaseUrl(testDatabaseUrl) });
+  const adminPool = new Pool({ connectionString: testDatabaseUrl });
   try {
-    const exists = await adminPool.query('SELECT 1 FROM pg_database WHERE datname = $1', [databaseName]);
-    if (exists.rowCount === 0) {
-      await adminPool.query(`CREATE DATABASE "${databaseName}"`);
-    }
+    await assertOwnedTestDatabase(adminPool);
     ensured = true;
   } finally {
     await adminPool.end();
@@ -39,6 +23,7 @@ async function ensureTestDatabase() {
 }
 
 async function truncateAllTables(db) {
+  await assertOwnedTestDatabase(db.$client);
   const { rows } = await db.$client.query(
     "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> '__drizzle_migrations'",
   );

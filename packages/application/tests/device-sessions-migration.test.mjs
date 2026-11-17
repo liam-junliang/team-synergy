@@ -1,23 +1,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID, createHash } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, readdir, copyFile, mkdir, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import pg from 'pg';
 import { openDb, closeDb } from '@team-synergy/persistence';
 import { createAuthUseCases } from '../dist/index.js';
+import { createTestFixture, requireTestContext } from '../../../scripts/test-database-guard.mjs';
+requireTestContext();
 
 test('0037 preserves old device identity and execution secret while migrating the existing bearer into a session exactly once', async()=>{
- const base=new URL(process.env.TSP_TEST_DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/team_synergy_test');base.pathname='/postgres';
- const admin=new pg.Client({connectionString:base.toString()});await admin.connect();
- const databaseName=`acp_device_migration_${randomUUID().replaceAll('-','')}`;
+ const owned=await createTestFixture('devicemigration');
  const migrations=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../persistence/drizzle');
  const scratch=await mkdtemp(path.join(os.tmpdir(),'tsp-device-migrations-'));
  let db;
  try {
-  await admin.query(`CREATE DATABASE "${databaseName}"`);const testUrl=new URL(base);testUrl.pathname=`/${databaseName}`;
+  const testUrl=new URL(owned.databaseUrl);
   await mkdir(path.join(scratch,'meta'));
   const journal=JSON.parse(await readFile(path.join(migrations,'meta','_journal.json'),'utf8'));
   journal.entries=journal.entries.filter(entry=>entry.tag<'0037_device_sessions');
@@ -35,7 +34,7 @@ test('0037 preserves old device identity and execution secret while migrating th
   assert.equal((await db.$client.query('SELECT count(*)::int AS count FROM device_sessions')).rows[0].count,1);
  } finally {
   if(db)await closeDb(db);
-  await admin.query(`DROP DATABASE IF EXISTS "${databaseName}"`);await admin.end();
+  await owned.dispose();
   const resolved=path.resolve(scratch);assert.equal(path.dirname(resolved),path.resolve(os.tmpdir()));assert.ok(path.basename(resolved).startsWith('tsp-device-migrations-'));
   await rm(resolved,{recursive:true,force:true});
  }

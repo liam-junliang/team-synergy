@@ -1,25 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, readdir, copyFile, mkdir, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import pg from 'pg';
 import { openDb, closeDb } from '@team-synergy/persistence';
+import { createTestFixture, requireTestContext } from '../../../scripts/test-database-guard.mjs';
+requireTestContext();
 
 test('0041 and 0042 preserve historical payloads and receipts while allowing isolated material-only bindings', async () => {
-  const base = new URL(process.env.TSP_TEST_DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/team_synergy_test');
-  assert.equal(base.pathname, '/team_synergy_test', 'migration verification must start from the isolated test configuration');
-  base.pathname = '/postgres';
-  const admin = new pg.Client({ connectionString: base.toString() }); await admin.connect();
-  const databaseName = `tsp_intake_migration_${randomUUID().replaceAll('-', '')}`;
+  const owned = await createTestFixture('intakemigration');
   const migrations = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../persistence/drizzle');
   const scratch = await mkdtemp(path.join(os.tmpdir(), 'tsp-intake-migrations-'));
   let db;
   try {
-    await admin.query(`CREATE DATABASE "${databaseName}"`);
-    const databaseUrl = new URL(base); databaseUrl.pathname = `/${databaseName}`;
+    const databaseUrl = new URL(owned.databaseUrl);
     await mkdir(path.join(scratch, 'meta'));
     const journal = JSON.parse(await readFile(path.join(migrations, 'meta', '_journal.json'), 'utf8'));
     journal.entries = journal.entries.filter(entry => entry.tag < '0041_intake_quality_gate');
@@ -57,7 +52,7 @@ test('0041 and 0042 preserve historical payloads and receipts while allowing iso
     assert(indexes.includes('uq_intake_bindings_source')); assert(indexes.includes('uq_intake_bindings_material_source'));
   } finally {
     if (db) await closeDb(db);
-    await admin.query(`DROP DATABASE IF EXISTS "${databaseName}"`); await admin.end();
+    await owned.dispose();
     const resolved = path.resolve(scratch);
     assert.equal(path.dirname(resolved), path.resolve(os.tmpdir())); assert.ok(path.basename(resolved).startsWith('tsp-intake-migrations-'));
     await rm(resolved, { recursive: true, force: true });

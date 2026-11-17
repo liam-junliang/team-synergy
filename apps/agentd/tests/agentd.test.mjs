@@ -11,11 +11,12 @@ import { buildServer } from '../../core-api/dist/server.js';
 import { eq } from 'drizzle-orm';
 import { Pool } from 'pg';
 import { closeDb, openDb, schema } from '@team-synergy/persistence';
+import { assertOwnedTestDatabase, requireTestContext } from '../../../scripts/test-database-guard.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const cliEntry = path.resolve(here, '../dist/index.js');
 const migrationsFolder = path.resolve(here, '../../../packages/persistence/drizzle');
-const testDatabaseUrl = process.env.TSP_TEST_DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/team_synergy_test';
+const testDatabaseUrl = requireTestContext().databaseUrl;
 let databaseEnsured = false;
 const code = (value) => String(value).padStart(20, '0');
 const IDS = Object.freeze({ team: 1n, user: 2n, project: 3n, feature: 4n, task: 5n, workspace: 6n, run: 7n });
@@ -24,29 +25,11 @@ const CODES = Object.freeze({
   task: code(5), workspace: code(6), run: code(7),
 });
 
-function databaseNameOf(databaseUrl) {
-  const databaseName = new URL(databaseUrl).pathname.replace(/^\/+/, '');
-  if (!/^[A-Za-z0-9_]+$/.test(databaseName)) {
-    throw new Error(`Unsupported test database name: ${databaseName}`);
-  }
-  return databaseName;
-}
-
-function adminDatabaseUrl(databaseUrl) {
-  const url = new URL(databaseUrl);
-  url.pathname = '/postgres';
-  return url.toString();
-}
-
 async function ensureTestDatabase() {
   if (databaseEnsured) return;
-  const databaseName = databaseNameOf(testDatabaseUrl);
-  const pool = new Pool({ connectionString: adminDatabaseUrl(testDatabaseUrl) });
+  const pool = new Pool({ connectionString: testDatabaseUrl });
   try {
-    const result = await pool.query('SELECT 1 FROM pg_database WHERE datname = $1', [databaseName]);
-    if (result.rowCount === 0) {
-      await pool.query(`CREATE DATABASE "${databaseName}"`);
-    }
+    await assertOwnedTestDatabase(pool);
     databaseEnsured = true;
   } finally {
     await pool.end();
@@ -54,6 +37,7 @@ async function ensureTestDatabase() {
 }
 
 async function truncateAllTables(db) {
+  await assertOwnedTestDatabase(db.$client);
   const result = await db.$client.query(
     "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> '__drizzle_migrations'",
   );

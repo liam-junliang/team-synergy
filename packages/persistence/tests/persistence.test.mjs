@@ -7,37 +7,23 @@ import path from 'node:path';
 import { Pool } from 'pg';
 import { eq, is, sql, Table } from 'drizzle-orm';
 import { openDb, closeDb, traverseSubgraph, schema } from '../dist/index.js';
+import { assertDisposableTestDatabase, assertOwnedTestDatabase, requireTestContext } from '../../../scripts/test-database-guard.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = path.resolve(__dirname, '../drizzle');
-const testDatabaseUrl =
-  process.env.TSP_TEST_DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/team_synergy_test';
+const testDatabaseUrl = requireTestContext().databaseUrl;
 const PUBLIC_CODE_PATTERN = /^[0-9A-HJKMNP-TV-Z]{20}$/;
+assertDisposableTestDatabase(testDatabaseUrl);
 const migrationJournal = JSON.parse(await readFile(path.join(migrationsFolder, 'meta/_journal.json'), 'utf8'));
 
 function quoteIdentifier(identifier) {
   return `"${identifier.replaceAll('"', '""')}"`;
 }
 
-function databaseNameFromUrl(connectionString) {
-  const databaseUrl = new URL(connectionString);
-  return databaseUrl.pathname.replace(/^\//, '');
-}
-
-function adminDatabaseUrl(connectionString) {
-  const databaseUrl = new URL(connectionString);
-  databaseUrl.pathname = '/postgres';
-  return databaseUrl.toString();
-}
-
 async function ensureTestDatabase() {
-  const databaseName = databaseNameFromUrl(testDatabaseUrl);
-  const adminPool = new Pool({ connectionString: adminDatabaseUrl(testDatabaseUrl) });
+  const adminPool = new Pool({ connectionString: testDatabaseUrl });
   try {
-    const result = await adminPool.query('SELECT 1 FROM pg_database WHERE datname = $1', [databaseName]);
-    if (result.rowCount === 0) {
-      await adminPool.query(`CREATE DATABASE ${quoteIdentifier(databaseName)}`);
-    }
+    await assertOwnedTestDatabase(adminPool);
   } finally {
     await adminPool.end();
   }
@@ -46,6 +32,7 @@ async function ensureTestDatabase() {
 async function resetPublicSchema() {
   const pool = new Pool({ connectionString: testDatabaseUrl });
   try {
+    await assertOwnedTestDatabase(pool);
     await pool.query('DROP SCHEMA IF EXISTS public CASCADE');
     await pool.query('DROP SCHEMA IF EXISTS drizzle CASCADE');
     await pool.query('CREATE SCHEMA public');
@@ -57,6 +44,7 @@ async function resetPublicSchema() {
 async function truncateBusinessTables() {
   const pool = new Pool({ connectionString: testDatabaseUrl });
   try {
+    await assertOwnedTestDatabase(pool);
     const result = await pool.query(
       "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> '__drizzle_migrations' ORDER BY tablename",
     );
@@ -335,6 +323,26 @@ test('迁移可重复执行：空库顺序迁移到最新版本后表数量稳�
   } finally {
     await closeDb(db2);
   }
+});
+
+test('0062 preserves legacy defect descriptions without inventing report facts or evidence', async () => {
+  const previous = await freshDbThrough(61);
+  let code;
+  try {
+    const { feature, user } = await seedTaskBase(previous);
+    const { rows } = await previous.$client.query(
+      "INSERT INTO defects (feature_id, title, severity, reported_by, description) VALUES ($1,'Old report','high',$2,'Original free text') RETURNING code",
+      [feature.id, user.id],
+    );
+    code = rows[0].code;
+  } finally { await closeDb(previous); }
+  await withDb(async db => {
+    const [report] = await db.select().from(schema.defects).where(eq(schema.defects.code, code));
+    assert.equal(report.description, 'Original free text');
+    assert.deepEqual([report.action_steps, report.expected_result, report.actual_result], [null, null, null]);
+    assert.deepEqual(JSON.parse(report.evidence_json), []);
+    assert.deepEqual(await db.select().from(schema.defectEvidenceFiles), []);
+  });
 });
 
 test('迁移幂等：同一数据库连续两次 openDb 不重复记录迁移', async () => {

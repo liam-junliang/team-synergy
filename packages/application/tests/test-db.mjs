@@ -3,36 +3,29 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sql } from 'drizzle-orm';
 import { closeDb, openDb, schema } from '@team-synergy/persistence';
+import { assertDisposableTestDatabase, assertOwnedTestDatabase, requireTestContext } from '../../../scripts/test-database-guard.mjs';
 
-const DEFAULT_TEST_DATABASE_URL = process.env.TSP_TEST_DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/team_synergy_test';
+const DEFAULT_TEST_DATABASE_URL = requireTestContext().databaseUrl;
+assertDisposableTestDatabase(DEFAULT_TEST_DATABASE_URL);
 
 function quoteIdentifier(value) {
   return `"${value.replaceAll('"', '""')}"`;
 }
 
-function toAdminDatabaseUrl(databaseUrl) {
-  const url = new URL(databaseUrl);
-  const databaseName = url.pathname.replace(/^\//, '');
-  url.pathname = '/postgres';
-  return { adminUrl: url.toString(), databaseName };
-}
-
 async function ensureTestDatabase(databaseUrl) {
   const { Client } = await import('pg');
-  const { adminUrl, databaseName } = toAdminDatabaseUrl(databaseUrl);
-  const client = new Client({ connectionString: adminUrl });
+  assertDisposableTestDatabase(databaseUrl);
+  const client = new Client({ connectionString: databaseUrl });
   await client.connect();
   try {
-    const { rows } = await client.query('SELECT 1 FROM pg_database WHERE datname = $1', [databaseName]);
-    if (rows.length === 0) {
-      await client.query(`CREATE DATABASE ${quoteIdentifier(databaseName)}`);
-    }
+    await assertOwnedTestDatabase(client);
   } finally {
     await client.end();
   }
 }
 
 async function truncateAllTables(db) {
+  await assertOwnedTestDatabase(db.$client);
   const result = await db.execute(sql`
     select tablename
     from pg_tables
@@ -51,6 +44,7 @@ export function useTestDb(metaUrl) {
   const here = path.dirname(fileURLToPath(metaUrl));
   const migrationsFolder = path.resolve(here, '../../persistence/drizzle');
   const databaseUrl = process.env.TSP_TEST_DATABASE_URL ?? DEFAULT_TEST_DATABASE_URL;
+  assertDisposableTestDatabase(databaseUrl);
   let db;
 
   before(async () => {

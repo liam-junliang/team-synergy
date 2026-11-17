@@ -1,18 +1,16 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { randomBytes } from 'node:crypto';
 import { Client } from 'pg';
 import { readFile, mkdtemp, mkdir, copyFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb, closeDb } from '../dist/index.js';
+import { createTestFixture, requireTestContext } from '../../../scripts/test-database-guard.mjs';
 
 const folder = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../drizzle');
-const privateUrl = new URL(process.env.TSP_TEST_DATABASE_URL ?? 'postgres://postgres@127.0.0.1:15432/c_fk_test');
-// Use the configured test host/credentials while isolating destructive upgrade fixtures.
-privateUrl.pathname = `/c_fk_test_${process.pid}_${randomBytes(3).toString('hex')}`;
-const url = privateUrl.toString();
+requireTestContext();
+let owned, url;
 const relations = [
  ['tasks', 'feature_id', 'features', 'fk_tasks_feature'],
  ['members', 'project_id', 'projects', 'fk_members_project'],
@@ -26,11 +24,7 @@ const validate = () => readFile(path.join(folder, '0049_core_foreign_keys_valida
 const missingParent = '9000000000000000000';
 
 before(async () => {
- const adminUrl = new URL(url); const databaseName = adminUrl.pathname.slice(1); adminUrl.pathname = '/postgres';
- assert.match(databaseName, /^c_fk_test(?:_[a-z0-9_]+)?$/, 'this destructive fixture is isolated to its named test database');
- const admin = new Client({ connectionString: adminUrl.toString() }); await admin.connect();
- try { await admin.query(`create database "${databaseName}"`); createdDatabase = true; }
- finally { await admin.end(); }
+ owned = await createTestFixture('foreignkeys'); url = owned.databaseUrl; createdDatabase = true;
  client = new Client({ connectionString: url }); await client.connect();
  oldMigrations = await mkdtemp(path.join(tmpdir(), 'tsp-core-fk-upgrade-'));
  const journal = JSON.parse(await readFile(path.join(folder, 'meta/_journal.json'), 'utf8'));
@@ -49,13 +43,11 @@ after(async () => {
   await rm(oldMigrations, { recursive: true, force: true });
  }
  if (createdDatabase) {
-  const adminUrl = new URL(url); const name = adminUrl.pathname.slice(1); adminUrl.pathname = '/postgres';
-  assert.match(name, /^c_fk_test_[a-z0-9_]+$/);
-  const admin = new Client({ connectionString: adminUrl.toString() }); await admin.connect();
-  try { await admin.query(`drop database "${name}"`); } finally { await admin.end(); }
+  await owned.dispose();
  }
 });
 async function legacyFixture() {
+ await owned.assertOwned(client);
  await client.query('drop schema if exists public cascade; drop schema if exists drizzle cascade; create schema public');
  const db = await openDb({ databaseUrl: url, migrationsFolder: oldMigrations }); await closeDb(db);
  const user = (await client.query("insert into users(account,display_name,created_at) values ('fk.user','FK user','2026-10-23T00:00:00Z') returning id")).rows[0];

@@ -14,7 +14,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --test tests/git-workspace.test.mjs tests/handover-workspace.test.mjs"
+    "test": "node --test tests/git-workspace.test.mjs tests/handover-workspace.test.mjs tests/code-analysis-semantic-evidence.test.mjs"
   },
   "dependencies": {
     "@team-synergy/contracts": "workspace:*",

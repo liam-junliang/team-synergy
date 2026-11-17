@@ -22,6 +22,7 @@ export default tseslint.config(
       'tmp/**',
       'output/**',
       'assets/**',
+      'apps/web/public/vendor/**', // Versioned upstream reader bundles; adapter source is linted separately.
     ],
   },
   eslint.configs.recommended,

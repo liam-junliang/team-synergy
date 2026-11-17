@@ -14,7 +14,7 @@ test('customer inventory catalog reviews every schema table exactly once', () =>
   const names = TENANT_INVENTORY_CATALOG.flatMap(group => group.tables.split(' '));
   assert.equal(new Set(names).size, names.length);
   assert.deepEqual(names.sort(), Object.values(schema).map(table => getTableConfig(table).name).sort());
-  assert.equal(names.length, 75);
+  assert.equal(names.length, 88);
 });
 
 test('inventory is pending, complete as a metadata read and never exposes private bodies or invents customer acceptance', {skip:!baseUrl}, async () => {
@@ -42,7 +42,7 @@ test('inventory is pending, complete as a metadata read and never exposes privat
     const before = await q('select (select count(*) from audit_events)::int as audits,(select count(*) from command_receipts)::int as receipts');
     const report = await planTenantMapping(db);
     assert.equal(report.status,'pending'); assert.equal(report.read_complete,true); assert.equal(report.ready_for_backfill,false); assert.equal(report.ownership_complete,false); assert.equal(report.tenant_id,null);
-    assert.equal(report.inventory.length,75);
+    assert.equal(report.inventory.length,88);
     assert.equal(report.teams.length,3); // Historical migration also retains its empty default team.
     assert.equal(report.projects.length,2);
     assert.equal(report.projects.find(p=>p.project_code===original.code).external_members,1);
@@ -95,12 +95,15 @@ test('inventory requires every table SELECT privilege and honors the DDL lock de
   await withIntegrityFixture(baseUrl,'privileges',async(db,url)=>{
     const role=`c041_reader_${process.pid}`;
     await db.$client.query(`create role ${role} nologin`);
+    // CREATEROLE is deliberately not superuser; PostgreSQL 16 requires an
+    // explicit SET membership for this temporary read-only privilege probe.
+    await db.$client.query(`grant ${role} to tsp_test_runner with set true`);
     let limited;
     try {
       await db.$client.query(`grant usage on schema public,drizzle to ${role}; grant select on all tables in schema public,drizzle to ${role}; revoke select on teams from ${role}`);
       limited=await openDb({databaseUrl:url,migrate:false});
       const connect=limited.$client.connect.bind(limited.$client);
-      const restricted={$client:{connect:async()=>{const c=await connect();await c.query(`set role ${role}`);return c;}}};
+      const restricted={$client:{connect:async()=>{const c=await connect();try{await c.query(`set role ${role}`);return c;}catch(error){c.release();throw error;}}}};
       await assert.rejects(planTenantMapping(restricted),/columns or visibility/);
     } finally {
       if(limited) await closeDb(limited);
@@ -151,6 +154,23 @@ test('different missing source skills cannot match each other through a null rev
     assert.equal(report.shares[0].skill_code,null);assert.equal(report.shares[0].versions_valid_and_published,false);
     assert.equal(report.issues.orphaned_skill_revisions,1);assert.equal(report.issues.missing_installation_revisions,1);
     assert.equal(report.issues.invalid_or_unpublished_share_versions,1);assert.equal(report.ready_for_backfill,false);
+    assert.ok(!JSON.stringify(report).includes(secret));
+  });
+});
+
+test('platform releases carry their own provenance in the inventory of project installations', {skip:!baseUrl}, async () => {
+  await withIntegrityFixture(baseUrl,'platform',async db => {
+    const query = (sql, params = []) => db.$client.query(sql, params).then(result => result.rows[0]);
+    const project = await query('SELECT id FROM projects LIMIT 1');
+    const user = await query('SELECT id FROM users LIMIT 1');
+    const skill = await query("INSERT INTO skills(scope_type,current_revision,created_at,updated_at) VALUES ('platform',1,$1,$1) RETURNING id,code",[time]);
+    await query("INSERT INTO skill_revisions(skill_id,revision,release_version,package_json,change_summary,created_at,published_at) VALUES ($1,1,'1.1.0',$2,$2,$3,$3)",[skill.id,secret,time]);
+    await query("INSERT INTO project_skill_installations(project_id,skill_id,revision,alias,enabled,updated_by,updated_at) VALUES ($1,$2,1,'builtin',true,$3,$4)",[project.id,skill.id,user.id,time]);
+    const report = await planTenantMapping(db);
+    assert.equal(report.skills.find(item => item.skill_code === skill.code).source_scope_type, 'platform');
+    assert.equal(report.installations.find(item => item.skill_code === skill.code).team_relation, 'platform_release');
+    assert.equal(report.issues.unresolved_skill_scopes,0);
+    assert.equal(report.issues.unresolved_installation_scopes,0);
     assert.ok(!JSON.stringify(report).includes(secret));
   });
 });

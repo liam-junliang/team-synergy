@@ -1,26 +1,18 @@
-import pg from 'pg';
 import { fileURLToPath } from 'node:url';
 import { openDb, closeDb } from '../packages/persistence/dist/index.js';
+import { createTestFixture } from './test-database-guard.mjs';
 
 /** Dedicated fresh DB only. Never truncate or migrate the database supplied by caller. */
 export async function withIntegrityFixture(baseUrl, label, run) {
-  if (!baseUrl) throw new Error('Explicit fixture PostgreSQL URL required');
-  const adminUrl = new URL(baseUrl); adminUrl.pathname='/postgres';
-  const database=`c_orphans_${label}_${process.pid}`;
-  if (!/^c_orphans_[a-z]+_\d+$/.test(database)) throw new Error('Invalid fixture database');
-  const admin=new pg.Client({connectionString:adminUrl.toString(),connectionTimeoutMillis:2000});
-  await admin.connect();
-  let db,created=false;
+  const fixture = await createTestFixture(label, baseUrl);
+  let db;
   try {
-    await admin.query(`CREATE DATABASE "${database}"`);created=true;
-    const url=new URL(baseUrl);url.pathname='/'+database;
-    db=await openDb({databaseUrl:url.toString(),migrationsFolder:fileURLToPath(new URL('../packages/persistence/drizzle',import.meta.url))});
+    db=await openDb({databaseUrl:fixture.databaseUrl,migrationsFolder:fileURLToPath(new URL('../packages/persistence/drizzle',import.meta.url))});
     await seedIntegrityFixture(db);
-    return await run(db,url.toString());
+    return await run(db,fixture.databaseUrl);
   } finally {
     if(db)await closeDb(db);
-    if(created)await admin.query(`DROP DATABASE "${database}"`);
-    await admin.end();
+    await fixture.dispose();
   }
 }
 

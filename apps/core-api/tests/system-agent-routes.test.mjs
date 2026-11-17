@@ -8,7 +8,6 @@ import { registerAuthMiddleware } from '../dist/auth.js';
 import { registerSystemAgentRoutes } from '../dist/routes/system-agent.js';
 import { closeTestDb, insertProject, insertProjectMember, insertTeam, insertUser, openTestDb } from './test-db.mjs';
 
-if (process.env.TSP_TEST_DATABASE_URL && new URL(process.env.TSP_TEST_DATABASE_URL).pathname !== '/team_synergy_test') throw new Error('System Agent tests require isolated team_synergy_test');
 const fixtures = [];
 afterEach(async () => { for (const { app, db } of fixtures.splice(0)) { await app.close(); await closeTestDb(db); } });
 async function fixture(configured = true) {

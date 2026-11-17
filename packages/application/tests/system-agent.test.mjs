@@ -6,8 +6,6 @@ import { createProjectDocumentUseCases, createSystemAgentUseCases, normalizeSyst
 import { insertProject, seedWorkspaceProject, useTestDb } from './test-db.mjs';
 
 // This suite deliberately exercises real transactions, but never a service database.
-const testUrl = process.env.TSP_TEST_DATABASE_URL;
-if (testUrl && new URL(testUrl).pathname !== '/team_synergy_test') throw new Error('System Agent tests require isolated team_synergy_test');
 const fixture = useTestDb(import.meta.url);
 const proposal = { title: 'Revised guide', summary: 'Draft summary', content: '# Revised guide\n\n## Purpose\n\nClarified scope.\n\n## Source\n\nOriginal guide.', rationale: 'Clarify the existing scope.', evidence: ['Current document revision 1'], warnings: ['Business intent requires confirmation.'] };
 const unwrap = value => { assert.equal(value.ok, true, JSON.stringify(value)); return value.data; };

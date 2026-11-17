@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, writeFile, copyFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -9,20 +9,20 @@ import { Pool } from 'pg';
 import { openDb, closeDb, schema } from '../dist/index.js';
 import { isoTimestamp } from '../dist/iso-timestamp.js';
 import { pgTable } from 'drizzle-orm/pg-core';
+import { createTestFixture, requireTestContext, testAdminUrl } from '../../../scripts/test-database-guard.mjs';
 
 const migrations = fileURLToPath(new URL('../drizzle/', import.meta.url));
 const journal = JSON.parse(await readFile(path.join(migrations, 'meta/_journal.json'), 'utf8'));
-const template = new URL(process.env.TSP_TEST_DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/team_synergy_test');
+requireTestContext();
 async function fixture(max = 49, { legacyDatabaseDefaults = false } = {}) {
-  const name = `tsp_time_${randomBytes(8).toString('hex')}`;
-  const adminUrl = new URL(template); adminUrl.pathname = '/postgres';
-  const admin = new Pool({ connectionString: adminUrl.href });
-  await admin.query(`CREATE DATABASE "${name}"`);
+  const owned = await createTestFixture('time');
+  const name = owned.databaseName;
+  const admin = new Pool({ connectionString: testAdminUrl() });
   if (legacyDatabaseDefaults) {
     await admin.query(`ALTER DATABASE "${name}" SET DateStyle = 'SQL, DMY'`);
     await admin.query(`ALTER DATABASE "${name}" SET TimeZone = 'Pacific/Auckland'`);
   }
-  const url = new URL(template); url.pathname = `/${name}`;
+  const url = new URL(owned.databaseUrl);
   const folder = await mkdtemp(path.join(tmpdir(), 'team-synergy-time-'));
   await mkdir(path.join(folder, 'meta'));
   const entries = journal.entries.filter(e => Number(e.tag.slice(0, 4)) <= max);
@@ -31,7 +31,7 @@ async function fixture(max = 49, { legacyDatabaseDefaults = false } = {}) {
   const db = await openDb({ databaseUrl: url.href, migrationsFolder: folder });
   return { db, async close() {
     await closeDb(db);
-    await admin.query(`DROP DATABASE "${name}"`); await admin.end();
+    await admin.end(); await owned.dispose();
     assert.equal(path.dirname(path.resolve(folder)), path.resolve(tmpdir()));
     assert.ok(path.basename(folder).startsWith('team-synergy-time-'));
     await rm(folder, { recursive: true, force: true });

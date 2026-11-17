@@ -22,22 +22,23 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: tsp_test_admin
+          POSTGRES_PASSWORD: ci_test_cluster_bootstrap_only_2026
           POSTGRES_DB: postgres
+          PGPORT: '55432'
+          POSTGRES_INITDB_ARGS: --auth=scram-sha-256
         ports:
-          - 5432:5432
+          - 55432:55432
         options: >-
-          --health-cmd "pg_isready -U postgres"
+          --health-cmd "pg_isready -U tsp_test_admin -p 55432"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
 
     env:
-      # 测试库连接串。库名必须是 team_synergy_test：ensureTestDatabase() 以该 URL 的库名
-      # 判断是否 CREATE DATABASE（不存在才建），绝不能指向 service 的管理库
-      # postgres，否则测试迁移+TRUNCATE 会清空管理库。
-      TSP_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/team_synergy_test
+      # Fresh service container only. The provisioner creates a non-superuser
+      # test identity and pins the cluster identifier; tests never use this admin.
+      TSP_TEST_BOOTSTRAP_PASSWORD: ci_test_cluster_bootstrap_only_2026
 
     steps:
       - uses: actions/checkout@v4
@@ -56,6 +57,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Provision isolated test PostgreSQL identity
+        run: node scripts/provision-test-postgres.mjs --ci
+
       - name: Migration policy
         run: pnpm migration:check
 
@@ -68,9 +72,12 @@ jobs:
       - name: Typecheck
         run: pnpm -r typecheck
 
+      - name: Verify database test isolation
+        run: pnpm test:db:check
+
       # 测试必须串行：多个 workspace 共享同一测试库，并行会互相清库
       - name: Test
-        run: pnpm -r --workspace-concurrency=1 test
+        run: pnpm test
 
       - name: Populated isolated integrity fixture gate
-        run: node scripts/check-orphans-ci.mjs
+        run: node scripts/run-tests.mjs -- node scripts/check-orphans-ci.mjs

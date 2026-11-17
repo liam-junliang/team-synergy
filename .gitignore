@@ -14,6 +14,7 @@ coverage/
 .env.*
 !.env.example
 *.token
+*.private.json
 
 # Local design assets (not part of the public source)
 /prototype-design/
@@ -34,6 +35,33 @@ coverage/
 /.site-artifacts/
 /prototype-ui/
 acp.sqlite*
+
+# Local experiment runs may contain sessions, model output or runtime identities.
+# Keep reusable scripts, specifications and explicitly curated fixtures in Git.
+/docs/experiments/**/*.json
+/docs/experiments/**/*.jsonl
+/docs/experiments/**/*.ndjson
+/docs/experiments/**/*.stop
+/docs/experiments/**/*.png
+/docs/experiments/memory-performance/20*/
+/docs/experiments/project-material-index/20*/
+!/docs/experiments/memory-performance/20261111-wiki-index-mechanism-controlled-a/
+!/docs/experiments/memory-performance/20261111-wiki-index-mechanism-controlled-a/verify.mjs
+/docs/experiments/memory-harness-pilot/agent-use/*-retrieval.md
+/docs/experiments/memory-harness-pilot/defect-handoff/evidence.md
+/docs/experiments/memory-harness-pilot/defect-handoff/review-protocol.md
+!/docs/experiments/code-analysis-quality/benchmark-definition.json
+!/docs/experiments/code-analysis-quality/baseline-c87aef/benchmark.json
+!/docs/experiments/code-analysis-quality/baseline-c87aef/manual-review.json
+!/docs/experiments/code-analysis-quality/baseline-c87aef/mechanical.json
+!/docs/experiments/code-analysis-quality/baseline-c87aef/scorecard.json
+!/docs/experiments/memory-harness-pilot/extraction/cases.json
+!/docs/experiments/full-project-specs-20261110/交付清单.json
+!/docs/experiments/full-project-specs-20261110/校验摘要.json
+/docs/rebuild-20261112/answer-comparison.json
+/docs/rebuild-20261112/graph-trial.json
+/docs/rebuild-20261112/source-evidence.json
+/docs/rebuild-20261112/thin-edge-followup.json
 
 # Logs and temporary files
 *.log
