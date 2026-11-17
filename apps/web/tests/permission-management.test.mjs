@@ -1,6 +1,5 @@
 import { after, afterEach, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -154,21 +153,38 @@ test('账号注销清单阻止遗漏交接，普通用户可接收所有权且�
   const { AccountClosurePanel } = await vite.ssrLoadModule('/src/AccountClosurePanel.tsx');
   const status = { pending_deletion: true, teams: [{ code: 'T', name: '待交接团队' }], projects: [{ code: 'P', name: '待交接项目', status: 'active' }], open_tasks: [{ code: 'TASK', title: '未完成任务' }], active_runs: [{ code: 'RUN', status: 'active' }] };
   const inbox = [{ code: 'TR', scope: 'project', scope_code: 'P', scope_name: '转入项目', initiated_by_code: 'O', target_user_code: api.currentPrincipalCode(), status: 'pending', expires_at: '2099-01-01' }];
-  const props = { onClose() {}, onClosed() {} };
+  const props = { onClosed() {} };
   const blocked = render(AccountClosurePanel, props, [[['account-closure'], status], [['ownership-transfers'], inbox]]);
   for (const value of ['待交接团队', '待交接项目', '未完成任务', 'RUN']) assert.match(blocked, new RegExp(value));
   assert.match(blocked, /<button[^>]*disabled=""[^>]*>确认注销账号<\/button>/);
   assert.match(blocked, /<button[^>]*disabled=""[^>]*>接受转移<\/button>/);
+  assert.match(blocked, /<details open=""/);
   const active = render(AccountClosurePanel, props, [[['account-closure'], { ...status, pending_deletion: false }], [['ownership-transfers'], inbox]]);
   assert.match(active, /<button type="button" class="[^"]*">接受转移<\/button>/);
   assert.match(active, /开始注销流程/);
+  assert.doesNotMatch(active, /<details open/);
   i18n.setLocale('en-US', false);
   const english = render(AccountClosurePanel, props, [[['account-closure'], status], [['ownership-transfers'], inbox]]);
-  assert.match(english, /My account/);
+  assert.match(english, />Ownership transfers</);
+  assert.match(english, />Account closure checklist</);
   assert.doesNotMatch(english, /注销前的交接清单|接受转移|确认注销账号/);
-  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
-  assert.match(app, /aria-label=\{t\("我的账号"\)\}/);
-  assert.match(app, /accountOpen && <AccountClosurePanel/);
+});
+
+test('头像默认收起，独立设置页按当前用户显示资料、设备、交接和折叠注销区', async () => {
+  const { AccountSettings } = await vite.ssrLoadModule('/src/AccountClosurePanel.tsx');
+  const { AccountMenu } = await vite.ssrLoadModule('/src/AccountMenu.tsx');
+  const user = { code: 'SELF', account: 'alex.account', display_name: 'Alex', is_system_admin: false };
+  const menu = render(AccountMenu, { user, currentView: 'teams', onLogout() {} });
+  assert.match(menu, /aria-label="账号菜单"[^>]+aria-haspopup="menu"[^>]+aria-expanded="false"/);
+  assert.doesNotMatch(menu, /role="menuitem"/);
+  const status = { pending_deletion: false, teams: [], projects: [], open_tasks: [], active_runs: [] };
+  const entries = [[['account-closure'], status], [['devices', 'SELF'], []]];
+  const zh = render(AccountSettings, { user, onClosed() {} }, entries);
+  for (const value of ['<main', '个人设置', '账号资料', 'Alex', 'alex.account', 'SELF', '设备与登录会话', '所有权交接', '注销账号']) assert.ok(zh.includes(value));
+  assert.doesNotMatch(zh, /role="dialog"|<details open/);
+  i18n.setLocale('en-US', false);
+  const english = render(AccountSettings, { user: { ...user, is_system_admin: true }, onClosed() {} }, entries);
+  for (const value of ['Personal settings', 'Account details', 'Alex', 'alex.account', 'SELF', 'Ownership transfers', 'Account closure']) assert.ok(english.includes(value));
 });
 
 test('成员兼容查询保持项目范围，缺少项目不会查询全局名单', async () => {
