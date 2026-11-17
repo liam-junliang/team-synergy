@@ -58,13 +58,17 @@ async function compensateLateMaterialWrite(connection: MaterialQuery, job: Index
   [job.id, job.generation, resourceRef(ref), uncertain, job.attempts]);
 }
 
+class EngineHttpError extends Error {
+  constructor(readonly status: number) { super('Engine HTTP ' + status); }
+}
+
 async function api<T>(config: EngineConfig, wiki: boolean, operation: string, body: object): Promise<T> {
   const base = wiki ? config.tencent.baseUrl : config.tencent.coreBaseUrl;
   if (!base) throw Error('Missing semantic mapping');
   const response = await fetch(base.replace(/\/+$/u, '') + (wiki ? '/wiki/' : '/conversation/') + operation, {
     method: 'POST', headers: { authorization: 'Bearer ' + config.tencent.token, 'x-tdai-service-id': config.tencent.serviceId,
       'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(12000), redirect: 'error' });
-  if (!response.ok) throw Error('Engine HTTP ' + response.status);
+  if (!response.ok) throw new EngineHttpError(response.status);
   const envelope = await response.json() as { code?: number; data?: T };
   if (envelope.code !== 0 || envelope.data === undefined || envelope.data === null) throw Error('Invalid engine envelope');
   return envelope.data;
@@ -76,12 +80,20 @@ function core(config: EngineConfig, p: Mapping, operation: string, body: object)
   return api<CoreResult>(config, false, operation, { team_id: p.teamId, user_id: p.userId, agent_id: p.semanticAgentId,
     task_id: 'tsp-wiki-' + p.wikiId, ...body });
 }
-async function owned(config: EngineConfig, project: string, p: Mapping) {
-  const detail = await wiki(config, p, 'get', {});
+async function owned(config: EngineConfig, project: string, p: Mapping, allowMissing = false) {
+  let detail: WikiResult;
+  try { detail = await wiki(config, p, 'get', {}); }
+  catch (error) {
+    // Only the authenticated Wiki GET's explicit not-found response can prove
+    // absence. Authorization, transport and envelope failures remain failures.
+    if (allowMissing && error instanceof EngineHttpError && error.status === 404) return false;
+    throw error;
+  }
   if (detail.wiki_id !== p.wikiId || detail.team_id !== p.teamId || detail.name !== 'tsp-memory-' + project) throw Error('Wiki identity mismatch');
   // A new metadata-only Wiki is draft until an ingest runs. Manual page writes
   // build their own search index; uploading a raw body just to become ready would defeat this architecture.
   if (detail.status !== 'ready' && detail.status !== 'draft') throw Error('Wiki ingestion pending');
+  return true;
 }
 
 /** Fixed, bounded directory card. Never receives the source body. */
@@ -126,6 +138,11 @@ async function coreCopy(config: EngineConfig, p: Mapping, session: string, conte
   if (rows.length !== 1) throw Error('Engine readback mismatch');
 }
 
+async function transferIndexCore(config: EngineConfig, p: Mapping, job: IndexJob, writing = (_inFlight: boolean) => {}) {
+  if (p.semanticAgentId && config.tencent.coreBaseUrl) await coreCopy(config, p, 'tsp-material-' + p.wikiId + '-' + job.code,
+    projectMaterialIndexText(job) + '\n\n[tsp-material-index ' + p.wikiId + ' ' + job.code + ']', job.operation === 'delete', writing);
+}
+
 async function transferIndex(config: EngineConfig, p: Mapping, job: IndexJob, writing = (_inFlight: boolean) => {}) {
   const text = projectMaterialIndexText(job), path = projectMaterialIndexPage(job.project, job.code);
   const page = '---\ntype: source\nlocked: true\n---\n\n# 项目资料目录：' + job.title.replace(/[\r\n]+/gu, ' ') + '\n\n' + text + '\n';
@@ -144,8 +161,7 @@ async function transferIndex(config: EngineConfig, p: Mapping, job: IndexJob, wr
     const indexed = await wiki(config, p, 'search', { query: job.code, limit: 16 });
     if (!indexed.results?.some(row => row.path.replace(/\\/gu, '/') === path)) throw Error('Wiki page not indexed');
   }
-  if (p.semanticAgentId && config.tencent.coreBaseUrl) await coreCopy(config, p, 'tsp-material-' + p.wikiId + '-' + job.code,
-    text + '\n\n[tsp-material-index ' + p.wikiId + ' ' + job.code + ']', job.operation === 'delete', writing);
+  await transferIndexCore(config, p, job, writing);
   return 'wiki:' + p.wikiId + '/' + path;
 }
 
@@ -270,8 +286,12 @@ export async function projectNextMaterialIndex(db: Db, config: EngineConfig) {
       // receipt. Verify and remove that copy before switching ownership. An
       // ambiguous old write stays pinned there until its uncertainty is resolved.
       const previous = receiptMapping(job, mapping, ref);
-      await owned(resolved.config, job.project, previous);
-      await transferIndex(resolved.config, previous, { ...job, operation: 'delete' });
+      const previousExists = await owned(resolved.config, job.project, previous, !isUncertain(ref));
+      const cleanup = { ...job, operation: 'delete' as const };
+      if (previousExists) await transferIndex(resolved.config, previous, cleanup);
+      // Core has an independent lifetime and exact task/session/content checks;
+      // a missing Wiki is never evidence that its Core copy was also removed.
+      else await transferIndexCore(resolved.config, previous, cleanup);
       if (isUncertain(ref)) {
         await update('needs_reconcile', 'uncertain_material_write');
         return { status: 'needs_reconcile', engine: 'tencent', code: 'uncertain_material_write' };

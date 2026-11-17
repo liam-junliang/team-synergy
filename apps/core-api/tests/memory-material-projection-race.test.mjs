@@ -88,7 +88,11 @@ async function fixture() {
     calls.push({ operation, body });
     const key = body.wiki_id, pageKey = ref => key + '/' + ref;
     let data;
-    if (operation === '/wiki/get') data = { wiki_id: key, team_id: 'team', name: 'tsp-memory-PROJECT', status: 'ready' };
+    if (operation === '/wiki/get' && key === 'old-wiki') {
+      if (hooks.wikiGetError) throw hooks.wikiGetError;
+      if (hooks.oldWikiStatus) return { ok: false, status: hooks.oldWikiStatus, json: async () => ({}) };
+    }
+    if (operation === '/wiki/get') data = { wiki_id: key, team_id: hooks.identityMismatchWiki === key ? 'foreign-team' : 'team', name: 'tsp-memory-PROJECT', status: 'ready' };
     else if (operation === '/wiki/page/read') { hooks.beforeRead?.(body); data = { items: body.refs.map(ref => pages.has(pageKey(ref)) ? { ref, content: pages.get(pageKey(ref)) } : { ref, not_found: true }) }; }
     else if (operation === '/wiki/page/write') {
       await hooks.beforeWrite?.(body);
@@ -265,4 +269,49 @@ test('a genuinely ambiguous Core add retains its qualifier through deletion', as
   assert.match(fx.jobs[0].externalRef, /#uncertain-material-write$/u);
   fx.retire(); assert.equal((await fx.run()).status, 'needs_reconcile');
   assert.equal(fx.pages.size, 0); assert.equal(fx.copies(), 0);
+});
+
+test('an authenticated missing old Wiki still cleans its exact Core scope and recovers the new binding', async () => {
+  const fx = await fixture(); assert.equal((await fx.run()).status, 'synced');
+  fx.hooks.oldWikiStatus = 404; fx.pages.clear(); fx.rebind(); fx.jobs[0].status = 'pending';
+  assert.equal((await fx.run()).status, 'synced');
+  assert.match(fx.jobs[0].externalRef, /^wiki:new-wiki\//u);
+  assert.equal(fx.messages.get('tsp-material-old-wiki-INDEX').length, 0);
+  assert.equal(fx.messages.get('tsp-material-new-wiki-INDEX').length, 1);
+  assert.ok(fx.calls.some(row => row.operation === '/conversation/query' && row.body.task_id === 'tsp-wiki-old-wiki' && row.body.session_id === 'tsp-material-old-wiki-INDEX'));
+  assert.equal(fx.pages.size, 1); assert.ok([...fx.pages.keys()][0].startsWith('new-wiki/'));
+});
+
+test('a missing old Wiki cannot release a genuinely uncertain old write', async () => {
+  const fx = await fixture(); fx.hooks.afterCoreAdd = () => { throw Error('Core response lost'); };
+  await fx.run(); const ref = fx.jobs[0].externalRef;
+  fx.hooks.oldWikiStatus = 404; fx.pages.clear(); fx.rebind(); fx.jobs[0].status = 'pending';
+  assert.equal((await fx.run()).status, 'needs_reconcile');
+  assert.equal(fx.jobs[0].externalRef, ref);
+  assert.equal(fx.calls.filter(row => row.operation === '/wiki/page/write' && row.body.wiki_id === 'new-wiki').length, 0);
+});
+
+test('old Wiki authorization, identity and transport failures do not authorize migration', async t => {
+  for (const failure of [401, 403, 500, 'identity', 'timeout']) await t.test(String(failure), async () => {
+    const fx = await fixture(); await fx.run(); const ref = fx.jobs[0].externalRef;
+    if (typeof failure === 'number') fx.hooks.oldWikiStatus = failure;
+    else if (failure === 'identity') fx.hooks.identityMismatchWiki = 'old-wiki';
+    else fx.hooks.wikiGetError = Error('Engine request timed out');
+    fx.rebind(); fx.jobs[0].status = 'pending';
+    assert.equal((await fx.run()).status, 'needs_reconcile');
+    assert.equal(fx.jobs[0].externalRef, ref);
+    assert.equal(fx.messages.get('tsp-material-old-wiki-INDEX').length, 1);
+    assert.equal(fx.calls.filter(row => row.operation === '/conversation/delete').length, 0);
+    assert.equal(fx.calls.filter(row => row.operation === '/wiki/page/write' && row.body.wiki_id === 'new-wiki').length, 0);
+  });
+});
+
+test('a definite missing Wiki does not permit removing unknown content from its old Core session', async () => {
+  const fx = await fixture(); await fx.run();
+  const rows = fx.messages.get('tsp-material-old-wiki-INDEX'); rows[0].content = 'Unknown Core content';
+  fx.hooks.oldWikiStatus = 404; fx.pages.clear(); fx.rebind(); fx.jobs[0].status = 'pending';
+  assert.equal((await fx.run()).code, 'remote_content_changed');
+  assert.equal(rows[0].content, 'Unknown Core content');
+  assert.equal(fx.calls.filter(row => row.operation === '/conversation/delete').length, 0);
+  assert.equal(fx.calls.filter(row => row.operation === '/wiki/page/write' && row.body.wiki_id === 'new-wiki').length, 0);
 });
