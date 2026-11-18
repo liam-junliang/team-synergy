@@ -20,7 +20,10 @@ export function registerAuthRoutes(app: FastifyInstance, db: Db): void {
     const result = await auth.loginWithPassword(account, typeof body.password === 'string' ? body.password : '',
       typeof body.device_name === 'string' ? body.device_name : 'Web browser', browser.identity, { ip: request.ip });
     if (!result.ok && result.error.code === 'slow_down') return throttled(reply, Number((result.error.details as { retry_after: number }).retry_after));
-    if (!result.ok) return unauthorized(reply);
+    if (!result.ok) {
+      if (result.error.code === 'auth_device_limit_reached') return reply.code(409).send(result);
+      return unauthorized(reply);
+    }
     const user = await getWebSessionUser(db, result.data.user_code);
     if (!user) return unauthorized(reply);
     const csrf = createWebCsrf(result.data.device_token);

@@ -1,6 +1,7 @@
 import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { hashPassword } from '@team-synergy/application';
+import { schema } from '@team-synergy/persistence';
 import { buildServer } from '../dist/server.js';
 import { openTestDb, closeTestDb, insertUser, publicCode } from './test-db.mjs';
 let app,db;
@@ -9,7 +10,7 @@ const origin='http://localhost:8080';
 afterEach(async()=>{await app?.close();if(db)await closeTestDb(db);app=db=undefined;for(const [key,value]of Object.entries(originalEnv)){if(value===undefined)delete process.env[key];else process.env[key]=value;}});
 async function fixture(initial=false){db=await openTestDb();app=await buildServer({db,logger:false});return insertUser(db,{code:publicCode(99201),account:'web.user',display_name:'Web User',is_system_admin:true,password_hash:await hashPassword('WebPassword123!'),must_change_password:initial,password_expires_at:initial?new Date(Date.now()+60000).toISOString():null,created_at:new Date().toISOString()});}
 const headers=(extra={})=>({host:'localhost:8080',origin,...extra});
-async function login(extra={}){return app.inject({method:'POST',url:'/auth/web/login',headers:headers(extra),payload:{account:'web.user',password:'WebPassword123!',device_name:'browser'}});}
+async function login(extra={},credentials={}){return app.inject({method:'POST',url:'/auth/web/login',headers:headers(extra),payload:{account:'web.user',password:'WebPassword123!',device_name:'browser',...credentials}});}
 function cookies(response){return response.headers['set-cookie'].map(value=>value.split(';')[0]).join('; ');}
 
 test('Web login exposes user/CSRF only and restores a verified HttpOnly cookie session',async()=>{
@@ -19,6 +20,38 @@ test('Web login exposes user/CSRF only and restores a verified HttpOnly cookie s
  const setCookies=response.headers['set-cookie'];assert.ok(setCookies.some(value=>value.startsWith('tsp_session=')&&value.includes('HttpOnly')&&value.includes('SameSite=Lax')));
  const restored=await app.inject({method:'GET',url:'/auth/web/session',headers:headers({cookie:cookies(response)})});assert.equal(restored.statusCode,200);assert.equal(restored.json().data.user.account,'web.user');assert.equal(restored.json().data.csrf_token,response.json().data.csrf_token);
 });
+
+test('browser device limit is disclosed only after valid credentials and allows existing installations', async () => {
+  const user = await fixture();
+  const existing = await login();
+  assert.equal(existing.statusCode, 200);
+  await db.insert(schema.devices).values(Array.from({ length: 9 }, (_, index) => ({
+    code: publicCode(99300 + index),
+    principal_id: user.id,
+    credential_hash: `test-device-${index}`,
+    created_at: new Date().toISOString(),
+  })));
+
+  const wrongPassword = await login({}, { password: 'wrong-password' });
+  const unknownAccount = await login({}, { account: 'unknown.user' });
+  assert.equal(wrongPassword.statusCode, 401);
+  assert.equal(unknownAccount.statusCode, 401);
+  assert.deepEqual(wrongPassword.json(), unknownAccount.json());
+  assert.equal(wrongPassword.json().error.code, 'unauthorized');
+
+  const newBrowser = await login();
+  assert.equal(newBrowser.statusCode, 409);
+  assert.equal(newBrowser.json().error.code, 'auth_device_limit_reached');
+  assert.equal(newBrowser.headers['set-cookie'], undefined);
+
+  const installationCookie = cookies(existing).split('; ').find(value => value.startsWith('tsp_browser='));
+  assert.ok(installationCookie);
+  const sameBrowser = await login({ cookie: installationCookie });
+  assert.equal(sameBrowser.statusCode, 200);
+  assert.equal(sameBrowser.json().data.user.account, 'web.user');
+  assert.equal((await db.select().from(schema.devices)).length, 10);
+});
+
 test('cookie mutations reject missing, forged and cross-session CSRF including public endpoints and fake Bearer fallback',async()=>{
  await fixture();const first=await login(),second=await login();assert.equal(first.statusCode,200);assert.equal(second.statusCode,200);
  const cookie=cookies(first);
@@ -57,7 +90,7 @@ test('browser installation proof is server-managed HttpOnly and remains stable a
  const browserCookie=first.headers['set-cookie'].find(value=>value.startsWith('tsp_browser='));
  assert.ok(browserCookie.includes('HttpOnly'));assert.ok(browserCookie.includes('SameSite=Lax'));
  const browserValue=browserCookie.split(';')[0].slice('tsp_browser='.length);
- const [stored]=await db.select().from((await import('@team-synergy/persistence')).schema.devices);
+ const [stored]=await db.select().from(schema.devices);
  assert.notEqual(stored.installation_id,spoofedId);assert.equal(stored.client_type,'web');assert.equal(stored.platform,'test-platform');
  const {createHash}=await import('node:crypto');
  assert.equal(stored.installation_secret_hash,createHash('sha256').update(browserValue.slice(37)).digest('hex'));
@@ -65,7 +98,7 @@ test('browser installation proof is server-managed HttpOnly and remains stable a
  const logout=await app.inject({method:'POST',url:'/auth/web/logout',headers:headers({cookie:cookies(first),'x-csrf-token':first.json().data.csrf_token})});assert.equal(logout.statusCode,200);
  assert.equal(logout.headers['set-cookie'].some(value=>value.startsWith('tsp_browser=')),false);
  const second=await login({cookie:browserCookie.split(';')[0]});assert.equal(second.statusCode,200);
- const devices=await db.select().from((await import('@team-synergy/persistence')).schema.devices);assert.equal(devices.length,1);assert.equal(devices[0].installation_secret_hash,stored.installation_secret_hash);
+ const devices=await db.select().from(schema.devices);assert.equal(devices.length,1);assert.equal(devices[0].installation_secret_hash,stored.installation_secret_hash);
 });
 test('production Host cookies reject downgraded names and duplicate cookie identities',async()=>{
  process.env.NODE_ENV='production';await fixture();const logged=await login();assert.equal(logged.statusCode,200);
