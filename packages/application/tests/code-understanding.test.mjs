@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/node-postgres';
 import { schema } from '@team-synergy/persistence';
 import { CodeArtifactSchema, validateCodeArtifact } from '@team-synergy/contracts';
 import { createCodeUnderstandingUseCases } from '../dist/index.js';
@@ -82,6 +83,27 @@ test('persistent register/progress/publish retries preserve immutable snapshots 
   const reopened = createCodeUnderstandingUseCases(f.db);
   assert.equal(ok(await reopened.detail({ ...f.command, code: done.code })).artifact_sha256, done.artifact_sha256);
   bad(await f.uc.publish({ ...f.command, code: ready.code, input: { ...publication, artifact: { ...publication.artifact, tour: [] } } }), 'code_understanding_conflict');
+});
+
+test('run metadata reads do not load published artifact JSON', async () => {
+  const f = await setup();
+  const run = await publish(f);
+  const runQueries = [];
+  const db = drizzle(f.db.$client, { schema, logger: { logQuery(query) {
+    if (query.includes('from "code_understanding_runs"')) runQueries.push(query);
+  } } });
+  const uc = createCodeUnderstandingUseCases(db);
+
+  assert.deepEqual(ok(await uc.context(f.command)).runs, [run]);
+  assert.deepEqual(ok(await uc.detail({ ...f.command, code: run.code })), run);
+  const view = await compose({ ...f, uc }, run);
+  assert.equal(view.selections[0].run_code, run.code);
+
+  assert.equal(runQueries.length, 4);
+  for (const query of runQueries) {
+    assert.ok(query.includes('"artifact_sha256"'));
+    assert.ok(!query.includes('"artifact_json"'));
+  }
 });
 
 test('run creator owns progress and publication while project collaborators retain reads and view selection', async () => {
