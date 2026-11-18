@@ -353,6 +353,8 @@ const messages: Record<string, string> = {
   "复制初始密码": "Copy initial password",
   "关闭并清除": "Close and clear",
   "登录失败：账号或密码错误，初始密码也可能已经过期。": "Sign-in failed. Check your username and password; the initial password may have expired.",
+  "登录设备已满": "You've reached your sign-in device limit",
+  "请在已登录的浏览器中进入「个人设置」的「设备与登录会话」，吊销一个不再使用的设备后再试。": "In a browser where you're already signed in, open Personal settings, then Devices & sessions. Revoke a device you no longer use and try again.",
   "登录项目工作台": "Sign in to your workspace",
   "使用用户账号和密码登录。首次登录请输入管理员提供的临时初始密码。": "Sign in with your username and password. For your first sign-in, use the temporary password provided by an administrator.",
   "用户账号": "Username",

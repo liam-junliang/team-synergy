@@ -3,6 +3,7 @@ import { useLocale } from './useLocale';
 import { t } from './i18n.ts';
 import { useState, type FormEvent } from 'react';
 import { loginWebSession, type AuthUser } from './api';
+import { ApiError } from './apiError';
 import { browserClientInfo } from './clientIdentity';
 
 export function LoginPage({ onLogin }: { onLogin: (user: AuthUser) => void }) {
@@ -10,7 +11,7 @@ export function LoginPage({ onLogin }: { onLogin: (user: AuthUser) => void }) {
   const [account, setAccount] = useState('');
   const [password, setPassword] = useState('');
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<'device-limit' | 'credentials' | null>(null);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -23,8 +24,8 @@ export function LoginPage({ onLogin }: { onLogin: (user: AuthUser) => void }) {
         device_name: browserClientInfo(navigator.userAgent).name,
       });
       onLogin(user);
-    } catch {
-      setError('登录失败：账号或密码错误，初始密码也可能已经过期。');
+    } catch (cause) {
+      setError(cause instanceof ApiError && cause.code === 'auth_device_limit_reached' ? 'device-limit' : 'credentials');
     } finally {
       setPending(false);
     }
@@ -51,7 +52,11 @@ export function LoginPage({ onLogin }: { onLogin: (user: AuthUser) => void }) {
           </label>
           <label className="block text-sm font-semibold text-slate-700">{t("密码")}<input required maxLength={128} type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={t("输入密码或初始密码")} className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100" />
           </label>
-          {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{t(error)}</p>}
+          {error === 'device-limit' && <div role="alert" className="rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700">
+            <p className="font-semibold">{t('登录设备已满')}</p>
+            <p className="mt-1">{t('请在已登录的浏览器中进入「个人设置」的「设备与登录会话」，吊销一个不再使用的设备后再试。')}</p>
+          </div>}
+          {error === 'credentials' && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{t('登录失败：账号或密码错误，初始密码也可能已经过期。')}</p>}
           <button disabled={pending} className="ui-button ui-button-primary ui-button-roomy ui-button-block">{pending ? t('正在登录…') : t('登录')}</button>
           <p className="text-center text-xs leading-5 text-slate-400">{t("没有账号或初始密码已过期？请联系系统管理员。")}</p>
         </form>
