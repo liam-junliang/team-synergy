@@ -5,3 +5,4 @@ skills/reverse-project-docs/** -text
 apps/web/public/vendor/ua-reader/** -text
 apps/web/ua-reader/** -text
 scripts/build-ua-reader.mjs -text
+packages/persistence/drizzle/*.sql -text
