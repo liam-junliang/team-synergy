@@ -49,6 +49,7 @@ import { loadSystemAgentGuidance } from './system-agent-guidance.js';
 import { createSystemAgentWorker } from './system-agent-worker.js';
 import { createCodeAnalysisRuntime } from './code-analysis-runtime.js';
 import { createCodeAnalysisWorker } from './code-analysis-worker.js';
+import { registerBackgroundDrain, registerBackgroundLoop } from './background-loop.js';
 
 export interface BuildServerOptions {
   /** Borrow an existing handle. The caller remains responsible for closing it. */
@@ -159,8 +160,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   if (ownsDb && codeAnalysisStatus().configured) {
     const worker = createCodeAnalysisWorker({ store: createHostedCodeAnalysisUseCases(db), runtime: codeAnalysisRuntime,
       onError: code => app.log.warn({ code }, 'Hosted code analysis worker event') });
-    app.addHook('onReady', async () => { worker.start(); });
-    app.addHook('onClose', async () => { await worker.stop(); });
+    registerBackgroundDrain(app, worker);
   }
 
   const systemAgentRuntime = createSystemAgentRuntime();
@@ -182,8 +182,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
         skill_version: systemAgentGuidance.version, skill_sha256: systemAgentGuidance.sha256 },
       onError: code => app.log.warn({ code }, 'System Agent worker event'),
     });
-    app.addHook('onReady', async () => { worker.start(); });
-    app.addHook('onClose', async () => { await worker.stop(); });
+    registerBackgroundDrain(app, worker);
   }
 
   // 统一错误状态码映射：业务拒绝（ok:false）不再一律 HTTP 200。
@@ -230,45 +229,28 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   // Native materials are automatically catalogued even without capture or an
   // engine configuration. Absence/pause/failures remain explicit status.
   if (ownsDb) {
-    let maintenance: Promise<unknown> | undefined;
-    let indexTimer: ReturnType<typeof setInterval>;
-    app.addHook('onReady', async () => {
-      indexTimer = setInterval(() => {
-        if (!maintenance) maintenance = maintainProjectMaterialIndexes(db, memoryEngines)
-          .catch(() => app.log.warn('Project material index maintenance unavailable'))
-          .finally(() => { maintenance = undefined; });
-      }, 3000);
-      indexTimer.unref();
+    registerBackgroundLoop(app, {
+      intervalMs: 3000,
+      run: () => maintainProjectMaterialIndexes(db, memoryEngines),
+      onError: () => app.log.warn('Project material index maintenance unavailable'),
     });
-    app.addHook('onClose', async () => { clearInterval(indexTimer); await maintenance; });
   }
   if (memoryEnabled) {
     registerMemoryRoutes(app, db, memoryEngines);
     registerPersonalMemoryRoutes(app, db);
     if (ownsDb) {
-      let capture: Promise<unknown> | undefined;
-      let captureTimer: ReturnType<typeof setInterval>;
-      app.addHook('onReady', async () => {
-        captureTimer = setInterval(() => {
-          if (!capture) capture = processNextMemoryCapture(db).catch(() => app.log.warn('Memory capture worker unavailable'))
-            .finally(() => { capture = undefined; });
-        }, 500);
-        captureTimer.unref();
+      registerBackgroundLoop(app, {
+        intervalMs: 500,
+        run: () => processNextMemoryCapture(db),
+        onError: () => app.log.warn('Memory capture worker unavailable'),
       });
-      app.addHook('onClose', async () => { clearInterval(captureTimer); await capture; });
     }
     if (memoryEngines && ownsDb) {
-      let running: Promise<unknown> | undefined;
-      let timer: ReturnType<typeof setInterval>;
-      app.addHook('onReady', async () => {
-        timer = setInterval(() => {
-          if (!running) running = projectNextMemory(db, memoryEngines)
-            .catch(() => app.log.warn('Memory projection worker unavailable'))
-            .finally(() => { running = undefined; });
-        }, 1000);
-        timer.unref();
+      registerBackgroundLoop(app, {
+        intervalMs: 1000,
+        run: () => projectNextMemory(db, memoryEngines),
+        onError: () => app.log.warn('Memory projection worker unavailable'),
       });
-      app.addHook('onClose', async () => { clearInterval(timer); await running; });
     }
   }
   registerRequirementBaselineRoutes(app, db);

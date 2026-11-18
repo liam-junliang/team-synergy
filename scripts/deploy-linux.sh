@@ -94,8 +94,16 @@ for image in "$api_image" "$web_image"; do
   [[ $actual == "$revision" ]] || { echo 'Image revision mismatch' >&2; exit 4; }
 done
 docker run --rm --network none "$pg_image" postgres --version | grep -Eq '\(PostgreSQL\) 16\.'
-stage=stop; stopped=1
-compose stop --timeout 30 api web >>"$log" 2>&1
+stage=stop
+api_containers=$(compose ps --all --quiet api)
+stopped=1
+compose stop --timeout 90 api web >>"$log" 2>&1
+stage=drain-check
+for container in $api_containers; do
+  [[ $container =~ ^[0-9a-f]{12,64}$ ]] || { echo 'Invalid previous API container identity' >&2; exit 7; }
+  state=$(docker inspect --format '{{.State.Status}} {{.State.Running}} {{.State.ExitCode}} {{.State.OOMKilled}}' "$container")
+  [[ $state == 'exited false 0 false' ]] || { echo 'Previous API did not drain successfully; refusing backup and migration.' >&2; exit 7; }
+done
 stage=database
 compose up -d --wait --wait-timeout 120 db >>"$log" 2>&1
 stage=backup

@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import Fastify from 'fastify';
 import { installShutdown, startupFailure } from '../dist/lifecycle.js';
 import { buildServer } from '../dist/server.js';
@@ -30,11 +31,55 @@ test('SIGTERM drains an in-flight request and closes once', async () => {
     await started;
     process.emit('SIGTERM');
     process.emit('SIGINT');
+    process.emit('SIGTERM');
     release();
     assert.deepEqual(await (await response).json(), { done: true });
     await app.close();
     assert.equal(closes, 1);
   } finally { remove(); await app.close(); }
+});
+
+test('a timed-out or failed drain exits nonzero without claiming a completed job', () => {
+  const lifecycle = new URL('../dist/lifecycle.js', import.meta.url).href;
+  for (const mode of ['timeout', 'failure']) {
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { mock } from 'node:test';
+      import { installShutdown, API_SHUTDOWN_TIMEOUT_MS } from ${JSON.stringify(lifecycle)};
+      mock.timers.enable({apis:['setTimeout']});
+      let completed = false;
+      const pending = ${mode === 'timeout' ? 'new Promise(() => {})' : "Promise.reject(new Error('secret connection details'))"};
+      installShutdown({close:()=>pending.then(()=>{completed=true;})});
+      process.emit('SIGTERM');
+      ${mode === 'timeout' ? 'mock.timers.tick(API_SHUTDOWN_TIMEOUT_MS);' : 'await new Promise(resolve=>setImmediate(resolve));'}
+      if (completed) process.stdout.write('completed');
+    `], { encoding: 'utf8', timeout: 5000, windowsHide: true });
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, mode === 'timeout' ? /shutdown timed out/ : /shutdown failed/);
+    assert.doesNotMatch(result.stderr, /secret connection details/);
+  }
+});
+
+test('shutdown allows the full 45 second model window instead of forcing exit at 30 seconds', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const exits = [];
+  t.mock.method(process, 'exit', code => { exits.push(code); });
+  let release;
+  const close = new Promise(resolve => { release = resolve; });
+  let closes = 0;
+  const remove = installShutdown({ close: () => { closes++; return close; } });
+  try {
+    process.emit('SIGTERM');
+    process.emit('SIGINT');
+    t.mock.timers.tick(45_000);
+    assert.deepEqual(exits, [], 'an in-flight model request must have its own timeout window');
+    assert.equal(closes, 1);
+    release();
+    await close;
+    await Promise.resolve();
+    t.mock.timers.tick(90_000);
+    assert.deepEqual(exits, [], 'successful drain must clear its deadline');
+  } finally { release(); remove(); }
 });
 
 test('readiness validates migration head and fails independently of liveness', async () => {
