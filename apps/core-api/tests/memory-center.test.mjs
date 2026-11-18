@@ -30,7 +30,7 @@ async function fixture(db) {
   }
   const app = await buildServer({ db, logger: false });
   const get = (user, query = '') => app.inject({ method: 'GET', url: '/account/memory-center' + query, ...(user ? { headers: headers.get(user.code) } : {}) });
-  return { q, owner, member, outsider, projects, document, app, get };
+  return { q, owner, member, outsider, projects, document, app, get, headers };
 }
 function data(response) { assert.equal(response.statusCode, 200, response.body); assert.equal(response.headers['cache-control'], 'no-store'); return response.json().data; }
 
@@ -101,6 +101,41 @@ test('center preserves personal edit/withdraw ownership and reads current materi
       center = data(await f.get(f.owner)); assert.equal(center.personal.active, 0); assert.equal(center.personal.withdrawn, 1); assert.equal(center.personal.total, 1);
     } finally { await f.app.close(); }
   }));
+
+test('the owner can read personal memory while capture is disabled', { skip: !database }, async t => {
+  const previous = process.env.TSP_MEMORY_ENABLED;
+  process.env.TSP_MEMORY_ENABLED = '0';
+  t.after(() => {
+    if (previous === undefined) delete process.env.TSP_MEMORY_ENABLED;
+    else process.env.TSP_MEMORY_ENABLED = previous;
+  });
+
+  await withIntegrityFixture(database, 'memorycenterpaused', async db => {
+    const f = await fixture(db);
+    try {
+      const projectCode = f.projects[0].code;
+      const text = '我习惯先核对来源再修改。';
+      await createMemorySliceUseCases(db).capture({
+        principalCode: f.owner.code, projectCode, sessionId: 'paused-fixture', eventId: 'preference',
+        sourceText: text, parts: [{ kind: 'preference', text }],
+      });
+      assert.equal(data(await f.get(f.owner)).serviceEnabled, false);
+
+      const read = (url, user) => f.app.inject({ method: 'GET', url, headers: user && f.headers.get(user.code) });
+      const listUrl = '/memory/personal?status=all';
+      const list = data(await read(listUrl, f.owner));
+      assert.equal(list.items.length, 1);
+      assert.equal(list.items[0].text, text);
+      const detailUrl = '/memory/personal/' + list.items[0].source;
+      assert.equal(data(await read(detailUrl, f.owner)).text, text);
+
+      assert.equal((await read(listUrl)).statusCode, 401);
+      assert.equal((await read(detailUrl)).statusCode, 401);
+      assert.deepEqual(data(await read(listUrl, f.member)).items, []);
+      assert.equal((await read(detailUrl, f.member)).statusCode, 404);
+    } finally { await f.app.close(); }
+  });
+});
 
 test('public model settings reveal current explicit/default configuration but never keys or endpoints; injected probes are not service calls', async t => {
   const names = ['TSP_MEMORY_PROVIDER', 'TSP_MEMORY_MODEL', 'TSP_MEMORY_BASE_URL', 'TSP_MEMORY_API_KEY'];

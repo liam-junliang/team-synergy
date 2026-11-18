@@ -226,6 +226,8 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   registerRequirementRoutes(app, db);
   registerMemoryManagementRoutes(app, db, memoryEngines);
   registerMemoryCenterRoutes(app, db, memoryEngines);
+  // The owner can manage durable personal records while capture is paused.
+  registerPersonalMemoryRoutes(app, db);
   // Native materials are automatically catalogued even without capture or an
   // engine configuration. Absence/pause/failures remain explicit status.
   if (ownsDb) {
@@ -237,7 +239,6 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   }
   if (memoryEnabled) {
     registerMemoryRoutes(app, db, memoryEngines);
-    registerPersonalMemoryRoutes(app, db);
     if (ownsDb) {
       registerBackgroundLoop(app, {
         intervalMs: 500,
