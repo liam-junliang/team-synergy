@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { beginAccountClosure, cancelAccountClosure, closureStatus, completeAccountClosure, currentPrincipalCode, listOwnershipTransfers, respondOwnershipTransfer, type AuthUser } from './api';
+import { beginAccountClosure, cancelAccountClosure, closureStatus, completeAccountClosure, currentPrincipalCode, getProject, listMembers, listOwnershipTransfers, respondOwnershipTransfer, type AuthUser } from './api';
 import { DeviceManagement } from './DeviceManagement';
+import { OwnershipTransferPanel } from './OwnershipTransferPanel';
+import { WorkspaceDialog } from './WorkspaceDialog';
 import { formatDate, t } from './i18n';
 import { useLocale } from './useLocale';
 import { projectWorkspacePath } from './workspaceRouting';
@@ -28,6 +30,7 @@ export function AccountClosurePanel({ onClosed }: { onClosed: () => void }) {
   useLocale();
   const client = useQueryClient();
   const [confirmed, setConfirmed] = useState(false);
+  const [archivedHandoff, setArchivedHandoff] = useState<string | null>(null);
   const status = useQuery({ queryKey: ['account-closure'], queryFn: closureStatus });
   const transfers = useQuery({ queryKey: ['ownership-transfers'], queryFn: listOwnershipTransfers });
   const me = currentPrincipalCode();
@@ -74,7 +77,12 @@ export function AccountClosurePanel({ onClosed }: { onClosed: () => void }) {
           <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
             <p className="text-sm font-semibold">{t('负责的团队和项目：{count}', { count: data.teams.length + data.projects.length })}</p>
             {data.teams.map(team => <div key={team.code} className="flex items-center justify-between gap-3 text-sm"><span>{team.name}</span><a href="/teams" className="text-cyan-700 underline">{t('前往团队管理')}</a></div>)}
-            {data.projects.map(project => <div key={project.code} className="flex items-center justify-between gap-3 text-sm"><span>{project.name}{project.status === 'archived' ? ` · ${t('已归档')}` : ''}</span><a href={projectWorkspacePath(project.code)} className="text-cyan-700 underline">{t('前往成员与权限')}</a></div>)}
+            {data.projects.map(project => <div key={project.code} className="flex items-center justify-between gap-3 text-sm">
+              <span>{project.name}{project.status === 'archived' ? ` · ${t('已归档')}` : ''}</span>
+              {project.status === 'archived'
+                ? <button type="button" className="text-cyan-700 underline" onClick={() => setArchivedHandoff(project.code)}>{t('所有权交接')}</button>
+                : <a href={projectWorkspacePath(project.code)} className="text-cyan-700 underline">{t('前往成员与权限')}</a>}
+            </div>)}
             <p className="text-sm font-semibold">{t('未完成任务：{count}', { count: data.open_tasks.length })}</p>
             {data.open_tasks.map(task => <p key={task.code} className="break-all text-xs text-slate-600">{task.title} · {task.code}</p>)}
             <p className="text-sm font-semibold">{t('活动运行：{count}', { count: data.active_runs.length })}</p>
@@ -89,5 +97,25 @@ export function AccountClosurePanel({ onClosed }: { onClosed: () => void }) {
         {closure.error && <p role="alert" className="text-sm text-rose-700">{closure.error.message}</p>}
         </div>
       </details>
+      {archivedHandoff && <ArchivedOwnershipDialog key={archivedHandoff} projectCode={archivedHandoff} onClose={() => setArchivedHandoff(null)} />}
   </>;
+}
+
+function ArchivedOwnershipDialog({ projectCode, onClose }: { projectCode: string; onClose: () => void }) {
+  const project = useQuery({ queryKey: ['project', projectCode], queryFn: () => getProject(projectCode) });
+  const members = useQuery({
+    queryKey: ['project-members', projectCode],
+    queryFn: () => listMembers(projectCode),
+    enabled: project.data?.role === 'owner',
+  });
+  const details = project.data;
+  const error = project.error ?? members.error;
+  return <WorkspaceDialog id="archived-ownership" title={t('所有权交接')} description={details?.name ?? t('项目')} onClose={onClose}>
+    {error ? <p role="alert" className="text-sm text-rose-700">{error.message}</p>
+      : project.isPending || (details?.role === 'owner' && members.isPending) ? <p className="ui-help">{t('加载中…')}</p>
+      : details?.role === 'owner' && members.data && <OwnershipTransferPanel
+        scope="project" scopeCode={projectCode} teamCode={details.team_code}
+        ownerCode={details.owner_code} createdByCode={details.created_by_code}
+        pending={details.ownership_pending} mayTransfer actorRole={details.role} members={members.data} />}
+  </WorkspaceDialog>;
 }

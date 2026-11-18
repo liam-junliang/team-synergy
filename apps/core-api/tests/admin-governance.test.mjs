@@ -97,6 +97,69 @@ test('governance search and pagination preserve filters and count effective inhe
   }
 });
 
+test('archived projects leave daily discovery and ordering until restored in system administration', async () => {
+  const f = await fixture();
+  const active = await insertProject(f.db, { team_id: f.team.id, owner_principal_id: f.users.owner.id,
+    name: 'Active collaboration', member_policy: 'team_read', created_at: createdAt });
+  await insertProjectMember(f.db, { project_id: f.project.id, principal_id: f.users.member.id,
+    role: 'member', display_name: 'member', created_at: createdAt });
+  const owner = f.users.owner.headers;
+  const member = f.users.member.headers;
+  const system = f.users.system.headers;
+  const statusUrl = `/projects/${f.project.code}/status`;
+  const adminUrl = `/admin/projects/${f.project.code}`;
+  const listUrl = `/projects?team_code=${f.team.code}`;
+  const teamGovernanceUrl = `/teams/${f.team.code}/projects-governance`;
+  const feature = await insertFeature(f.db, { project_id: f.project.id, title: 'Historical feature' });
+  await f.db.insert(schema.requirements).values({
+    feature_id: feature.id, title: 'Historical requirement', owner_principal_id: f.users.owner.id,
+  });
+  await f.db.insert(schema.defects).values({
+    feature_id: feature.id, title: 'Historical defect', severity: 'low', description: 'Historical evidence', reported_by: f.users.owner.id,
+  });
+
+  const archived = await f.app.inject({ method: 'PATCH', url: statusUrl, headers: owner, payload: { status: 'archived' } });
+  assert.equal(archived.statusCode, 200, archived.body);
+  for (const headers of [owner, member]) {
+    for (const url of ['/projects', listUrl]) {
+      const result = await f.app.inject({ method: 'GET', url, headers });
+      assert.equal(result.statusCode, 200, result.body);
+      assert.deepEqual(result.json().data.map(project => project.project_code), [active.code]);
+    }
+    const teams = await f.app.inject({ method: 'GET', url: '/teams', headers });
+    assert.equal(teams.json().data.find(team => team.team_code === f.team.code)?.projects_count, 1);
+  }
+  const teamGovernance = await f.app.inject({ method: 'GET', url: teamGovernanceUrl, headers: owner });
+  assert.deepEqual(teamGovernance.json().data.map(project => project.project_code), [active.code]);
+  const staleOrder = await f.app.inject({ method: 'PUT', url: '/projects/order', headers: owner,
+    payload: { team_code: f.team.code, project_codes: [f.project.code, active.code] } });
+  assert.equal(staleOrder.json().error.code, 'project_order_invalid');
+  const order = await f.app.inject({ method: 'PUT', url: '/projects/order', headers: owner,
+    payload: { team_code: f.team.code, project_codes: [active.code] } });
+  assert.equal(order.statusCode, 200, order.body);
+  const historical = await f.app.inject({ method: 'GET', url: `/projects/${f.project.code}`, headers: member });
+  assert.equal(historical.statusCode, 200, historical.body);
+  assert.equal(historical.json().data.status, 'archived');
+  assert.equal(historical.json().data.capabilities.write, false);
+  for (const endpoint of ['/requirements', '/defects']) {
+    const defaultList = await f.app.inject({ method: 'GET', url: endpoint, headers: member });
+    assert.deepEqual(defaultList.json().data, []);
+    const scopedList = await f.app.inject({ method: 'GET', url: `${endpoint}?project_code=${f.project.code}`, headers: member });
+    assert.equal(scopedList.json().data.length, 1);
+  }
+
+  const archivedProjects = await f.app.inject({ method: 'GET', url: '/admin/projects?status=archived', headers: system });
+  assert.deepEqual(archivedProjects.json().data.items.map(project => project.project_code), [f.project.code]);
+  const restore = { status: 'active', reason: 'Reopen this project', base_snapshot: archived.json().data.current_snapshot };
+  const ownerDenied = await f.app.inject({ method: 'PATCH', url: adminUrl, headers: owner, payload: restore });
+  assert.equal(ownerDenied.statusCode, 403, ownerDenied.body);
+  const restored = await f.app.inject({ method: 'PATCH', url: adminUrl, headers: system, payload: restore });
+  assert.equal(restored.statusCode, 200, restored.body);
+  assert.equal(restored.json().data.status, 'active');
+  const rediscovered = await f.app.inject({ method: 'GET', url: listUrl, headers: member });
+  assert.deepEqual(rediscovered.json().data.map(project => project.project_code).sort(), [active.code, f.project.code].sort());
+});
+
 test('metadata edits require reason, audit old/new values and preserve owners and membership', async () => {
   const f = await fixture();
   const headers = f.users.system.headers;

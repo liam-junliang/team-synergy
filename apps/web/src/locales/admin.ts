@@ -52,6 +52,6 @@ export default {
   '管理项目': 'Manage project',
   '编辑团队': 'Edit team',
   '管理操作会记录审计日志，请说明调整原因。': 'Administrative changes are audited. Include the reason for this change.',
-  '归档后项目进入只读状态；恢复后成员可继续操作。': 'Archived projects become read-only. Restoring a project lets members resume work.',
+  '归档项目仅在系统管理中显示。恢复后，成员可再次打开项目工作区。': 'Archived projects appear in Administration. Restoring a project lets members open its workspace again.',
   '调整原因': 'Reason for change',
 } satisfies Record<string, string>;

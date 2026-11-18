@@ -102,13 +102,21 @@ for (const operation of ['assign', 'claim']) {
       const result = await taskWrite;
       assert.equal(result.ok, true, JSON.stringify(result));
       const archived = await archive;
-      assert.equal(archived.ok, true, JSON.stringify(archived));
-      assert.equal(archived.data.status, 'archived');
       const [after] = await ctx.db.select().from(schema.tasks).where(eq(schema.tasks.id, ctx.task.id));
-      assert.equal(after.status, operation === 'claim' ? 'running' : 'assigned');
-      const denied = await claim(ctx, ctx.users.member, { baseSnapshot: after.base_snapshot });
-      assert.equal(denied.ok, false);
-      assert.equal(denied.error.code, 'project_archived');
+      if (operation === 'claim') {
+        assert.equal(after.status, 'running');
+        assert.equal(archived.ok, false);
+        assert.equal(archived.error.code, 'project_has_active_runs');
+        const [project] = await ctx.db.select().from(schema.projects).where(eq(schema.projects.id, ctx.project.id));
+        assert.equal(project.status, 'active');
+      } else {
+        assert.equal(after.status, 'assigned');
+        assert.equal(archived.ok, true, JSON.stringify(archived));
+        assert.equal(archived.data.status, 'archived');
+        const denied = await claim(ctx, ctx.users.member, { baseSnapshot: after.base_snapshot });
+        assert.equal(denied.ok, false);
+        assert.equal(denied.error.code, 'project_archived');
+      }
     } finally {
       // Release the database barrier even if an assertion fails, before waiting
       // for service transactions; this prevents leaking blocked pool clients.
@@ -198,6 +206,9 @@ test('inherited execution loses write rights immediately after team membership i
 test('archived projects retain task reads but reject task, feature and defect writes', async () => {
   const ctx = await setup();
   await ctx.db.update(schema.projects).set({ status: 'archived' }).where(eq(schema.projects.id, ctx.project.id));
+  assert.deepEqual(await ctx.tasks.listTasks({ principalCode: ctx.users.viewer.code }), []);
+  const history = await ctx.tasks.listTasks({ principalCode: ctx.users.viewer.code, projectCode: ctx.project.code });
+  assert.deepEqual(history.map(task => task.task_code), [ctx.task.code]);
   assert.equal((await ctx.tasks.getTaskStatus(ctx.task.code, ctx.users.viewer.code)).ok, true);
   assert.equal((await ctx.projects.createFeature({ projectCode: ctx.project.code, principalCode: ctx.users.admin.code, title: 'Blocked' })).error.code, 'project_archived');
   assert.equal((await ctx.tasks.assignTask({ taskCode: ctx.task.code, principalCode: ctx.users.admin.code, assigneePrincipalCode: ctx.users.member.code, baseSnapshot: 0 })).error.code, 'project_archived');

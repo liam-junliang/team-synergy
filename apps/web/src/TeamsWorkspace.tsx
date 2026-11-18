@@ -84,7 +84,7 @@ export function TeamsWorkspace() {
     queryKey: projectsQueryKey,
     queryFn: () => listProjects(),
   });
-  const allProjects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data]);
+  const allProjects = useMemo(() => (projectsQuery.data ?? []).filter(project => project.status === 'active'), [projectsQuery.data]);
   const externalProjects = allProjects.filter((project) => isExternalProject(project, teams, teamsQuery.isSuccess) === true);
   const externalIdentityUnknown = allProjects.some((project) => isExternalProject(project, teams, teamsQuery.isSuccess) === undefined);
   const projects = scope.kind === 'team' ? allProjects.filter((project) => project.team_code === scope.teamCode)
@@ -145,13 +145,17 @@ export function TeamsWorkspace() {
     },
   });
   const updateProjectStatusMutation = useMutation({
-    mutationFn: ({ projectCode, status }: { projectCode: string; status: 'active' | 'archived' }) => updateProjectStatus(projectCode, status),
+    mutationFn: (projectCode: string) => updateProjectStatus(projectCode, 'archived'),
     onSuccess: (project) => {
       setEditingProject(null);
       setProjectName('');
       setProjectDescription('');
+      queryClient.setQueriesData<ProjectSummary[]>({ queryKey: ['projects'] }, (previous) => previous?.filter(item => item.code !== project.code));
+      queryClient.setQueryData(['project', project.code], project);
+      void queryClient.invalidateQueries({ queryKey: ['teams'] });
       void queryClient.invalidateQueries({ queryKey: ['projects'] });
       void queryClient.invalidateQueries({ queryKey: ['project', project.code] });
+      void queryClient.invalidateQueries({ queryKey: ['team-projects-governance'] });
     },
   });
   const saveRepositoryMutation = useMutation({
@@ -292,11 +296,10 @@ export function TeamsWorkspace() {
     setProjectDescription('');
   }
 
-  function changeProjectStatus(project: ProjectSummary) {
-    if (!canProject(project, 'archive')) return;
-    const status = project.status === 'active' ? 'archived' : 'active';
-    if (status === 'archived' && !window.confirm(t("确认归档项目「{p0}」？\n项目数据不会删除，之后可以随时恢复。", { p0: project.name }))) return;
-    updateProjectStatusMutation.mutate({ projectCode: project.code, status });
+  function archiveProject(project: ProjectSummary) {
+    if (project.status !== 'active' || !canProject(project, 'archive')) return;
+    if (!window.confirm(t("确认归档项目「{p0}」？\n归档后仅系统管理员可以恢复项目。", { p0: project.name }))) return;
+    updateProjectStatusMutation.mutate(project.code);
   }
 
   function openRepositoryManagement(project: ProjectSummary) {
@@ -462,10 +465,10 @@ export function TeamsWorkspace() {
                     onDragEnter={() => setProjectDropTargetCode(project.code)}
                     onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; }}
                     onDrop={(event) => dropProject(event, project.code)}
-                    className={`group relative rounded-xl border transition hover:-translate-y-0.5 hover:shadow-md ${project.status === 'archived' ? 'border-slate-200 bg-slate-50/80 hover:border-slate-300' : 'border-slate-200 hover:border-cyan-300'} ${draggingProjectCode === project.code ? 'opacity-45' : ''} ${draggingProjectCode && projectDropTargetCode === project.code ? 'ring-2 ring-cyan-300 ring-offset-2' : ''}`}
+                    className={`group relative rounded-xl border border-slate-200 transition hover:-translate-y-0.5 hover:border-cyan-300 hover:shadow-md ${draggingProjectCode === project.code ? 'opacity-45' : ''} ${draggingProjectCode && projectDropTargetCode === project.code ? 'ring-2 ring-cyan-300 ring-offset-2' : ''}`}
                   >
                     <a href={projectWorkspacePath(project.code)} className="block rounded-xl p-4 pr-12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2">
-                      <div className="flex flex-wrap items-center gap-2"><h3 className={`break-words font-bold ${project.status === 'archived' ? 'text-slate-600' : 'text-slate-800 group-hover:text-cyan-800'}`}>{project.name}</h3>{project.status === 'archived' && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-600">{t("已归档")}</span>}{isExternalProject(project, teams, teamsQuery.isSuccess) === true && <span className="rounded-md bg-cyan-50 px-2 py-0.5 text-xs font-medium text-cyan-800">{t('外部协作')}</span>}</div>
+                      <div className="flex flex-wrap items-center gap-2"><h3 className="break-words font-bold text-slate-800 group-hover:text-cyan-800">{project.name}</h3>{isExternalProject(project, teams, teamsQuery.isSuccess) === true && <span className="rounded-md bg-cyan-50 px-2 py-0.5 text-xs font-medium text-cyan-800">{t('外部协作')}</span>}</div>
                       <p className="mt-2 break-words text-xs text-slate-500">{t('所属团队：{name}', { name: projectTeamName(project, teams) })}</p>
                       <code className="mt-2 block text-xs text-slate-400">{project.code}</code>
                       <p className="mt-3 line-clamp-2 min-h-10 text-xs leading-5 text-slate-500">{project.description || t("暂无项目简介")}</p>
@@ -535,7 +538,7 @@ export function TeamsWorkspace() {
           {updateProjectMutation.error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{updateProjectMutation.error.message}</p>}
           {updateProjectStatusMutation.error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{updateProjectStatusMutation.error.message}</p>}
           <div className="flex items-center justify-between gap-3 pt-2">
-            {canProject(editingProject, 'archive') && <button type="button" onClick={() => changeProjectStatus(editingProject)} disabled={updateProjectStatusMutation.isPending} className={`ui-button ${editingProject.status === 'active' ? 'ui-button-danger' : 'ui-button-success'}`}>{updateProjectStatusMutation.isPending ? t("处理中…") : editingProject.status === 'active' ? t("归档项目") : t("恢复项目")}</button>}
+            {editingProject.status === 'active' && canProject(editingProject, 'archive') && <button type="button" onClick={() => archiveProject(editingProject)} disabled={updateProjectStatusMutation.isPending} className="ui-button ui-button-danger">{updateProjectStatusMutation.isPending ? t("处理中…") : t("归档项目")}</button>}
             <div className="flex justify-end gap-2">
               <button type="button" onClick={closeProjectEdit} className="ui-button ui-button-secondary">{t("取消")}</button>
               <button disabled={!canProject(editingProject, 'manage') || updateProjectMutation.isPending || updateProjectStatusMutation.isPending || !projectName.trim() || (projectName.trim() === editingProject.name && (projectDescription.trim() || null) === editingProject.description)} className="ui-button ui-button-strong">{updateProjectMutation.isPending ? t("保存中…") : t("保存修改")}</button>
@@ -737,14 +740,15 @@ function TeamMemberRemovalDialog({ teamCode, member, pending, error, onClose, on
 
 export function TeamProjectsGovernance({ teamCode }: { teamCode: string }) {
   const projects = useQuery({ queryKey: ['team-projects-governance', teamCode], queryFn: () => listTeamProjectGovernance(teamCode) });
+  const activeProjects = (projects.data ?? []).filter(project => project.status === 'active');
   return <section className="space-y-3 rounded-xl border border-slate-200 p-4">
     <h3 className="text-sm font-bold text-slate-900">{t('团队项目归属')}</h3>
     <p className="ui-help">{t('团队管理权限可以查看项目归属；打开项目仍需相应的项目权限。')}</p>
     {projects.isPending && <p className="ui-help">{t('加载中…')}</p>}
     {projects.error && <p role="alert" className="text-xs text-rose-700">{projects.error.message}</p>}
-    {projects.isSuccess && projects.data.length === 0 && <p className="ui-help">{t('此团队暂无项目。')}</p>}
-    <ul className="max-h-64 divide-y divide-slate-100 overflow-y-auto">{(projects.data ?? []).map(project => <li key={project.project_code} className="flex items-center justify-between gap-3 py-3">
-      <div className="min-w-0"><p className="break-words text-sm font-semibold text-slate-800">{project.name}{project.status === 'archived' && <span className="ml-2 text-xs font-normal text-slate-500">{t('已归档')}</span>}</p><p className="ui-help mt-1">{t('项目负责人：{name}', { name: project.owner_name || project.owner_user_code || t('待确认唯一负责人') })}</p></div>
+    {projects.isSuccess && activeProjects.length === 0 && <p className="ui-help">{t('此团队暂无项目。')}</p>}
+    <ul className="max-h-64 divide-y divide-slate-100 overflow-y-auto">{activeProjects.map(project => <li key={project.project_code} className="flex items-center justify-between gap-3 py-3">
+      <div className="min-w-0"><p className="break-words text-sm font-semibold text-slate-800">{project.name}</p><p className="ui-help mt-1">{t('项目负责人：{name}', { name: project.owner_name || project.owner_user_code || t('待确认唯一负责人') })}</p></div>
       {project.can_access ? <a href={projectWorkspacePath(project.project_code)} className="ui-button ui-button-secondary ui-button-compact shrink-0">{t('打开项目')}</a> : <span className="shrink-0 text-xs text-slate-500">{t('未获项目访问权限')}</span>}
     </li>)}</ul>
   </section>;

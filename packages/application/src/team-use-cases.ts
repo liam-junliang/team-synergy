@@ -101,7 +101,7 @@ export function createTeamUseCases(db: Db) {
       const role = await resolveTeamRole(db, team.id, principal.id);
       const [memberCounts, projects, owner, creator] = await Promise.all([
         db.select({ value: count() }).from(schema.teamMembers).where(eq(schema.teamMembers.team_id, team.id)),
-        db.select({ id: schema.projects.id }).from(schema.projects).where(eq(schema.projects.team_id, team.id)),
+        db.select({ id: schema.projects.id }).from(schema.projects).where(and(eq(schema.projects.team_id, team.id), eq(schema.projects.status, 'active'))),
         team.owner_principal_id ? db.select({ code: schema.users.code }).from(schema.users).where(eq(schema.users.id, team.owner_principal_id)) : Promise.resolve([]),
         team.created_by ? db.select({ code: schema.users.code }).from(schema.users).where(eq(schema.users.id, team.created_by)) : Promise.resolve([]),
       ]);
@@ -253,7 +253,9 @@ export function createTeamUseCases(db: Db) {
       if (!team) throw new DomainError('team_not_found', '团队不存在');
       if (!actor) throw new DomainError('user_not_found', '有效用户不存在');
       assertCanManage(await resolveTeamRole(db, team.id, actor.id));
-      const projects = await db.select().from(schema.projects).where(eq(schema.projects.team_id, team.id)).orderBy(asc(schema.projects.created_at), asc(schema.projects.code));
+      const projects = await db.select().from(schema.projects)
+        .where(and(eq(schema.projects.team_id, team.id), eq(schema.projects.status, 'active')))
+        .orderBy(asc(schema.projects.created_at), asc(schema.projects.code));
       const ownerIds = projects.map(project => project.owner_principal_id).filter((id): id is bigint => id !== null);
       const owners = ownerIds.length ? await db.select().from(schema.users).where(inArray(schema.users.id, ownerIds)) : [];
       const ownerById = new Map(owners.map(owner => [owner.id, owner]));

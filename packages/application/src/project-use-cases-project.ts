@@ -10,6 +10,7 @@ import { ensureProjectSystemFolders } from './project-document-folders.js';
 import { assertProjectAccess, effectiveProjectMember, isProjectManager, projectCapabilities, resolveProjectAccess, resolveTeamRole } from './project-access.js';
 import { createMemberUseCases } from './member-use-cases.js';
 import { enqueueProjectDocumentMemory } from './project-document-memory.js';
+import { assertNoProjectArchiveRuns } from './project-archive.js';
 
 async function usersByIds(db: Db, ids: bigint[]) {
   if (ids.length === 0) return new Map<bigint, typeof schema.users.$inferSelect>();
@@ -150,6 +151,7 @@ export function createProjectUseCasesProject(db: Db) {
     const teamIds = (await db.select({ id: schema.teamMembers.team_id }).from(schema.teamMembers).where(eq(schema.teamMembers.principal_id, principal.id))).map(row => row.id);
     const explicitIds = (await db.select({ id: schema.members.project_id }).from(schema.members).where(eq(schema.members.principal_id, principal.id))).map(row => row.id);
     const rows = await db.select().from(schema.projects).where(and(
+      eq(schema.projects.status, 'active'),
       team ? eq(schema.projects.team_id, team.id) : undefined,
       or(eq(schema.projects.owner_principal_id, principal.id), teamIds.length ? inArray(schema.projects.team_id, teamIds) : undefined, explicitIds.length ? inArray(schema.projects.id, explicitIds) : undefined),
     )).orderBy(asc(schema.projects.created_at), asc(schema.projects.code));
@@ -260,7 +262,7 @@ export function createProjectUseCasesProject(db: Db) {
         db.select().from(schema.teams).where(eq(schema.teams.id, project.team_id)).limit(1).then((rows) => rows[0]),
       ]);
       if (!membership || membership.role !== 'owner') {
-        return fail(new DomainError('project_forbidden', '只有项目 Owner 可以归档或恢复项目', {
+        return fail(new DomainError('project_forbidden', '只有项目 Owner 可以归档项目', {
           project_code: project.code,
           principal_code: principal.code,
         }));
@@ -278,6 +280,8 @@ export function createProjectUseCasesProject(db: Db) {
           description: current.description, status: current.status, role: membership.role,
           current_snapshot: current.current_snapshot, created_at: current.created_at,
         };
+        if (cmd.status === 'active') throw new DomainError('project_forbidden', '归档项目须由系统管理员在管理台恢复');
+        await assertNoProjectArchiveRuns(tx, project.id);
         const nextSnapshot = current.current_snapshot + 1;
         await tx.update(schema.projects).set({ status: cmd.status, current_snapshot: nextSnapshot }).where(eq(schema.projects.id, project.id));
         const audit = {
@@ -286,7 +290,7 @@ export function createProjectUseCasesProject(db: Db) {
           legacy_entity_code: project.legacy_code ?? undefined,
           principal_id: principal.id,
           base_snapshot: current.current_snapshot,
-          action: cmd.status === 'archived' ? 'project.archived' : 'project.restored',
+          action: 'project.archived',
           payload: { status: { from: current.status, to: cmd.status } },
         };
         assertAuditedChange(audit);

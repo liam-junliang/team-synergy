@@ -151,11 +151,13 @@ test('过期转移不显示接收操作', () => {
 
 test('账号注销清单阻止遗漏交接，普通用户可接收所有权且待注销不可接收', async () => {
   const { AccountClosurePanel } = await vite.ssrLoadModule('/src/AccountClosurePanel.tsx');
-  const status = { pending_deletion: true, teams: [{ code: 'T', name: '待交接团队' }], projects: [{ code: 'P', name: '待交接项目', status: 'active' }], open_tasks: [{ code: 'TASK', title: '未完成任务' }], active_runs: [{ code: 'RUN', status: 'active' }] };
+  const status = { pending_deletion: true, teams: [{ code: 'T', name: '待交接团队' }], projects: [{ code: 'P', name: '待交接项目', status: 'active' }, { code: 'ARCHIVED', name: '待交接归档项目', status: 'archived' }], open_tasks: [{ code: 'TASK', title: '未完成任务' }], active_runs: [{ code: 'RUN', status: 'active' }] };
   const inbox = [{ code: 'TR', scope: 'project', scope_code: 'P', scope_name: '转入项目', initiated_by_code: 'O', target_user_code: api.currentPrincipalCode(), status: 'pending', expires_at: '2099-01-01' }];
   const props = { onClosed() {} };
   const blocked = render(AccountClosurePanel, props, [[['account-closure'], status], [['ownership-transfers'], inbox]]);
   for (const value of ['待交接团队', '待交接项目', '未完成任务', 'RUN']) assert.match(blocked, new RegExp(value));
+  assert.match(blocked, /待交接归档项目 · 已归档<\/span><button[^>]+>所有权交接<\/button>/);
+  assert.doesNotMatch(blocked, /href="\/projects\/ARCHIVED\//);
   assert.match(blocked, /<button[^>]*disabled=""[^>]*>确认注销账号<\/button>/);
   assert.match(blocked, /<button[^>]*disabled=""[^>]*>接受转移<\/button>/);
   assert.match(blocked, /<details open=""/);
@@ -203,9 +205,11 @@ test('团队治理显示归属元数据，仅已授权项目提供访问链接',
   const html = render(TeamProjectsGovernance, { teamCode: 'T' }, [[['team-projects-governance', 'T'], [
     { project_code: 'PRIVATE', name: '私人项目', status: 'active', owner_name: '私人项目负责人', can_access: false },
     { project_code: 'SHARED', name: '已授权项目', status: 'active', owner_name: '公开项目负责人', can_access: true },
+    { project_code: 'ARCHIVED', name: '归档样例', status: 'archived', owner_name: '历史项目负责人', can_access: true },
   ]]]);
   assert.match(html, /私人项目负责人|未获项目访问权限/);
   assert.doesNotMatch(html, /href="[^"]*PRIVATE/);
+  assert.doesNotMatch(html, /ARCHIVED|归档样例|历史项目负责人/);
   assert.match(html, /href="\/projects\/SHARED\/overview"/);
 });
 

@@ -24,7 +24,7 @@ export function ProjectSwitcherOption({ project, teams, teamMembershipKnown, sel
     <span className="min-w-0 flex-1"><span className="block break-words text-sm font-semibold">{project.name}</span><span title={teamName} className="mt-1 block truncate text-xs text-slate-500">{teamName}</span>
       <span className="mt-1.5 flex flex-wrap gap-1 text-[11px]"><span className={`rounded px-1.5 py-0.5 ${role.color}`}>{role.label}</span>{external && <span className="rounded bg-violet-50 px-1.5 py-0.5 text-violet-700">{t('外部协作')}</span>}</span>
     </span>
-    <span className="flex shrink-0 flex-col items-end gap-1 text-xs">{selected && <span className="text-cyan-700">{t('当前项目')}</span>}{project.status === 'archived' && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-500">{t('已归档')}</span>}</span>
+    {selected && <span className="shrink-0 text-xs text-cyan-700">{t('当前项目')}</span>}
   </a></li>;
 }
 
@@ -38,13 +38,13 @@ export function ProjectSwitcher({ route, currentProjectName }: { route: Workspac
   const resultsRef = useRef<HTMLUListElement>(null);
   const popupId = useId();
   const principalCode = currentPrincipalCode();
-  // The server returns all authorized projects, including direct memberships in external teams.
+  // The server returns active projects, including authorized projects in external teams.
   const projectsQuery = useQuery({ queryKey: ['projects', 'switcher', principalCode], queryFn: () => listProjects(), enabled: open, staleTime: 30_000 });
   const teamsQuery = useQuery({ queryKey: ['teams'], queryFn: listTeams, enabled: open, staleTime: 30_000 });
   const projects = projectsQuery.data ?? [];
   const teams = teamsQuery.data ?? [];
   const visible = filterSwitchableProjects(projects, teams, search);
-  const currentName = currentProjectName || projects.find(project => project.code === route.projectCode)?.name || route.projectCode || t('我的项目');
+  const currentName = currentProjectName || projects.find(project => project.status === 'active' && project.code === route.projectCode)?.name || route.projectCode || t('我的项目');
 
   useEffect(() => {
     if (!open) return;

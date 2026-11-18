@@ -56,15 +56,15 @@ test('项目代码仓库：成员可查看和复制 CLI，Owner 可配置并切�
   assert.match(apiSource, /repositories\/\$\{encodeURIComponent\(repositoryCode\)\}/);
 });
 
-test('项目归档：使用可恢复的归档语义并仅向 Owner 提供入口', async () => {
+test('项目负责人可在工作区归档，恢复入口在系统管理', async () => {
   const workspaceSource = await readFile(new URL('../src/TeamsWorkspace.tsx', import.meta.url), 'utf8');
   const apiSource = await readFile(new URL('../src/api.ts', import.meta.url), 'utf8');
 
   assert.match(workspaceSource, /canProject\(project, 'archive'\)/);
   assert.equal(canProject({ role: 'admin', status: 'active' }, 'archive'), false);
-  assert.equal(canProject({ role: 'owner', status: 'archived' }, 'archive'), true);
+  assert.equal(canProject({ role: 'owner', status: 'active' }, 'archive'), true);
   assert.match(workspaceSource, /归档项目/);
-  assert.match(workspaceSource, /恢复项目/);
-  assert.match(workspaceSource, /项目数据不会删除，之后可以随时恢复/);
+  assert.match(workspaceSource, /归档后仅系统管理员可以恢复项目/);
+  assert.match(workspaceSource, /updateProjectStatus\(projectCode, 'archived'\)/);
   assert.match(apiSource, /projects\/\$\{encodeURIComponent\(projectCode\)\}\/status/);
 });

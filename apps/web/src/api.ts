@@ -1916,7 +1916,7 @@ export async function listProjects(teamCode?: string): Promise<ProjectSummary[]>
   const projects = await fetchEnvelope<RawProjectSummary[]>(path, {
     headers: { 'X-Principal-Code': accountPrincipalCode() },
   });
-  return projects.map(normalizeProject).filter((project) => project.code.length > 0);
+  return projects.map(normalizeProject).filter((project) => project.code.length > 0 && project.status === 'active');
 }
 
 export async function reorderProjects(teamCode: string, projectCodes: string[]): Promise<void> {
@@ -3078,7 +3078,7 @@ export interface TeamProjectGovernance {
 export function listTeamProjectGovernance(teamCode: string): Promise<TeamProjectGovernance[]> {
   return fetchEnvelope<TeamProjectGovernance[]>(`/teams/${encodeURIComponent(teamCode)}/projects-governance`, {
     headers: { 'X-Principal-Code': accountPrincipalCode() },
-  });
+  }).then((projects) => projects.filter((project) => project.status === 'active'));
 }
 
 // Testing shares wire contracts with the API and CLI; content and execution snapshots are versioned.

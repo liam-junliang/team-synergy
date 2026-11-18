@@ -79,7 +79,26 @@ test('team governance displays global ownership and no personal project entry', 
   assert.match(html, /查看项目/); assert.doesNotMatch(html, /我的团队|创建团队|href="\/projects/);
   const dialog = render(directory.AdminEditDialog, { selection: { kind: 'project', item: { project_code: 'P', name: 'Project', description: '', status: 'archived', current_snapshot: 8 } }, onClose() {} });
   assert.match(dialog, /调整原因/); assert.match(dialog, /required="" maxLength="1000"/);
-  assert.match(dialog, /只读状态/); assert.doesNotMatch(dialog, /删除项目|转移/);
+  assert.match(dialog, /归档项目仅在系统管理中显示/);
+  assert.match(dialog, /<option value="active">恢复项目<\/option>/);
+  assert.doesNotMatch(dialog, /删除项目|转移/);
+});
+
+test('archived links stop before project providers and guide members and administrators in their current language', async () => {
+  const { AuthenticatedWorkspace } = await vite.ssrLoadModule('/src/App.tsx');
+  const project = { code: 'ARCHIVED', status: 'archived', name: 'Archived project name', role: 'owner' };
+  for (const [path, adminAccount, locale, heading, exit] of [
+    ['/projects/ARCHIVED/documents?document=HISTORICAL', false, 'zh-CN', '项目已归档', '/teams'],
+    ['/agent/skills?project=ARCHIVED', true, 'en-US', 'Project archived', '/admin/teams'],
+  ]) {
+    i18n.setLocale(locale, false);
+    const props = { session: { code: 'U', is_system_admin: adminAccount }, route: routing.parseWorkspacePath(path), onLogout() {}, onClosed() {} };
+    assert.match(render(AuthenticatedWorkspace, props), /role="status"/);
+    const html = render(AuthenticatedWorkspace, props, [[['project', 'ARCHIVED'], project]]);
+    assert.ok(html.includes(heading), html);
+    assert.ok(html.includes(`href="${exit}"`), html);
+    assert.doesNotMatch(html, /Archived project name|ARCHIVED|HISTORICAL|Agent 集成|Agent integration|role="alert"/);
+  }
 });
 
 test('users page uses normalized API deletion states without mislabeling users as admins', async () => {

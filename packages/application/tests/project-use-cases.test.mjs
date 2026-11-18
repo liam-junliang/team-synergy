@@ -10,6 +10,7 @@ import {
   createVerificationUseCases,
   createMemberUseCases,
   createTeamUseCases,
+  createAdminGovernanceUseCases,
   createDefectUseCases,
   createRequirementUseCases,
 } from '../dist/index.js';
@@ -206,7 +207,7 @@ test('project update：普通成员不能修改项目资料，负责人修改后
   });
 });
 
-test('project archive：只有项目 Owner 可归档，数据保留并可恢复', async () => {
+test('project archive: owners may archive and only system administration can restore', async () => {
   const ctx = await seededDb();
   const projects = createProjectUseCasesProject(ctx.db);
 
@@ -217,10 +218,18 @@ test('project archive：只有项目 Owner 可归档，数据保留并可恢复'
   const archived = await projects.updateProjectStatus({ projectCode: ctx.project.code, status: 'archived', principalCode: ctx.users.chen.code });
   assert.equal(archived.ok, true, JSON.stringify(archived));
   assert.equal(archived.data.status, 'archived');
+  const repeated = await projects.updateProjectStatus({ projectCode: ctx.project.code, status: 'archived', principalCode: ctx.users.chen.code });
+  assert.equal(repeated.ok, true, JSON.stringify(repeated));
+  assert.equal(repeated.data.current_snapshot, archived.data.current_snapshot);
   const listed = await projects.listProjects(ctx.users.chen.code, ctx.team.code);
-  assert.equal(listed.find((project) => project.project_code === ctx.project.code)?.status, 'archived');
+  assert.ok(!listed.some(project => project.project_code === ctx.project.code));
 
-  const restored = await projects.updateProjectStatus({ projectCode: ctx.project.code, status: 'active', principalCode: ctx.users.chen.code });
+  const denied = await projects.updateProjectStatus({ projectCode: ctx.project.code, status: 'active', principalCode: ctx.users.chen.code });
+  assert.equal(denied.ok, false);
+  assert.equal(denied.error.code, 'project_forbidden');
+  const system = await insertUser(ctx.db, { account: 'system', displayName: 'System administrator', isSystemAdmin: true });
+  const restored = await createAdminGovernanceUseCases(ctx.db).updateProject({ projectCode: ctx.project.code,
+    principalCode: system.code, status: 'active', baseSnapshot: archived.data.current_snapshot, reason: 'Reopen this project' });
   assert.equal(restored.ok, true, JSON.stringify(restored));
   assert.equal(restored.data.status, 'active');
   const [stored] = await ctx.db.select().from(schema.projects).where(eq(schema.projects.code, ctx.project.code));
@@ -229,7 +238,7 @@ test('project archive：只有项目 Owner 可归档，数据保留并可恢复'
     eq(schema.auditEvents.entity_type, 'project'),
     eq(schema.auditEvents.entity_id, ctx.project.id),
   ));
-  assert.deepEqual(audits.map((event) => event.action), ['project.archived', 'project.restored']);
+  assert.deepEqual(audits.map(event => event.action).sort(), ['admin.project.updated', 'project.archived']);
 });
 
 test('project repositories/workspace：Owner 配置多仓库，成员可查阅且云端工作空间不保存本机路径', async () => {

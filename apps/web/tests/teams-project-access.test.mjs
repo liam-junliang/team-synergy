@@ -64,17 +64,18 @@ test('没有团队但有获授权项目时，默认全部项目可直接进入�
 });
 
 test('默认展示全部已授权项目，外部和团队筛选互不混淆，跨团队列表不提供团队内排序', () => {
-  const input = { teams: [ownTeam], projects: [internal, external] };
+  const archived = { ...internal, code: 'PROJECT-ARCHIVED', name: '已归档样例', status: 'archived' };
+  const input = { teams: [ownTeam], projects: [internal, external, archived] };
   const all = renderWorkspace(input);
   assert.match(all, /href="\/projects\/PROJECT-A\/overview"/);
   assert.match(all, /href="\/projects\/PROJECT-X\/overview"/);
-  assert.doesNotMatch(all, /调整项目顺序：|团队管理/);
+  assert.doesNotMatch(all, /调整项目顺序：|团队管理|PROJECT-ARCHIVED|已归档样例/);
   const externalOnly = renderWorkspace({ ...input, scope: '外部协作' });
   assert.match(externalOnly, /href="\/projects\/PROJECT-X\/overview"/);
   assert.doesNotMatch(externalOnly, /href="\/projects\/PROJECT-A\/overview"|团队管理|>创建项目</);
   const teamOnly = renderWorkspace({ ...input, scope: '查看团队项目：研发团队' });
   assert.match(teamOnly, /href="\/projects\/PROJECT-A\/overview"/);
-  assert.doesNotMatch(teamOnly, /href="\/projects\/PROJECT-X\/overview"/);
+  assert.doesNotMatch(teamOnly, /href="\/projects\/PROJECT-X\/overview"|PROJECT-ARCHIVED|已归档样例/);
   assert.match(teamOnly, /团队管理|>创建项目</);
   assert.match(teamOnly, /调整项目顺序：内部项目/);
 });

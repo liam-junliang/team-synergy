@@ -105,7 +105,8 @@ export function createDefectUseCases(db: Db) {
     const project = filter.projectCode ? await findProjectByCode(db, filter.projectCode) : undefined;
     if (filter.featureCode && !feature) return [];
     if (filter.projectCode && !project) return [];
-    const projects = project ? [project] : await db.select().from(schema.projects);
+    const projects = project ? [project] : await db.select().from(schema.projects)
+      .where(feature ? eq(schema.projects.id, feature.project_id) : eq(schema.projects.status, 'active'));
     const visibleProjects = (await Promise.all(projects.map(async candidate =>
       await resolveProjectAccess(db, candidate.id, principal.id) ? candidate.id : null,
     ))).filter((id): id is bigint => id !== null);
