@@ -12,6 +12,19 @@ type RunCommand = Command & { code: string };
 type Run = typeof schema.codeUnderstandingRuns.$inferSelect;
 type View = typeof schema.codeUnderstandingViews.$inferSelect;
 const runs = schema.codeUnderstandingRuns, views = schema.codeUnderstandingViews, selections = schema.codeUnderstandingSelections;
+const runSummaryColumns = {
+  code: runs.code,
+  request_key: runs.request_key,
+  request_json: runs.request_json,
+  status: runs.status,
+  revision: runs.revision,
+  snapshot_json: runs.snapshot_json,
+  message: runs.message,
+  artifact_sha256: runs.artifact_sha256,
+  created_at: runs.created_at,
+  updated_at: runs.updated_at,
+};
+type RunSummaryRow = Pick<Run, keyof typeof runSummaryColumns>;
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const invalid = (message: string) => new DomainError('code_understanding_invalid', message);
 const conflict = (message: string) => new DomainError('code_understanding_conflict', message);
@@ -43,11 +56,15 @@ async function runOf(db: AccessDb, projectId: bigint, code: string) {
   const [run] = await db.select().from(runs).where(and(eq(runs.project_id, projectId), eq(runs.code, code))).limit(1);
   if (!run) throw missing(); return run;
 }
+async function runSummaryOf(db: AccessDb, projectId: bigint, code: string) {
+  const [run] = await db.select(runSummaryColumns).from(runs).where(and(eq(runs.project_id, projectId), eq(runs.code, code))).limit(1);
+  return required(run);
+}
 async function viewOf(db: AccessDb, projectId: bigint, code: string) {
   const [view] = await db.select().from(views).where(and(eq(views.project_id, projectId), eq(views.code, code))).limit(1);
   if (!view) throw missing(); return view;
 }
-export function codeUnderstandingRunSummary(run: Run): CodeRunSummary {
+export function codeUnderstandingRunSummary(run: RunSummaryRow): CodeRunSummary {
   const request: CodeRunRegister = JSON.parse(run.request_json);
   let snapshot: CodeRunSummary['snapshot'] = null;
   if (run.snapshot_json) { const { files, ...identity }: CodeSnapshot = JSON.parse(run.snapshot_json); snapshot = { ...identity, file_count: files.length }; }
@@ -135,7 +152,7 @@ export function createCodeUnderstandingUseCases(db: Db) {
     context: (cmd: Command) => result<CodeUnderstandingContext>(async () => {
       const { project } = await access(db, cmd);
       const repositories = await db.select({ code: schema.projectRepositories.code, name: schema.projectRepositories.name, default_branch: schema.projectRepositories.default_branch, status: schema.projectRepositories.status }).from(schema.projectRepositories).where(eq(schema.projectRepositories.project_id, project.id));
-      const runRows = await db.select().from(runs).where(eq(runs.project_id, project.id)).orderBy(desc(runs.id)).limit(101);
+      const runRows = await db.select(runSummaryColumns).from(runs).where(eq(runs.project_id, project.id)).orderBy(desc(runs.id)).limit(101);
       const viewRows = await db.select().from(views).where(eq(views.project_id, project.id)).orderBy(desc(views.id)).limit(101);
       return { repositories, runs: runRows.slice(0, 100).map(summary), views: viewRows.slice(0, 100).map(viewSummary), current_view: await current(db, project.id, 'commit'), current_draft_view: await current(db, project.id, 'draft'), can_write: project.status === 'active', truncated: runRows.length > 100 || viewRows.length > 100 };
     }),
@@ -154,7 +171,7 @@ export function createCodeUnderstandingUseCases(db: Db) {
       const [run] = await tx.insert(runs).values({ project_id: project.id, repository_id: repo.id, created_by: principal.id, request_key: input.idempotency_key, request_hash: hash(input), request_json: JSON.stringify(input), status: 'preparing', created_at: now, updated_at: now }).returning();
       return summary(required(run));
     })),
-    detail: (cmd: RunCommand) => result(async () => { const { project } = await access(db, cmd); return summary(await runOf(db, project.id, cmd.code)); }),
+    detail: (cmd: RunCommand) => result(async () => { const { project } = await access(db, cmd); return summary(await runSummaryOf(db, project.id, cmd.code)); }),
     progress: (cmd: RunCommand & { input: unknown }) => result(() => db.transaction(async tx => {
       const { project, principal } = await access(tx, cmd, true), input = parse(CodeRunProgressSchema, cmd.input), run = await runOf(tx, project.id, cmd.code);
       assertRunCreator(run, principal.id);
@@ -173,14 +190,14 @@ export function createCodeUnderstandingUseCases(db: Db) {
       const base = input.base_view_code ? viewSummary(await viewOf(tx, project.id, input.base_view_code)).selections : [];
       const merged = new Map(base.map(selection => [selection.repository_code, selection]));
       for (const selection of input.selections) {
-        const run = await runOf(tx, project.id, selection.run_code), item = summary(run);
-        if (run.status !== 'succeeded' || !item.snapshot || item.repository_code !== selection.repository_code) throw invalid('View requires published runs belonging to the specified repositories');
-        merged.set(item.repository_code, { repository_code: item.repository_code, run_code: run.code, snapshot_id: item.snapshot.snapshot_id });
+        const item = summary(await runSummaryOf(tx, project.id, selection.run_code));
+        if (item.status !== 'succeeded' || !item.snapshot || item.repository_code !== selection.repository_code) throw invalid('View requires published runs belonging to the specified repositories');
+        merged.set(item.repository_code, { repository_code: item.repository_code, run_code: item.code, snapshot_id: item.snapshot.snapshot_id });
       }
       const selected = [...merged.values()].sort((a, b) => a.repository_code.localeCompare(b.repository_code));
       if (selected.length > 50) throw invalid('Too many repositories');
       let kind: 'commit' | 'draft' = 'commit';
-      for (const selection of selected) if (summary(await runOf(tx, project.id, selection.run_code)).kind === 'draft') kind = 'draft';
+      for (const selection of selected) if (summary(await runSummaryOf(tx, project.id, selection.run_code)).kind === 'draft') kind = 'draft';
       const contentHash = hash(selected);
       const [old] = await tx.select().from(views).where(and(eq(views.project_id, project.id), eq(views.content_hash, contentHash))).limit(1);
       if (old) return viewSummary(old);
