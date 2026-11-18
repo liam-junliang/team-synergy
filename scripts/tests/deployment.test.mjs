@@ -13,6 +13,13 @@ const run = { conclusion: 'success', event: 'push', head_branch: 'main', head_sh
 const request = changes => ({ eventName: 'workflow_run', event: { workflow_run: run }, repository, ref: 'refs/heads/main', sha, ...changes });
 const verifiedApi = async route => route.includes('/git/ref/') ? { object: { sha } } : { workflow_runs: [run] };
 
+test('container and deployment stop deadlines allow the API bounded drain to finish', () => {
+  const compose = readFileSync(path.join(root, 'deploy/containers/compose.yaml'), 'utf8');
+  const script = readFileSync(path.join(root, 'scripts/deploy-linux.sh'), 'utf8');
+  assert.match(compose, /\n  api:[\s\S]*?stop_grace_period: 90s/);
+  assert.match(script, /compose stop --timeout 90 api web/);
+});
+
 test('PR builds never request privileged workflow verification or publication', async () => {
   const result = await deploymentGate(request({ eventName: 'pull_request', api: () => { throw Error('Unexpected privileged lookup'); } }));
   assert.deepEqual(result, { build: true, publish: false, sha });
@@ -113,5 +120,61 @@ test('Linux offline deployment keeps backups and reports migration failure witho
     assert.equal(readdirSync(path.join(directory, 'backups')).filter(name => name.endsWith('.dump')).length, 1);
     const failure = readdirSync(path.join(directory, 'releases')).find(name => name.startsWith('failure-'));
     assert.equal(JSON.parse(readFileSync(path.join(directory, 'releases', failure), 'utf8')).database_restored, false);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+for (const state of ['exited false 1 false', 'exited false 137 false', 'exited false 0 true', 'running true 0 false']) {
+  test(`Linux deployment refuses backup and migration after unsuccessful drain: ${state}`, { skip: process.platform !== 'linux' }, () => {
+    const directory = fixture(), bin = path.join(directory, 'bin'), trace = path.join(directory, 'trace');
+    mkdirSync(bin);
+    const ids = refs.map((_, i) => `sha256:${String(i + 1).repeat(64)}`);
+    writeFileSync(path.join(directory, 'release.env'), 'TSP_API_IMAGE=old-api\nTSP_WEB_IMAGE=old-web\n');
+    writeFileSync(path.join(bin, 'docker'), `#!/bin/bash
+printf '%s\\n' "$*" >> "$TRACE"
+if [[ $1 == image ]];then if [[ $* == *'{{.Id}}'* ]];then echo "${'$'}{!#}";else echo "$REVISION";fi;exit 0;fi
+if [[ $1 == run ]];then echo 'postgres (PostgreSQL) 16.11';exit 0;fi
+if [[ $* == *'ps --all --quiet api'* ]];then echo aaaaaaaaaaaa;exit 0;fi
+if [[ $1 == inspect ]];then echo "$API_STATE";exit 0;fi
+exit 0
+`, { mode: 0o755 });
+    writeFileSync(path.join(bin, 'curl'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    try {
+      const result = invoke(directory, ['deploy-loaded', sha, ...ids], {
+        PATH: bin + ':' + process.env.PATH, TRACE: trace, REVISION: sha, API_STATE: state,
+      });
+      assert.equal(result.status, 7, result.stderr);
+      const calls = readFileSync(trace, 'utf8');
+      assert.match(calls, /stop --timeout 90 api web/);
+      assert.match(calls, /inspect .* aaaaaaaaaaaa/);
+      assert.doesNotMatch(calls, /exec -T db|run --rm --no-deps migrate/);
+      assert.equal(readdirSync(path.join(directory, 'backups')).length, 0);
+      assert.match(result.stderr, /refusing backup and migration/);
+      const failure = readdirSync(path.join(directory, 'releases')).find(name => name.startsWith('failure-'));
+      assert.equal(JSON.parse(readFileSync(path.join(directory, 'releases', failure), 'utf8')).stage, 'drain-check');
+      assert.match(calls, /previous-.*up -d --no-deps api web/);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  });
+}
+
+test('Linux deployment accepts a cleanly stopped API before its backup stage', { skip: process.platform !== 'linux' }, () => {
+  const directory = fixture(), bin = path.join(directory, 'bin'), trace = path.join(directory, 'trace');
+  mkdirSync(bin);
+  const ids = refs.map((_, i) => `sha256:${String(i + 1).repeat(64)}`);
+  writeFileSync(path.join(bin, 'docker'), `#!/bin/bash
+printf '%s\\n' "$*" >> "$TRACE"
+if [[ $1 == image ]];then if [[ $* == *'{{.Id}}'* ]];then echo "${'$'}{!#}";else echo "$REVISION";fi;exit 0;fi
+if [[ $1 == run ]];then echo 'postgres (PostgreSQL) 16.11';exit 0;fi
+if [[ $* == *'ps --all --quiet api'* ]];then echo aaaaaaaaaaaa;exit 0;fi
+if [[ $1 == inspect ]];then echo 'exited false 0 false';exit 0;fi
+if [[ $* == *'exec -T db'* ]];then printf 'PGDMPtest';exit 0;fi
+if [[ $* == *'run --rm --no-deps migrate'* ]];then exit 17;fi
+exit 0
+`, { mode: 0o755 });
+  try {
+    const result = invoke(directory, ['deploy-loaded', sha, ...ids], { PATH: bin + ':' + process.env.PATH, TRACE: trace, REVISION: sha });
+    assert.equal(result.status, 17, result.stderr);
+    const calls = readFileSync(trace, 'utf8');
+    assert.ok(calls.indexOf('inspect --format') < calls.indexOf('exec -T db'));
+    assert.equal(readdirSync(path.join(directory, 'backups')).filter(name => name.endsWith('.dump')).length, 1);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });

@@ -57,6 +57,7 @@ services:
     pull_policy: ${TSP_PULL_POLICY:-missing}
     network_mode: host
     restart: unless-stopped
+    stop_grace_period: 90s
     env_file: ['${TSP_CONFIG_DIR:?Set an absolute private config directory}/api.env']
     environment: *api-environment
     secrets: [db-password]
