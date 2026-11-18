@@ -14,6 +14,7 @@ let devHttp;
 let built;
 const origins = [];
 const html = '<!doctype html><html><body><main id="routing-fixture">Workspace shell</main></body></html>';
+const guide = '# Agent 操作手册\n\n直接用 MCP。\n';
 const listen = (server) => new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const origin = (server) => `http://127.0.0.1:${server.address().port}`;
 const close = (server) => server?.listening ? new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); }) : Promise.resolve();
@@ -23,6 +24,10 @@ before(async () => {
   await writeFile(join(root, 'index.html'), html);
   await mkdir(join(root, 'dist'));
   await writeFile(join(root, 'dist/index.html'), html);
+  for (const directory of ['public', 'dist']) {
+    await mkdir(join(root, directory, 'agent'), { recursive: true });
+    await writeFile(join(root, directory, 'agent', 'guide.zh-CN.md'), guide);
+  }
   upstream = createHttpServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
@@ -65,6 +70,15 @@ test('development and built preview serve the SPA for direct workspace paths and
       assert.match(response.headers.get('content-type'), /text\/html/);
       assert.match(await response.text(), /id="routing-fixture"/);
     }
+  }
+});
+
+test('direct Agent guide responses declare UTF-8 in development and built preview', async () => {
+  for (const [mode, base] of origins) {
+    const response = await fetch(`${base}/agent/guide.zh-CN.md?source=direct`);
+    assert.equal(response.status, 200, mode);
+    assert.equal(response.headers.get('content-type'), 'text/markdown; charset=utf-8', mode);
+    assert.equal(await response.text(), guide, mode);
   }
 });
 

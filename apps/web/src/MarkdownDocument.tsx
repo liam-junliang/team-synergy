@@ -4,6 +4,7 @@ import { useEffect, useRef, type MouseEvent } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MermaidDiagram } from './MermaidDiagram';
+import { CopyCommand } from './SkillShared';
 
 interface OutlineItem {
   level: number;
@@ -52,7 +53,23 @@ const componentsWithoutImages: Components = {
   },
 };
 
-export function MarkdownDocument({ content, outline = [], allowImages = true }: { content: string; outline?: OutlineItem[]; allowImages?: boolean }) {
+const copyableCodeBlock: Components['pre'] = ({ children, node, ...props }) => {
+  const code = node?.children[0];
+  if (node?.children.length !== 1 || code?.type !== 'element' || code.tagName !== 'code') {
+    return <pre {...props}>{children}</pre>;
+  }
+  const command = code.children.filter(child => child.type === 'text').map(child => child.value).join('').replace(/\n$/, '');
+  return <div className="markdown-copy-command" data-source-line={node.position?.start.line}>
+    <CopyCommand command={command} />
+  </div>;
+};
+
+export function MarkdownDocument({ content, outline = [], allowImages = true, copyCodeBlocks = false }: {
+  content: string;
+  outline?: OutlineItem[];
+  allowImages?: boolean;
+  copyCodeBlocks?: boolean;
+}) {
   useLocale();
   const containerRef = useRef<HTMLDivElement>(null);
   const restoredLocation = useRef<string | null>(null);
@@ -67,8 +84,9 @@ export function MarkdownDocument({ content, outline = [], allowImages = true }: 
     return () => window.cancelAnimationFrame(frame);
   }, [content]);
 
+  const renderers = allowImages ? components : componentsWithoutImages;
   return <div ref={containerRef} className="markdown-document" onClick={handleMarkdownAnchorClick}>
-    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[headingAnchors(content, outline)]} remarkRehypeOptions={{ footnoteLabel: t('脚注'), footnoteBackLabel: t('返回正文') }} components={allowImages ? components : componentsWithoutImages}>{content}</ReactMarkdown>
+    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[headingAnchors(content, outline)]} remarkRehypeOptions={{ footnoteLabel: t('脚注'), footnoteBackLabel: t('返回正文') }} components={copyCodeBlocks ? { ...renderers, pre: copyableCodeBlock } : renderers}>{content}</ReactMarkdown>
   </div>;
 }
 

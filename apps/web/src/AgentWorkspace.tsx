@@ -5,6 +5,7 @@ import { navigateWorkspace } from './workspaceNavigation';
 import { t } from './i18n';
 import { useLocale } from './useLocale';
 import { DeviceAuthorization } from './DeviceAuthorization';
+import { AgentUsageGuide } from './AgentUsageGuide';
 import { CliInstaller } from './CliInstaller';
 import { SkillsWorkbench, type SkillLibraryTab } from './SkillsWorkbench';
 import { CopyCommand, SkillError } from './SkillShared';
@@ -92,9 +93,10 @@ function McpConnectionGuide({ projectCode }: { projectCode?: string }) {
   </div>;
 }
 
-export function AgentWorkspace({ route, user }: { route: WorkspaceRoute; user: AuthUser }) {
+export function AgentWorkspace({ route, user, guideProject }: { route: WorkspaceRoute; user: AuthUser; guideProject?: ProjectSummary }) {
   useLocale();
   if (route.agentTab === 'authorize') return <DeviceAuthorization key={route.authorizationCode ?? ''} user={user} code={route.authorizationCode} />;
+  if (route.agentTab === 'guide') return <AgentUsageGuide route={route} project={guideProject} />;
   return <AgentLibraryWorkspace route={route} user={user} />;
 }
 

@@ -7,6 +7,7 @@ import permissions from './locales/permissions.ts';
 import testing from './locales/testing.ts';
 import skills from './locales/skills.ts';
 import agentConnection from './locales/agentConnection.ts';
+import agentGuide from './locales/agentGuide.ts';
 import admin from './locales/admin.ts';
 import intake from './locales/intake.ts';
 import documentQuality from './locales/documentQuality.ts';
@@ -16,7 +17,7 @@ import memory from './locales/memory.ts';
 
 export type Locale = 'zh-CN' | 'en-US';
 export const LOCALE_STORAGE_KEY = 'tsp:web:locale';
-export const englishMessages: Readonly<Record<string, string>> = { ...documentQuality, ...workspace, ...knowledge, ...execution, ...projectSwitcher, ...permissions, ...testing, ...skills, ...core, ...agentConnection, ...admin, ...intake, ...systemAgent, ...codeUnderstanding, ...memory };
+export const englishMessages: Readonly<Record<string, string>> = { ...documentQuality, ...workspace, ...knowledge, ...execution, ...projectSwitcher, ...permissions, ...testing, ...skills, ...core, ...agentConnection, ...agentGuide, ...admin, ...intake, ...systemAgent, ...codeUnderstanding, ...memory };
 type Parameters = Record<string, string | number>;
 let currentLocale: Locale = 'zh-CN';
 const listeners = new Set<() => void>();

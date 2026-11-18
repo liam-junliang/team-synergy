@@ -11,7 +11,7 @@ import { Component, lazy, Suspense, useCallback, useEffect, useState, type CSSPr
 import { cancelTask, getProject, listFeatures, listMembers, listTasks, getTask, logoutWebSession, restoreWebSession, taskHistory, updateTaskContract, type AuthUser, type Feature, type Member, type TaskDetail as TaskDetailData, type TaskSummary, type UpdateTaskContractInput } from './api';
 import { ApiError } from './apiError';
 import { STATUS_META, BOARD_COLUMNS, PROFILE_META, SOURCE_META, isStale } from './status';
-import { agentWorkspacePath, safeAgentReturnPath, projectWorkspacePath, workspacePathAfterLogin, type ProjectSection, type WorkspaceRoute } from './workspaceRouting';
+import { AGENT_WORKSPACE_TABS, agentWorkspacePath, safeAgentReturnPath, projectWorkspacePath, workspacePathAfterLogin, type ProjectSection, type WorkspaceRoute } from './workspaceRouting';
 import { listenWorkspaceNavigation, navigateWorkspace, readWorkspaceRoute } from './workspaceNavigation';
 import { LoginPage } from './LoginPage';
 import { PasswordChangePage } from './PasswordChangePage';
@@ -55,6 +55,8 @@ const TASK_CARD_BRIEF_STYLE: CSSProperties = {
  */
 
 // ---- 轻量 History API 路由（不引入路由库） ----
+const AGENT_TAB_LABELS = { connect: 'Agent 接入', guide: '使用指南', skills: '技能库' };
+
 export const PROJECT_VIEWS: Array<{ id: ProjectSection; label: string }> = [
   { id: 'overview', label: '项目' },
   { id: 'documents', label: '文档' },
@@ -374,7 +376,7 @@ export function AuthenticatedWorkspace({ route, session, onLogout, onClosed }: {
         <nav className="col-start-1 row-start-3 flex min-w-0 flex-wrap sm:col-span-2 sm:row-start-2 xl:col-span-1 xl:col-start-2 xl:row-start-1" aria-label={t("工作台导航")}>
           {inAdminConsole ? <AdminNavigation tab={route.adminTab ?? (view === 'admin' ? 'teams' : undefined)} /> : view === 'agent' ? <>
             <a href={session.is_system_admin ? '/admin/teams' : safeAgentReturnPath(route.agentReturnPath, projectCode)} className="inline-flex shrink-0 items-center gap-1.5 border-b-2 border-transparent px-3 py-2 text-sm font-medium text-slate-400 hover:text-slate-100"><svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M7 4 3 8l4 4M3 8h8a5 5 0 0 1 0 10H9" /></svg>{t(session.is_system_admin ? '系统管理' : projectCode ? '返回项目' : '团队与项目')}</a>
-            {route.agentTab !== 'authorize' && (['connect', 'skills'] as const).map(tab => <a key={tab} href={agentWorkspacePath(tab, route)} aria-current={route.agentTab === tab ? 'page' : undefined} className={`shrink-0 border-b-2 px-3 py-2 text-sm font-medium transition ${route.agentTab === tab ? 'border-cyan-400 text-white' : 'border-transparent text-slate-400 hover:text-slate-100'}`}>{t(tab === 'connect' ? 'Agent 接入' : '技能库')}</a>)}
+            {route.agentTab !== 'authorize' && AGENT_WORKSPACE_TABS.map(tab => <a key={tab} href={agentWorkspacePath(tab, route)} aria-current={route.agentTab === tab ? 'page' : undefined} className={`shrink-0 border-b-2 px-3 py-2 text-sm font-medium transition ${route.agentTab === tab ? 'border-cyan-400 text-white' : 'border-transparent text-slate-400 hover:text-slate-100'}`}>{t(AGENT_TAB_LABELS[tab])}</a>)}
           </> : <>
           <a href="/teams" aria-current={view === 'teams' ? 'page' : undefined} className={`shrink-0 border-b-2 px-3 py-2 text-sm font-medium transition ${view === 'teams' ? 'border-cyan-400 text-white' : 'border-transparent text-slate-400 hover:text-slate-100'}`}>{t("团队与项目")}</a>
         {projectCode && PROJECT_VIEWS.map((item) => (
@@ -391,7 +393,7 @@ export function AuthenticatedWorkspace({ route, session, onLogout, onClosed }: {
       </header>
       <ErrorBoundary>
         {view === 'admin' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t('正在加载…')}</div>}><AdminWorkspace tab={route.adminTab} isSystemAdmin={session.is_system_admin} /></Suspense>}
-        {view === 'agent' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t('正在加载…')}</div>}><AgentWorkspace key={`${projectCode ?? ''}:${route.teamCode ?? ''}:${route.agentTab}`} route={route} user={session} /></Suspense>}
+        {view === 'agent' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t('正在加载…')}</div>}><AgentWorkspace key={`${projectCode ?? ''}:${route.teamCode ?? ''}:${route.agentTab}`} route={route} user={session} guideProject={projectQuery.data} /></Suspense>}
         {view === 'teams' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载团队…")}</div>}><TeamsWorkspace /></Suspense>}
         {view === 'personal-memory' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t('正在读取记忆中心…')}</div>}><MemoryCenterWorkbench key={`${session.code}:${route.personalMemoryProject ?? ''}`} ownerCode={session.code} initialProject={route.personalMemoryProject} /></Suspense>}
         {projectCode && view === 'overview' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载项目…")}</div>}><ProjectWorkspace key={projectCode} projectCode={projectCode} tab={route.projectTab} documentCode={route.documentCode} /></Suspense>}

@@ -183,6 +183,11 @@ select.form-control {
   white-space: pre;
 }
 
+.markdown-document .markdown-copy-command { margin-block: 1rem; }
+.markdown-document .markdown-copy-command pre { margin: 0; padding: 0; font-size: 0.8125rem; }
+.markdown-document .markdown-copy-command pre code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.markdown-document .markdown-copy-command p { margin: 0.25rem 0 0; }
+
 .markdown-document blockquote {
   @apply rounded-r-lg border-l-4 border-cyan-300 bg-cyan-50/60 px-4 py-2 text-slate-600;
 }

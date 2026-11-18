@@ -7,10 +7,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createServer } from 'vite';
 
-let vite, api, routing, switching, helpers, workbench, agent, dialogs, i18n;
+let vite, api, routing, switching, helpers, workbench, agent, dialogs, i18n, guide;
 before(async () => {
   vite = await createServer({ root: fileURLToPath(new URL('..', import.meta.url)), appType: 'custom', optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true, hmr: false } });
-  [api, routing, switching, helpers, workbench, agent, dialogs, i18n] = await Promise.all(['api.ts', 'workspaceRouting.ts', 'projectSwitching.ts', 'skills.ts', 'SkillsWorkbench.tsx', 'AgentWorkspace.tsx', 'SkillDialogs.tsx', 'i18n.ts'].map(file => vite.ssrLoadModule(`/src/${file}`)));
+  [api, routing, switching, helpers, workbench, agent, dialogs, i18n, guide] = await Promise.all(['api.ts', 'workspaceRouting.ts', 'projectSwitching.ts', 'skills.ts', 'SkillsWorkbench.tsx', 'AgentWorkspace.tsx', 'SkillDialogs.tsx', 'i18n.ts', 'AgentUsageGuide.tsx'].map(file => vite.ssrLoadModule(`/src/${file}`)));
 });
 after(async () => vite?.close());
 afterEach(() => i18n.setLocale('zh-CN', false));
@@ -44,6 +44,57 @@ test('Agent integration entry is visibly named and original navigation retains T
   assert.ok(source.indexOf("aria-label={t('Agent 集成')}") < source.indexOf('<ProjectSwitcher route='));
   assert.doesNotMatch(source, />← \{t\(session\.is_system_admin/);
   assert.equal(routing.PROJECT_SECTIONS.at(-3), 'testing'); assert.equal(routing.PROJECT_SECTIONS.at(-2), 'defects'); assert.equal(routing.PROJECT_SECTIONS.at(-1), 'handovers');
+});
+
+test('Agent usage guide sits between setup and skills and preserves the current return path', () => {
+  assert.deepEqual(routing.AGENT_WORKSPACE_TABS, ['connect', 'guide', 'skills']);
+  const route = { view: 'agent', agentTab: 'guide', projectCode: 'P', teamCode: 'T', agentReturnPath: '/projects/P/understanding' };
+  const path = routing.agentWorkspacePath('guide', route);
+  assert.ok(routing.isWorkspacePath(path));
+  assert.deepEqual(routing.parseWorkspacePath(path), route);
+  assert.equal(routing.workspacePathAfterLogin(`http://localhost${path}`, false), path);
+  assert.deepEqual(routing.parseWorkspacePath(switching.projectSwitchPath(route, 'Q')), { view: 'agent', agentTab: 'guide', projectCode: 'Q' });
+});
+
+test('Agent usage guide links and renders the corresponding Markdown manual independently of project context', () => {
+  const user = { code: 'U', username: 'member', display_name: 'Member' };
+  const route = { view: 'agent', agentTab: 'guide' };
+  const noProject = render(agent.AgentWorkspace, { route, user });
+  assert.match(noProject, /href="\/agent\/guide\.zh-CN\.md"[^>]*>读取 Markdown<\/a>/);
+  assert.match(noProject, /正在读取使用指南/);
+  assert.doesNotMatch(noProject, /候选项目|复制指令|授权本机设备/);
+
+  const guideProject = { ...project, code: '19Q4K7PDARXQ9JHW6R6F' };
+  const content = readFileSync(new URL('../public/agent/guide.en-US.md', import.meta.url), 'utf8');
+  i18n.setLocale('en-US', false);
+  const localized = render(agent.AgentWorkspace, { route: { ...route, projectCode: guideProject.code }, user, guideProject },
+    [[['agent-usage-guide', 'en-US'], content]]);
+  assert.match(localized, /<h1[^>]*>Team Synergy Agent operating manual<\/h1>/i);
+  assert.match(localized, /aria-label="Contents"/);
+  assert.match(localized, /href="\/agent\/guide\.en-US\.md"[^>]*>Read Markdown<\/a>/);
+  assert.match(localized, /Candidate project from this page[^<]*<\/span><code[^>]*>19Q4K7PDARXQ9JHW6R6F<\/code>/);
+  assert.match(localized, /Confirm it through the connection tools before use/);
+  assert.match(localized, /<button[^>]*>Copy<\/button>/);
+  for (const command of [
+    'tsp tools call get_connection_context', 'read_project_material', 'read_memory_source', 'query_code_graph',
+    'tsp.cmd task create', 'tsp task assign', 'tsp task claim TASK_CODE --profile builder',
+    'tsp task submit', 'tsp task claim TASK_CODE --profile verifier', 'tsp task verify', 'tsp task close',
+  ]) assert.ok(localized.includes(command), command);
+  assert.doesNotMatch(localized, /Copy instructions|Loading the usage guide/);
+  const shell = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(shell, /rel="help" href="\/agent\/guide\.zh-CN\.md"/);
+  assert.match(shell, /rel="help" href="\/agent\/guide\.en-US\.md"/);
+});
+
+test('Agent manual source ignores session credentials and rejects missing or SPA-fallback responses', async (context) => {
+  const fetch = context.mock.method(globalThis, 'fetch', async () => new Response('# Manual', { headers: { 'Content-Type': 'text/markdown; charset=utf-8' } }));
+  assert.equal(await guide.readAgentGuide('en-US'), '# Manual');
+  assert.equal(fetch.mock.calls[0].arguments[0], '/agent/guide.en-US.md');
+  assert.equal(fetch.mock.calls[0].arguments[1].credentials, 'omit');
+  fetch.mock.mockImplementation(async () => new Response('<!doctype html>', { headers: { 'Content-Type': 'text/html' } }));
+  await assert.rejects(guide.readAgentGuide('zh-CN'), /agent_guide_unavailable/);
+  fetch.mock.mockImplementation(async () => new Response('missing', { status: 404 }));
+  await assert.rejects(guide.readAgentGuide('en-US'), /agent_guide_unavailable/);
 });
 
 test('skill reader uses selected immutable revision, safe Markdown and manager-gated controls', () => {
