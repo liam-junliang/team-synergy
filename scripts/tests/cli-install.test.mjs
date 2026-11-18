@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, writeFile, mkdir, rm, copyFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, mkdir, rm, copyFile, realpath, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -53,7 +53,9 @@ test('Windows platform installation works without source, preserves configuratio
 });
 
 test('Unix platform installation uses bundled runtime and preserves a working install on corrupt updates', { skip: !['linux', 'darwin'].includes(process.platform) || !distribution, timeout: 180_000 }, async (t) => {
-  const temporary = await mkdtemp(path.join(os.tmpdir(), 'tsp-install-smoke-'));
+  // macOS can expose the system temporary directory through the /var symlink.
+  const temporaryParent = await realpath(os.tmpdir());
+  const temporary = await mkdtemp(path.join(temporaryParent, 'tsp-install-smoke-'));
   const served = path.join(temporary, 'distribution'); await mkdir(served);
   const manifest = JSON.parse(await readFile(path.join(distribution, 'manifest.json'), 'utf8'));
   const artifact = manifest.artifacts.find((item) => item.platform === process.platform && item.arch === process.arch); assert.ok(artifact, 'build the matching release first');
@@ -65,7 +67,7 @@ test('Unix platform installation uses bundled runtime and preserves a working in
   t.after(async () => { await app.close(); await rm(temporary, { recursive: true, force: true }); });
   const installDir = path.join(temporary, 'installed CLI'); const downloadedScript = path.join(temporary, 'install.sh');
   await writeFile(downloadedScript, await (await fetch(`${address}/api/cli/install.sh`)).text());
-  const install = () => execute('sh', [downloadedScript, '--base-url', `${address}/api`, '--install-dir', installDir, '--no-modify-path'], { HOME: temporary });
+  const install = (destination = installDir) => execute('sh', [downloadedScript, '--base-url', `${address}/api`, '--install-dir', destination, '--no-modify-path'], { HOME: temporary });
   const first = await install(); assert.equal(first.code, 0, first.stderr);
   assert.equal((await execute(path.join(installDir, 'bin/tsp'), ['--version'], { HOME: temporary })).stdout.trim(), manifest.version);
   const selected = (await readFile(path.join(installDir, '.tsp-install'), 'utf8')).trim().split('\n')[1];
@@ -73,8 +75,14 @@ test('Unix platform installation uses bundled runtime and preserves a working in
   await writeFile(path.join(installDir, 'keep-user-config'), 'preserve');
   const second = await install(); assert.equal(second.code, 0, second.stderr); assert.equal(await readFile(path.join(installDir, 'keep-user-config'), 'utf8'), 'preserve');
   const shimBefore = await readFile(path.join(installDir, 'bin/tsp'), 'utf8');
+  const linkedInstallDir = path.join(temporary, 'linked CLI');
+  await symlink(installDir, linkedInstallDir);
+  const linked = await install(linkedInstallDir);
+  assert.notEqual(linked.code, 0);
+  assert.match(linked.stderr, /Installation path contains a link/);
+  assert.equal(await readFile(path.join(installDir, 'bin/tsp'), 'utf8'), shimBefore);
   artifact.sha256 = '0'.repeat(64); await writeFile(path.join(served, 'manifest.json'), JSON.stringify(manifest));
   const corrupt = await install(); assert.notEqual(corrupt.code, 0); assert.match(corrupt.stderr, /checksum mismatch/); assert.equal(await readFile(path.join(installDir, 'bin/tsp'), 'utf8'), shimBefore);
   const unmanaged = path.join(temporary, 'unmanaged'); await mkdir(unmanaged); await writeFile(path.join(unmanaged, 'important'), 'untouched');
-  const refused = await execute('sh', [downloadedScript, '--base-url', `${address}/api`, '--install-dir', unmanaged, '--no-modify-path']); assert.notEqual(refused.code, 0); assert.match(refused.stderr, /unmanaged/); assert.equal(await readFile(path.join(unmanaged, 'important'), 'utf8'), 'untouched');
+  const refused = await install(unmanaged); assert.notEqual(refused.code, 0); assert.match(refused.stderr, /unmanaged/); assert.equal(await readFile(path.join(unmanaged, 'important'), 'utf8'), 'untouched');
 });
