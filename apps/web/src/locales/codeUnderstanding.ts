@@ -1,4 +1,7 @@
 const codeUnderstanding: Record<string, string> = {
+  '查看权限受限': 'Viewing access is limited',
+  '观看者可以阅读已发布的项目资料。查看规格地图和源码证据需要项目成员权限。': 'Viewers can read published project materials. Viewing specification maps and source code evidence requires project membership.',
+  '查看项目文档': 'View project documents',
   '规格': 'Specifications',
   '正在加载规格…': 'Loading specifications…',
   '这里将呈现项目规格地图': 'Your project specification map will appear here',

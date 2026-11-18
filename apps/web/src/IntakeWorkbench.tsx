@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError } from './apiError';
+import { CodeSourceAccessNotice } from './CodeSourceAccessNotice';
 import { useLocale } from './useLocale';
 import { t } from './i18n.ts';
 import { MarkdownDocument } from './MarkdownDocument';
@@ -32,7 +33,10 @@ function IntakeProject({ projectCode }: { projectCode: string }) {
   const detail = useQuery({ queryKey: ['intake', projectCode, batchCode], queryFn: () => getIntake(projectCode, batchCode ?? ''), enabled: list.isSuccess && Boolean(batchCode), retry: false,
     refetchInterval: query => applying || query.state.data?.status === 'applying' ? 1500 : false });
   // A stale cached result must never keep an unauthorized candidate visible after a refetch fails.
-  const denied = list.error instanceof ApiError && (list.error.status === 403 || list.error.status === 401 || ['intake_forbidden', 'project_forbidden', 'forbidden'].includes(list.error.code));
+  const apiError = list.error instanceof ApiError ? list.error : null;
+  const viewerDenied = [list.error, context.error, detail.error]
+    .some(error => error instanceof ApiError && error.code === 'intake_forbidden');
+  const denied = apiError && (apiError.status === 403 || apiError.status === 401 || ['project_forbidden', 'forbidden'].includes(apiError.code));
   const batch = !detail.error && detail.data?.project_code === projectCode ? detail.data : undefined;
   async function saved(value: IntakeBatchDetail) {
     setSelected(value.code);
@@ -41,9 +45,17 @@ function IntakeProject({ projectCode }: { projectCode: string }) {
   }
   return <main className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-slate-50">
     <section className="mx-auto max-w-[1440px] p-4 sm:p-6">
-      <header className="mb-5 flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-2xl font-bold text-slate-950">{t('代码规格')}</h1><p className="mt-2 text-sm leading-6 text-slate-500">{t('从代码和团队资料生成可追溯规格，检查能力覆盖后审阅发布。')}</p></div>{list.data?.can_submit && !list.error && <button type="button" className="ui-button ui-button-secondary" aria-expanded={showSetup} onClick={() => setShowSetup(!showSetup)}>{t('接入已有代码')}</button>}</header>
-      {actionNotice && <p role="status" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-800">{actionNotice}</p>}
-      {list.isPending ? <p role="status" className="p-6 text-sm text-slate-500">{t('正在加载接入批次…')}</p> : list.error ? <section className="rounded-xl border border-slate-200 bg-white p-6"><h2 className="text-base font-semibold text-slate-800">{denied ? t('当前身份不能访问代码候选') : t('无法加载接入批次')}</h2><p className="mt-2 text-sm leading-6 text-slate-600">{denied ? t('代码候选与源码定位仅向当前项目成员开放。观看者可在对应页面阅读已发布资料。') : list.error.message}</p><button type="button" className="ui-button ui-button-secondary mt-4" onClick={() => void list.refetch()}>{t('重试')}</button></section> : <>
+      <header className="mb-5 flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-2xl font-bold text-slate-950">{t('代码规格')}</h1><p className="mt-2 text-sm leading-6 text-slate-500">{t('从代码和团队资料生成可追溯规格，检查能力覆盖后审阅发布。')}</p></div>{list.data?.can_submit && !list.error && !viewerDenied && <button type="button" className="ui-button ui-button-secondary" aria-expanded={showSetup} onClick={() => setShowSetup(!showSetup)}>{t('接入已有代码')}</button>}</header>
+      {!viewerDenied && actionNotice && <p role="status" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-800">{actionNotice}</p>}
+      {viewerDenied ? (
+        <CodeSourceAccessNotice projectCode={projectCode} resource="candidates" />
+      ) : list.isPending ? <p role="status" className="p-6 text-sm text-slate-500">{t('正在加载接入批次…')}</p> : list.error ? (
+        <section className="rounded-xl border border-slate-200 bg-white p-6">
+          <h2 className="text-base font-semibold text-slate-800">{denied ? t('当前身份不能访问代码候选') : t('无法加载接入批次')}</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-600">{denied ? t('请确认当前账号有权访问此项目。') : list.error.message}</p>
+          <button type="button" className="ui-button ui-button-secondary mt-4" onClick={() => void list.refetch()}>{t('重试')}</button>
+        </section>
+      ) : <>
         {(showSetup || !list.data.batches.length) && <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5"><IntakeSetup projectCode={projectCode} context={context.data} error={context.error} canSubmit={list.data.can_submit} onSaved={saved} onRetry={() => void context.refetch()} /></section>}
         {list.data.batches.length > 0 && <div className="grid min-w-0 items-start gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
           <aside className="document-library-sidebar" aria-label={t('接入批次列表')}><header className="shrink-0 border-b border-slate-200 p-4"><h2 className="text-sm font-semibold text-slate-800">{t('接入批次')} <span className="font-normal text-slate-500">{list.data.batches.length}</span></h2><button type="button" className="ui-context-action mt-2" onClick={() => { void list.refetch(); void detail.refetch(); }}>{t('刷新')}</button></header><div className="scroll-region min-h-0 flex-1 overflow-y-auto overscroll-contain p-2">{list.data.batches.map(entry => <button key={entry.code} type="button" aria-current={batchCode === entry.code ? 'true' : undefined} onClick={() => setSelected(entry.code)} className={`mb-2 block w-full rounded-xl border p-3 text-left ${batchCode === entry.code ? 'border-cyan-200 bg-cyan-50' : 'border-transparent hover:bg-slate-50'}`}><span className="block break-words text-sm font-semibold text-slate-900">{entry.namespace}</span><span className="mt-2 flex flex-wrap justify-between gap-2 text-xs text-slate-600"><span>{t(intakeStatusLabels[entry.status])}</span><span>{entry.applied_count} / {entry.item_count}</span></span><code className="mt-2 block break-all text-[11px] text-slate-500">{entry.code}</code></button>)}</div></aside>

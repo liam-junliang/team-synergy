@@ -25,7 +25,7 @@ const run = (code, kind = 'commit') => ({ code, repository_code: 'REPO-A', kind,
 const context = { repositories: [{ code: 'REPO-A', name: '演示仓库', status: 'active' }], runs: [run('RUN-A'), run('RUN-DRAFT', 'draft')], views: [{ code: 'VIEW-A', kind: 'commit', selections: [{ repository_code: 'REPO-A', run_code: 'RUN-A' }] }], current_view: 'VIEW-A', current_draft_view: null, can_write: true, truncated: false };
 const result = { source: 'published_projection', runs: [run('RUN-A')], view: null, nodes: [node('module'), node('symbol', 'RUN-A', { provider: 'codegraph', kind: 'function', path: 'src/auth.ts', line_start: 4, line_end: 8 })], edges: [edge('bridge', 'module', 'symbol')], evidence: [], tour: [], coverage: [], total_nodes: 2, offset: 0, limit: 64, truncated: false, capabilities: ['overview', 'node', 'relations'] };
 const render = (component, props) => renderToStaticMarkup(createElement(component, props));
-function renderWorkbench(route, data = context, graph = result, extraEntries = [], native = null) {
+function renderWorkbench(route, data = context, graph = result, extraEntries = [], native = null, errorEntries = []) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   client.setQueryData(['code-understanding-context', 'PROJECT-A'], data);
   client.setQueryData(['code-understanding-runtime', 'PROJECT-A'], { configured: false, model: null, message: '' });
@@ -37,9 +37,57 @@ function renderWorkbench(route, data = context, graph = result, extraEntries = [
     client.setQueryData(['code-understanding-ua-map', 'PROJECT-A', code], { run: item, graph: native, projection: graph, metadata_complete: Boolean(native) });
   }
   for (const [key, value] of extraEntries) client.setQueryData(key, value);
+  for (const [queryKey, error] of errorEntries) client.getQueryCache().build(client, { queryKey }).setState({ status: 'error', error });
   try { return renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(components.CodeUnderstandingWorkbench, { projectCode: 'PROJECT-A', route }))); }
   finally { client.clear(); }
 }
+
+test('viewer specifications use the current language and point to published project documents', async () => {
+  const { ApiError } = await vite.ssrLoadModule('/src/apiError.ts');
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const queryKey = ['code-understanding-context', 'PROJECT-A'];
+  client.setQueryData(queryKey, context);
+  const query = client.getQueryCache().find({ queryKey });
+  const markup = () => renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(components.CodeUnderstandingWorkbench, { projectCode: 'PROJECT-A', route: { view: 'understanding' } })));
+  try {
+    query.setState({ status: 'error', error: new ApiError('code_understanding_forbidden', 'Source-bearing knowledge is not available to viewers', 403) });
+    for (const [locale, heading, description, link] of [
+      ['zh-CN', '查看权限受限', '查看规格地图和源码证据需要项目成员权限', '查看项目文档'],
+      ['en-US', 'Viewing access is limited', 'Viewing specification maps and source code evidence requires project membership', 'View project documents'],
+    ]) {
+      i18n.setLocale(locale, false);
+      const html = markup();
+      assert.ok(html.includes(heading));
+      assert.ok(html.includes(description));
+      assert.ok(html.includes(`href="/projects/PROJECT-A/documents">${link}</a>`));
+      assert.doesNotMatch(html, /role="alert"|cu-error|code_understanding_forbidden|Source-bearing knowledge|重试|Retry|演示仓库/);
+    }
+    query.setState({ status: 'error', error: new Error('Temporary network failure') });
+    assert.match(markup(), /role="alert".*Temporary network failure.*>Retry<\/button>/);
+  } finally {
+    i18n.setLocale('zh-CN', false);
+    client.clear();
+  }
+});
+
+test('a viewer denial on a specification read hides cached source data even when project context succeeded', async () => {
+  const { ApiError } = await vite.ssrLoadModule('/src/apiError.ts');
+  const mainline = { view: 'understanding' };
+  const uaKey = ['code-understanding-ua-map', 'PROJECT-A', 'RUN-A'];
+  const denied = new ApiError('code_understanding_forbidden', 'Source-bearing knowledge is not available to viewers', 403);
+  for (const [route, key, cached] of [
+    [mainline, uaKey],
+    [mainline, ['code-understanding-graph', 'PROJECT-A', { run_code: 'RUN-A', provider: 'codegraph', query: '', offset: 0, limit: 64 }], result],
+    [{ ...mainline, understandingRun: 'OLDER-RUN' }, ['code-understanding-run', 'PROJECT-A', 'OLDER-RUN'], run('OLDER-RUN')],
+    [{ ...mainline, understandingNode: 'cg:symbol' }, ['code-understanding-node', 'PROJECT-A', 'RUN-A', 'cg:symbol', 'both'], result],
+  ]) {
+    const html = renderWorkbench(route, context, result, cached ? [[key, cached]] : [], null, [[key, denied]]);
+    assert.match(html, /查看权限受限/);
+    assert.doesNotMatch(html, /cu-reader-strip|cu-reader-stage|cu-error|Source-bearing knowledge|重试/);
+  }
+  const transient = renderWorkbench(mainline, context, result, [], null, [[uaKey, new Error('Retryable read failure')]]);
+  assert.match(transient, /role="alert".*Retryable read failure.*>重试<\/button>/);
+});
 
 test('knowledge URLs preserve encoded version/node context and project switches drop foreign identities', () => {
   const path = codeUnderstandingPath('项目/A', { repository: 'REPO-A', run: 'RUN-A', node: 'ua:module/a?x=1', view: 'VIEW-A' });
