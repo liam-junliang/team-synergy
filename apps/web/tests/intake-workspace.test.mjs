@@ -133,14 +133,56 @@ test('existing architecture links to its original reader in a safe new tab even 
 });
 
 test('permission errors hide stale cached candidates instead of exposing the former member preview', () => {
-  for (const [code, status] of [['forbidden', 403], ['intake_forbidden', 200], ['project_forbidden', 200]]) {
+  for (const [code, status] of [['forbidden', 403], ['project_forbidden', 200]]) {
     const html = render(ui.IntakeWorkbench, { projectCode: 'PROJECT' }, [
       [['intakes', 'PROJECT'], { can_submit: true, can_review: true, batches: [batch] }],
       [['intake', 'PROJECT', 'BATCH'], batch],
     ], [[['intakes', 'PROJECT'], new errors.ApiError(code, 'Forbidden', status)]]);
-    assert.match(html, /当前身份不能访问代码候选/); assert.match(html, /观看者/);
-    assert.doesNotMatch(html, /账户权限|src\/auth.ts|上传候选 JSON|接入批次列表/);
+    assert.match(html, /当前身份不能访问代码候选/);
+    assert.doesNotMatch(html, /观看者|账户权限|src\/auth.ts|上传候选 JSON|接入批次列表/);
   }
+});
+
+test('viewers see the localized code candidate access notice and can open project documents', () => {
+  for (const [locale, heading, description, link] of [
+    ['zh-CN', '查看权限受限', '查看代码候选和源码证据需要项目成员权限', '查看项目文档'],
+    ['en-US', 'Viewing access is limited', 'Viewing code candidates and source code evidence requires project membership', 'View project documents'],
+  ]) {
+    i18n.setLocale(locale, false);
+    const html = render(ui.IntakeWorkbench, { projectCode: 'PROJECT' }, [
+      [['intakes', 'PROJECT'], { can_submit: true, can_review: true, batches: [batch] }],
+      [['intake', 'PROJECT', 'BATCH'], batch],
+    ], [[['intakes', 'PROJECT'], new errors.ApiError('intake_forbidden', 'Forbidden', 403)]]);
+    assert.ok(html.includes(heading));
+    assert.ok(html.includes(description));
+    assert.ok(html.includes(`href="/projects/PROJECT/documents">${link}</a>`));
+    assert.doesNotMatch(html, /intake_forbidden|重试|Retry|账户权限|src\/auth.ts|上传候选 JSON|接入批次列表/);
+  }
+  const html = render(ui.IntakeWorkbench, { projectCode: 'PROJECT' }, [
+    [['intakes', 'PROJECT'], { batches: [] }],
+  ], [
+    [['intakes', 'PROJECT'], new errors.ApiError('internal_error', 'Temporary failure', 500)],
+  ]);
+  assert.match(html, /Unable to load intake batches/);
+  assert.match(html, />Retry<\/button>/);
+});
+
+test('viewer denial on intake context or detail hides the entire cached candidate workspace', () => {
+  const props = { projectCode: 'PROJECT' };
+  const entries = [
+    [['intakes', 'PROJECT'], { can_submit: true, can_review: true, batches: [batch] }],
+    [['intake-context', 'PROJECT'], { repositories: [], skill_version: '1.0.0' }],
+    [['intake', 'PROJECT', 'BATCH'], batch],
+  ];
+  const detailKey = ['intake', 'PROJECT', 'BATCH'];
+  assert.match(render(ui.IntakeWorkbench, props, entries), /接入批次列表/);
+  for (const key of [['intake-context', 'PROJECT'], detailKey]) {
+    const html = render(ui.IntakeWorkbench, props, entries, [[key, new errors.ApiError('intake_forbidden', 'Forbidden', 403)]]);
+    assert.match(html, /查看权限受限/);
+    assert.doesNotMatch(html, /接入已有代码|接入批次列表|账户权限|src\/auth.ts|上传候选 JSON|重试|重新读取批次|Forbidden/);
+  }
+  const html = render(ui.IntakeWorkbench, props, entries, [[detailKey, new Error('Retryable detail failure')]]);
+  assert.match(html, /Retryable detail failure.*>重新读取批次<\/button>/);
 });
 
 test('intake errors translate stable codes in both locales and retain original diagnostics', () => {

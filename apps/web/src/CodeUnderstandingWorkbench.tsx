@@ -7,6 +7,8 @@ import { codeUnderstandingPath, type WorkspaceRoute } from './workspaceRouting';
 import { navigateWorkspace } from './workspaceNavigation';
 import { formatDateTime, t } from './i18n';
 import { useLocale } from './useLocale';
+import { ApiError } from './apiError';
+import { CodeSourceAccessNotice } from './CodeSourceAccessNotice';
 import { UaNativeReader } from './UaNativeReader';
 import { PublicCodeSchema } from '../../../packages/contracts/src/schemas';
 import './codeUnderstanding.css';
@@ -104,12 +106,16 @@ export function CodeUnderstandingWorkbench({ projectCode, route }: { projectCode
     go({ repository: repositoryCode, run: readerRunCode, node: id, view: route.understandingView });
   };
   const activeRuns = context.data?.runs.filter(activeRun) || [];
+  const viewerDenied = [context.error, historicalRun.error, ua.error, symbols.error, detail.error]
+    .some(error => error instanceof ApiError && error.code === 'code_understanding_forbidden');
   const legacy = readableUa?.projection;
   const visibleLegacy = legacy ? { ...legacy, nodes: legacy.nodes.slice(0, PAGE_SIZE), truncated: legacy.nodes.length > PAGE_SIZE } : null;
   const hostedControls = <HostedCodeAnalysisControls key={`${projectCode}:${repositoryCode}`} projectCode={projectCode} repositoryCode={repositoryCode} canWrite={context.data?.can_write === true} />;
 
-  return <main aria-label={t('规格')} className={`cu-workbench cu-reader-workbench ${focused ? 'cu-reader-focused' : ''}`}>
-    {context.isPending ? <p role="status" className="cu-empty">{t('正在加载规格…')}</p> : context.error ? <Notice error={context.error} onRetry={() => void context.refetch()} /> : <>
+  return <main aria-label={t('规格')} className={`cu-workbench cu-reader-workbench ${focused && !viewerDenied ? 'cu-reader-focused' : ''}`}>
+    {viewerDenied ? (
+      <div className="mx-auto w-full max-w-[1440px] p-4 sm:p-6"><CodeSourceAccessNotice projectCode={projectCode} resource="map" /></div>
+    ) : context.isPending ? <p role="status" className="cu-empty">{t('正在加载规格…')}</p> : context.error ? <Notice error={context.error} onRetry={() => void context.refetch()} /> : <>
       {activeRuns.length > 0 && <details className="cu-progress"><summary>{t('正在分析')} · {activeRuns.length}</summary>{activeRuns.map(run => <a key={run.code} href={codeUnderstandingPath(projectCode, { repository: run.repository_code, run: run.code })}>{run.repository_code} · {t(statusNames[run.status])} · {formatDateTime(run.updated_at)}</a>)}<p>{t('进度由分析执行方上报；最近活动时间不代表仍在执行。')}</p></details>}
       {Boolean(context.data?.repositories.length) && <div className="cu-reader-strip">
         {context.data && (context.data.repositories.length > 1 ? <label className="cu-repository-picker"><span>{t('仓库')}</span><select aria-label={t('代码仓库')} value={selection?.repository?.code ?? ''} onChange={event => chooseRepository(event.target.value)}>{!selection?.repository && <option value="" disabled>{t('选择仓库')}</option>}{context.data.repositories.map(repo => <option key={repo.code} value={repo.code}>{repo.name}</option>)}</select></label> : context.data.repositories[0] && <span className="cu-reader-repository" title={t('项目主线')}>{context.data.repositories[0].name}</span>)}
