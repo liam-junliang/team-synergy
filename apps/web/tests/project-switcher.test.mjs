@@ -38,15 +38,16 @@ test('switching preserves legitimate project and requirement tabs with encoded p
   assert.equal(projectSwitchPath({ view: 'account' }, 'NEW'), '/projects/NEW/overview');
 });
 
-test('search finds authorized projects by project or team name/code without changing data or dropping archived projects', () => {
+test('search finds active authorized projects by project or team name/code without changing source data', () => {
   const original = JSON.stringify({ projects, teams });
   assert.deepEqual(filterSwitchableProjects(projects, teams, '  synergy '), [projects[0]]);
   assert.deepEqual(filterSwitchableProjects(projects, teams, 'PROJECT-b'), [projects[1]]);
-  assert.deepEqual(filterSwitchableProjects(projects, teams, 'engineering'), [projects[0], projects[2]]);
+  assert.deepEqual(filterSwitchableProjects(projects, teams, 'engineering'), [projects[0]]);
   assert.deepEqual(filterSwitchableProjects(projects, teams, '产品'), [projects[1]]);
   assert.deepEqual(filterSwitchableProjects(projects, [], 'TEAM-B'), [projects[1]], 'team-code search works even when team labels are unavailable');
   assert.deepEqual(filterSwitchableProjects(projects, teams, 'unknown'), []);
-  assert.equal(filterSwitchableProjects(projects, teams, ''), projects);
+  assert.deepEqual(filterSwitchableProjects(projects, teams, ''), projects.slice(0, 2));
+  assert.deepEqual(filterSwitchableProjects(projects, teams, 'Archived product'), []);
   assert.equal(JSON.stringify({ projects, teams }), original);
 });
 
@@ -140,7 +141,6 @@ test('internal and legacy switcher options keep safe labels while team data is l
   const unavailable = render(projects[0], []);
   assert.match(unavailable, /TEAM-A/);
   assert.doesNotMatch(unavailable, /外部协作/);
-  assert.match(render(projects[2], teams), /已归档/);
 });
 
 test('project listing uses the existing membership-scoped endpoint without an arbitrary principal or team filter', async () => {
@@ -149,10 +149,13 @@ test('project listing uses the existing membership-scoped endpoint without an ar
   const paths = [];
   globalThis.fetch = async path => {
     paths.push(String(path));
-    return new Response(JSON.stringify({ ok: true, data: String(path) === '/api/projects' ? [{ project_code: 'MEMBER-PROJECT', team_code: 'TEAM-A', name: 'Private project', status: 'active', role: 'member' }] : [] }), { status: 200 });
+    return new Response(JSON.stringify({ ok: true, data: String(path) === '/api/projects' ? [
+      { project_code: 'MEMBER-PROJECT', team_code: 'TEAM-A', name: 'Private project', status: 'active', role: 'member' },
+      { project_code: 'ARCHIVED-PROJECT', team_code: 'TEAM-A', name: 'Old project', status: 'archived', role: 'owner' },
+    ] : [] }), { status: 200 });
   };
   try {
-    assert.equal((await listProjects())[0].code, 'MEMBER-PROJECT');
+    assert.deepEqual((await listProjects()).map(project => project.code), ['MEMBER-PROJECT']);
     await listTeams();
     assert.deepEqual(paths, ['/api/projects', '/api/teams']);
   } finally { globalThis.fetch = originalFetch; }

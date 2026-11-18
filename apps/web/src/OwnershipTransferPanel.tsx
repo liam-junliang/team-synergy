@@ -18,7 +18,7 @@ export function OwnershipTransferPanel({ scope, scopeCode, teamCode, ownerCode, 
   const relevant = (transfers.data ?? []).filter((item) => item.scope === scope && item.scope_code === scopeCode && item.status === 'pending' && Date.parse(item.expires_at) > Date.now());
   async function refresh() {
     setTarget('');
-    await Promise.all(['ownership-transfers', 'teams', 'projects', 'project', 'team-members', 'project-members'].map((key) => client.invalidateQueries({ queryKey: [key] })));
+    await Promise.all(['account-closure', 'ownership-transfers', 'teams', 'projects', 'project', 'team-members', 'project-members'].map((key) => client.invalidateQueries({ queryKey: [key] })));
   }
   const mutation = useMutation({ mutationFn: (input: { action: 'create' | 'accept' | 'cancel' | 'resolve'; code?: string }) => {
     if (input.action === 'resolve') return resolveOwnership({ scope, scope_code: scopeCode, owner_user_code: target });

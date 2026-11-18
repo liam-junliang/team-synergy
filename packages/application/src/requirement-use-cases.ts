@@ -1,6 +1,6 @@
 import { writeRequirement } from './intake-entity-writers.js';
 import { lockAggregate } from './aggregate-lock.js';
-import { assertProjectAccess, effectiveProjectMember, isProjectManager } from './project-access.js';
+import { assertProjectAccess, effectiveProjectMember, isProjectManager, visibleProjectIds } from './project-access.js';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { Db } from '@team-synergy/persistence';
 import { schema } from '@team-synergy/persistence';
@@ -471,10 +471,7 @@ export function createRequirementUseCases(db: Db) {
         ),
       );
 
-    const visible = new Set<bigint>();
-    for (const id of new Set(rows.map(row => row.feature?.project_id ?? row.module?.project_id ?? row.document?.project_id).filter((id): id is bigint => id !== undefined))) {
-      if (await effectiveProjectMember(db, id, principal.id)) visible.add(id);
-    }
+    const visible = new Set(await visibleProjectIds(db, principal.id, project?.code));
     const filtered = rows.filter((row) => {
       const projectId = row.feature?.project_id ?? row.module?.project_id ?? row.document?.project_id ?? null;
       if (projectId === null || !visible.has(projectId) || (project && projectId !== project.id)) return false;

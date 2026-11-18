@@ -70,6 +70,9 @@ test('memory center enforces account/project visibility and exposes real private
       const adminWithoutProject = data(await f.get(f.outsider));
       assert.deepEqual(adminWithoutProject.projects, []); assert.equal(adminWithoutProject.captures.total, 0);
       assert.equal((await f.get(f.outsider, '?projectCode=' + project.code)).statusCode, 403);
+      await f.q("update projects set status='archived' where id=$1", [project.id]);
+      assert.deepEqual(data(await f.get(f.member)).projects, []);
+      assert.equal((await f.get(f.member, '?projectCode=' + project.code)).statusCode, 403);
     } finally { await f.app.close(); }
   }));
 

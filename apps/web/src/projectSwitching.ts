@@ -23,11 +23,12 @@ export function isExternalProject(project: ProjectSummary, teams: TeamSummary[],
   return teamMembershipKnown ? true : undefined;
 }
 
-/** Filter only the already authorized API result; names and codes remain user content. */
+/** Search active projects in the authorized API result. */
 export function filterSwitchableProjects(projects: ProjectSummary[], teams: TeamSummary[], search: string): ProjectSummary[] {
+  const active = projects.filter(project => project.status === 'active');
   const needle = search.trim().toLocaleLowerCase();
-  if (!needle) return projects;
+  if (!needle) return active;
   const teamNames = new Map(teams.map(team => [team.code, team.name]));
-  return projects.filter(project => [project.name, project.code, project.team_code, project.team_name, teamNames.get(project.team_code)]
+  return active.filter(project => [project.name, project.code, project.team_code, project.team_name, teamNames.get(project.team_code)]
     .some(value => value?.toLocaleLowerCase().includes(needle)));
 }

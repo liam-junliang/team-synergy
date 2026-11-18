@@ -9,6 +9,7 @@ import { ProjectSwitcher } from './ProjectSwitcher';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Component, lazy, Suspense, useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { cancelTask, getProject, listFeatures, listMembers, listTasks, getTask, logoutWebSession, restoreWebSession, taskHistory, updateTaskContract, type AuthUser, type Feature, type Member, type TaskDetail as TaskDetailData, type TaskSummary, type UpdateTaskContractInput } from './api';
+import { ApiError } from './apiError';
 import { STATUS_META, BOARD_COLUMNS, PROFILE_META, SOURCE_META, isStale } from './status';
 import { agentWorkspacePath, safeAgentReturnPath, projectWorkspacePath, workspacePathAfterLogin, type ProjectSection, type WorkspaceRoute } from './workspaceRouting';
 import { listenWorkspaceNavigation, navigateWorkspace, readWorkspaceRoute } from './workspaceNavigation';
@@ -274,20 +275,12 @@ export function BoardInsights({
 export default function App() {
   useLocale();
   const route = useWorkspaceRoute();
-  const { projectCode } = route;
   const queryClient = useQueryClient();
   const [session, setSession] = useState<AuthUser | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
-  const view = session?.is_system_admin && route.view === 'teams' ? 'admin' : route.view;
-  const inAdminConsole = Boolean(session?.is_system_admin && (view === 'admin' || view === 'account'));
   useEffect(() => {
     if (!checkingSession && session?.is_system_admin && route.view === 'teams') navigateWorkspace('/admin/teams', { replace: true });
   }, [checkingSession, session, route.view]);
-  const projectQuery = useQuery({
-    queryKey: ['project', projectCode],
-    queryFn: () => getProject(projectCode as string),
-    enabled: Boolean(projectCode && session),
-  });
 
   useEffect(() => {
     let active = true;
@@ -326,6 +319,50 @@ export default function App() {
   if (!session) return <LoginPage onLogin={(user) => { queryClient.clear(); setSession(user); navigateWorkspace(workspacePathAfterLogin(window.location.href, user.is_system_admin), { replace: true }); }} />;
   if (session.must_change_password) return <PasswordChangePage user={session} onChanged={(user) => { queryClient.clear(); setSession(user); navigateWorkspace(workspacePathAfterLogin(window.location.href, user.is_system_admin), { replace: true }); }} onLogout={() => void logout()} />;
 
+  return <AuthenticatedWorkspace route={route} session={session} onLogout={() => void logout()} onClosed={finishSession} />;
+}
+
+export function AuthenticatedWorkspace({ route, session, onLogout, onClosed }: {
+  route: WorkspaceRoute;
+  session: AuthUser;
+  onLogout: () => void;
+  onClosed: () => void;
+}) {
+  useLocale();
+  const { projectCode } = route;
+  const view = session.is_system_admin && route.view === 'teams' ? 'admin' : route.view;
+  const inAdminConsole = session.is_system_admin && (view === 'admin' || view === 'account');
+  const projectQuery = useQuery({
+    queryKey: ['project', projectCode],
+    queryFn: () => getProject(projectCode as string),
+    enabled: Boolean(projectCode),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  });
+
+  const code = projectQuery.error instanceof ApiError ? projectQuery.error.code : undefined;
+  const archived = code === 'project_archived' || (projectQuery.isSuccess && projectQuery.data.status === 'archived');
+  if (projectCode && !archived && (projectQuery.isPending || (projectQuery.isFetching && !projectQuery.isFetchedAfterMount))) {
+    return <main className="grid min-h-screen place-items-center bg-slate-50 text-sm text-slate-500"><p role="status">{t('正在加载项目…')}</p></main>;
+  }
+  if (projectCode && (!projectQuery.isSuccess || projectQuery.data.status !== 'active')) {
+    const blocked = code === 'project_forbidden' || code === 'project_not_found';
+    return (
+      <main className="grid min-h-screen place-items-center bg-slate-50 p-6">
+        <section className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h1 className="font-bold text-slate-900">{t(archived ? '项目已归档' : blocked ? '项目不可访问' : '项目读取失败')}</h1>
+          <p className="mt-2 text-sm leading-6 text-slate-600">{t(archived
+            ? '系统管理员可在团队项目管理中筛选已归档项目并恢复。'
+            : blocked ? '请确认项目链接，或向项目负责人核对访问权限。' : '请检查连接后重试。')}</p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <a href={session.is_system_admin ? '/admin/teams' : '/teams'} className="ui-button ui-button-secondary">{t(session.is_system_admin ? '前往团队项目管理' : '返回团队与项目')}</a>
+            {!archived && !blocked && <button type="button" className="ui-button ui-button-secondary" onClick={() => void projectQuery.refetch()}>{t('重新读取项目')}</button>}
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <ProjectDisplayNamesProvider projectCode={projectCode}>
     <div className="flex h-screen min-w-[320px] flex-col overflow-hidden">
@@ -349,7 +386,7 @@ export default function App() {
           {!inAdminConsole && <a href={agentWorkspacePath('connect', { projectCode, agentReturnPath: view === 'agent' ? route.agentReturnPath : `${window.location.pathname}${window.location.search}` })} aria-label={t('Agent 集成')} title={t('Agent 集成')} aria-current={view === 'agent' ? 'page' : undefined} className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${view === 'agent' ? 'border-cyan-500 bg-cyan-500/15 text-cyan-300' : 'border-slate-700 bg-slate-900 text-slate-300 hover:border-cyan-500 hover:text-cyan-300'}`}><svg aria-hidden="true" viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="7" width="14" height="13" rx="3" /><path d="M12 3v4M9 12v1m6-1v1m-6 4h6M2 11v5m20-5v5" /><circle cx="12" cy="2.5" r=".5" /></svg><span>{t('Agent 集成')}</span></a>}
           {!inAdminConsole && (projectCode || view === 'agent') && <ProjectSwitcher route={route} currentProjectName={projectQuery.data?.name} />}
           <LanguageSwitcher />
-          <AccountMenu key={window.location.pathname + window.location.search} user={session} currentView={view} onLogout={() => void logout()} />
+          <AccountMenu key={window.location.pathname + window.location.search} user={session} currentView={view} onLogout={onLogout} />
         </div>
       </header>
       <ErrorBoundary>
@@ -367,7 +404,7 @@ export default function App() {
         {projectCode && view === 'defects' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载…")}</div>}><DefectsWorkbench key={projectCode} projectCode={projectCode} /></Suspense>}
         {projectCode && view === 'documents' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载项目文档…")}</div>}><ProjectDocumentsWorkbench key={`${projectCode}:${route.documentCode ?? ''}:${route.folderCode ?? ''}:${route.createDocument ?? false}`} projectCode={projectCode} documentCode={route.documentCode} folderCode={route.folderCode} createDocument={route.createDocument} /></Suspense>}
         {projectCode && view === 'handovers' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载交接记录…")}</div>}><ProjectHandoversWorkbench key={projectCode} projectCode={projectCode} handoverCode={route.handoverCode} /></Suspense>}
-        {view === 'account' && <AccountSettings user={session} onClosed={finishSession} />}
+        {view === 'account' && <AccountSettings user={session} onClosed={onClosed} />}
       </ErrorBoundary>
       {projectCode && !inAdminConsole && <SystemAgentPanel key={`${session.code}:${projectCode}`} projectCode={projectCode} projectName={projectQuery.data?.name ?? projectCode} userCode={session.code} />}
     </div>

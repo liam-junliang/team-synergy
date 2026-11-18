@@ -1,10 +1,11 @@
 import { lockProjectByCode } from './aggregate-lock.js';
-import { and, asc, count, eq, gt, ilike, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, count, eq, gt, ilike, or, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { schema, type Db } from '@team-synergy/persistence';
 import { DomainError, assertAuditedChange, toAuditEvent } from '@team-synergy/domain';
 import { createPublicCode } from './public-code.js';
 import { fail, insertAudit, now } from './task-service.js';
+import { assertNoProjectArchiveRuns } from './project-archive.js';
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 export type AdminGovernanceFilter = { q?: string; limit?: number; cursor?: string };
@@ -139,11 +140,7 @@ export function createAdminGovernanceUseCases(db: Db) {
         if (description && description.length > 10000) throw new DomainError('admin_input_invalid', '项目说明不能超过 10000 个字符');
         const status = cmd.status as 'active' | 'archived' | undefined ?? project.status;
         if (status === 'archived' && project.status !== status) {
-          const activeRuns = await tx.select({ code: schema.runs.code }).from(schema.runs)
-            .innerJoin(schema.tasks, eq(schema.tasks.id, schema.runs.task_id))
-            .innerJoin(schema.features, eq(schema.features.id, schema.tasks.feature_id))
-            .where(and(eq(schema.features.project_id, project.id), inArray(schema.runs.status, ['active', 'preparing', 'suspended']))).limit(20);
-          if (activeRuns.length) throw new DomainError('project_has_active_runs', '项目仍有运行或交接中的任务，请先完成交接或结束运行', { run_codes: activeRuns.map(row => row.code) });
+          await assertNoProjectArchiveRuns(tx, project.id);
         }
         const changed = name !== project.name || description !== project.description || status !== project.status;
         const snapshot = project.current_snapshot + (changed ? 1 : 0);

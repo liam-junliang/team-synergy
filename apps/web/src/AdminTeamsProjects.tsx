@@ -56,16 +56,17 @@ export function AdminEditDialog({ selection, onClose }: { selection: Selection; 
   const [status, setStatus] = useState<'active' | 'archived'>(selection.kind === 'project' ? selection.item.status : 'active');
   const [reason, setReason] = useState('');
   const mutation = useMutation({ mutationFn: () => selection.kind === 'team' ? adminUpdateTeam(selection.item.team_code, { name: name.trim(), reason: reason.trim() }) : adminUpdateProject(selection.item.project_code, { name: name.trim(), description: description.trim() || null, status, reason: reason.trim(), base_snapshot: selection.item.current_snapshot }), onSuccess: async () => {
-    await Promise.all(['admin-teams', 'admin-projects', 'teams', 'projects', 'project'].map(key => queryClient.invalidateQueries({ queryKey: [key] }))); onClose();
+    await Promise.all(['admin-teams', 'admin-projects', 'teams', 'projects', 'project', 'team-projects-governance'].map(key => queryClient.invalidateQueries({ queryKey: [key] }))); onClose();
   } });
+  const isRestoring = selection.kind === 'project' && selection.item.status === 'archived' && status === 'active';
   function submit(event: FormEvent) { event.preventDefault(); if (name.trim() && reason.trim()) mutation.mutate(); }
   return <WorkspaceDialog id="admin-resource-edit" title={t(selection.kind === 'team' ? '编辑团队' : '管理项目')} description={t('管理操作会记录审计日志，请说明调整原因。')} onClose={() => { if (!mutation.isPending) onClose(); }}>
     <form className="space-y-4" onSubmit={submit}>
       <label className="ui-field-label block">{t('名称')}<input className="form-control mt-2" required maxLength={200} value={name} onChange={event => setName(event.target.value)} /></label>
-      {selection.kind === 'project' && <><label className="ui-field-label block">{t('项目说明')}<textarea className="form-control mt-2" rows={4} value={description} onChange={event => setDescription(event.target.value)} maxLength={10000} /></label><label className="ui-field-label block">{t('项目状态')}<select className="form-control mt-2" value={status} onChange={event => setStatus(event.target.value as 'active' | 'archived')}><option value="active">{t('启用')}</option><option value="archived">{t('已归档')}</option></select></label>{status === 'archived' && <p className="text-xs leading-5 text-amber-700">{t('归档后项目进入只读状态；恢复后成员可继续操作。')}</p>}</>}
+      {selection.kind === 'project' && <><label className="ui-field-label block">{t('项目说明')}<textarea className="form-control mt-2" rows={4} value={description} onChange={event => setDescription(event.target.value)} maxLength={10000} /></label><label className="ui-field-label block">{t('项目状态')}<select className="form-control mt-2" value={status} onChange={event => setStatus(event.target.value as 'active' | 'archived')}><option value="active">{t(selection.item.status === 'archived' ? '恢复项目' : '启用')}</option><option value="archived">{t('已归档')}</option></select></label>{status === 'archived' && <p className="text-xs leading-5 text-slate-600">{t('归档项目仅在系统管理中显示。恢复后，成员可再次打开项目工作区。')}</p>}</>}
       <label className="ui-field-label block">{t('调整原因')}<textarea required maxLength={1000} className="form-control mt-2" rows={3} value={reason} onChange={event => setReason(event.target.value)} /></label>
       <SkillError error={mutation.error} />
-      <div className="flex justify-end gap-2"><button type="button" disabled={mutation.isPending} onClick={onClose} className="ui-button ui-button-secondary">{t('取消')}</button><button type="submit" disabled={mutation.isPending || !name.trim() || !reason.trim()} className="ui-button ui-button-primary">{mutation.isPending ? t('保存中…') : t('保存')}</button></div>
+      <div className="flex justify-end gap-2"><button type="button" disabled={mutation.isPending} onClick={onClose} className="ui-button ui-button-secondary">{t('取消')}</button><button type="submit" disabled={mutation.isPending || !name.trim() || !reason.trim()} className="ui-button ui-button-primary">{t(mutation.isPending ? '保存中…' : isRestoring ? '恢复项目' : '保存')}</button></div>
     </form>
   </WorkspaceDialog>;
 }

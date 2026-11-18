@@ -534,7 +534,7 @@ test('handoff routes expose nested folders, API documents, search and immutable 
 });
 
 test('team and project routes create generated codes, enforce ownership, persist personal order, and filter by public codes', async () => {
-  const { app, owner, builder, other, team, project } = await createFixture();
+  const { app, db, owner, builder, other, team, project } = await createFixture();
 
   const createdTeam = await app.inject({
     method: 'POST',
@@ -679,11 +679,24 @@ test('team and project routes create generated codes, enforce ownership, persist
   assert.equal(archivedProject.json().ok, true, archivedProject.body);
   assert.equal(archivedProject.json().data.status, 'archived');
 
-  const restoredProject = await app.inject({
+  const forbiddenRestore = await app.inject({
     method: 'PATCH',
     url: `/projects/${builderProjectCode}/status`,
     headers: { 'x-principal-code': builder.code },
     payload: { status: 'active' },
+  });
+  assert.equal(forbiddenRestore.statusCode, 403, forbiddenRestore.body);
+  assert.equal(forbiddenRestore.json().error.code, 'project_forbidden');
+  const createdAt = archivedProject.json().data.created_at;
+  const system = await insertUser(db, { account: 'system.project.restore', display_name: 'System administrator', is_system_admin: true, created_at: createdAt });
+  const systemToken = 'system-project-restore-token';
+  await db.insert(schema.devices).values({ principal_id: system.id, device_name: 'System administrator',
+    credential_hash: createHash('sha256').update(systemToken).digest('hex'), created_at: createdAt });
+  const restoredProject = await app.inject({
+    method: 'PATCH',
+    url: `/admin/projects/${builderProjectCode}`,
+    headers: { authorization: `Bearer ${systemToken}` },
+    payload: { status: 'active', reason: 'Reopen project for repository configuration', base_snapshot: archivedProject.json().data.current_snapshot },
   });
   assert.equal(restoredProject.json().ok, true, restoredProject.body);
   assert.equal(restoredProject.json().data.status, 'active');

@@ -156,15 +156,17 @@ test('ordinary team members see only authorized project counts while managers re
 test('team governance exposes project responsibility metadata to team managers without granting private content access', async () => {
   const ctx = await setup();
   const privateProject = await insertProject(ctx.db, { teamId: ctx.team.id, name: 'Admin private project' });
-  await ctx.db.update(schema.projects).set({ owner_principal_id: ctx.users.admin.id, description: 'Private description', status: 'archived' }).where(eq(schema.projects.id, privateProject.id));
+  await ctx.db.update(schema.projects).set({ owner_principal_id: ctx.users.admin.id, description: 'Private description' }).where(eq(schema.projects.id, privateProject.id));
   await addProjectMember(ctx.db, { projectId: privateProject.id, principalId: ctx.users.admin.id, displayName: 'admin', role: 'admin' });
   const governance = await ctx.teams.listProjectGovernance(ctx.team.code, ctx.users.owner.code);
   assert.equal(governance.ok, true, JSON.stringify(governance));
   assert.equal(governance.data.length, 2);
   const privateMetadata = governance.data.find(project => project.project_code === privateProject.code);
-  assert.deepEqual(privateMetadata, { project_code: privateProject.code, name: 'Admin private project', status: 'archived', owner_user_code: ctx.users.admin.code, owner_name: 'admin', ownership_pending: false, can_access: false });
+  assert.deepEqual(privateMetadata, { project_code: privateProject.code, name: 'Admin private project', status: 'active', owner_user_code: ctx.users.admin.code, owner_name: 'admin', ownership_pending: false, can_access: false });
   assert.equal((await ctx.teams.listProjectGovernance(ctx.team.code, ctx.users.admin.code)).data.find(project => project.project_code === privateProject.code).can_access, true);
   assert.equal((await ctx.teams.listProjectGovernance(ctx.team.code, ctx.users.member.code)).error.code, 'team_forbidden');
   assert.equal((await ctx.teams.listProjectGovernance(ctx.team.code, ctx.users.external.code)).error.code, 'team_forbidden');
   assert.deepEqual(await ctx.members.listMembers(privateProject.code, ctx.users.owner.code), []);
+  await ctx.db.update(schema.projects).set({ status: 'archived' }).where(eq(schema.projects.id, privateProject.id));
+  assert.deepEqual((await ctx.teams.listProjectGovernance(ctx.team.code, ctx.users.admin.code)).data.map(project => project.project_code), [ctx.project.code]);
 });
