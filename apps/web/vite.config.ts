@@ -1,11 +1,23 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type Connect } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { webSecurityHeaders } from './security-headers.mjs';
 
+const encodeAgentGuide: Connect.NextHandleFunction = (request, response, next) => {
+  const pathname = request.url?.split('?', 1)[0] ?? '';
+  if (/^\/agent\/guide\.(zh-CN|en-US)\.md$/.test(pathname)) {
+    response.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+  }
+  next();
+};
+
 export default defineConfig({
   appType: 'spa',
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), {
+    name: 'agent-guide-encoding',
+    configureServer(server) { server.middlewares.use(encodeAgentGuide); },
+    configurePreviewServer(server) { server.middlewares.use(encodeAgentGuide); },
+  }],
   server: {
     port: 5173,
     headers: webSecurityHeaders({ development: true }),

@@ -3,6 +3,12 @@ export type ProjectSection = (typeof PROJECT_SECTIONS)[number];
 export type WorkspaceView = 'teams' | 'account' | 'personal-memory' | 'agent' | 'admin' | ProjectSection;
 export type AdminSection = 'teams' | 'users' | 'settings';
 export type ProjectWorkspaceTab = 'overview' | 'structure' | 'architecture' | 'intake';
+export const AGENT_WORKSPACE_TABS = ['connect', 'guide', 'skills'] as const;
+type AgentWorkspaceTab = (typeof AGENT_WORKSPACE_TABS)[number];
+
+function isAgentWorkspaceTab(tab: string | undefined): tab is AgentWorkspaceTab {
+  return AGENT_WORKSPACE_TABS.some(section => section === tab);
+}
 
 export interface WorkspaceRoute {
   view: WorkspaceView;
@@ -16,7 +22,7 @@ export interface WorkspaceRoute {
   testingTab?: 'cases' | 'assets' | 'executions';
   testingCode?: string;
   testingRevision?: string;
-  agentTab?: 'connect' | 'skills' | 'authorize';
+  agentTab?: AgentWorkspaceTab | 'authorize';
   authorizationCode?: string;
   teamCode?: string;
   agentReturnPath?: string;
@@ -38,7 +44,7 @@ export function parseWorkspacePath(pathname: string): WorkspaceRoute {
     const code = new URLSearchParams(query).get('code')?.trim().toUpperCase();
     return { view: 'agent', agentTab: 'authorize', ...(code ? { authorizationCode: code.slice(0, 32) } : {}) };
   }
-  if (parts[0] === 'agent' && (parts[1] === 'connect' || parts[1] === 'skills')) {
+  if (parts[0] === 'agent' && isAgentWorkspaceTab(parts[1])) {
     const params = new URLSearchParams(query);
     const projectCode = params.get('project') || undefined;
     const teamCode = params.get('team') || undefined;
@@ -137,7 +143,7 @@ export function safeAgentReturnPath(path?: string | null, projectCode?: string):
   return projectCode ? projectWorkspacePath(projectCode) : '/teams';
 }
 
-export function agentWorkspacePath(tab: 'connect' | 'skills' = 'connect', context: { projectCode?: string; teamCode?: string; agentReturnPath?: string } = {}): string {
+export function agentWorkspacePath(tab: AgentWorkspaceTab = 'connect', context: { projectCode?: string; teamCode?: string; agentReturnPath?: string } = {}): string {
   const params = new URLSearchParams();
   if (context.projectCode) params.set('project', context.projectCode);
   if (context.teamCode) params.set('team', context.teamCode);
@@ -204,7 +210,8 @@ export function isWorkspacePath(path: string): boolean {
   const pathname = path.split(/[?#]/, 1)[0];
   if (/^\/(?:teams\/?|account\/?)?$/.test(pathname)) return true;
   if (/^\/account\/memory\/?$/.test(pathname)) return true;
-  if (/^\/agent\/(?:connect|skills|authorize)\/?$/.test(pathname)) return true;
+  const agent = /^\/agent\/([^/]+)\/?$/.exec(pathname);
+  if (agent) return agent[1] === 'authorize' || isAgentWorkspaceTab(agent[1]);
   if (/^\/admin(?:\/(?:teams|users|settings))?\/?$/.test(pathname)) return true;
   const match = /^\/projects\/([^/]+)(?:\/([^/]+))?\/?$/.exec(pathname);
   if (!match) return false;
