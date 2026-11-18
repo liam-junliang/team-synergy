@@ -50,6 +50,8 @@ export default {
   '{count} 位成员': '{count} members',
   '查看项目': 'View projects',
   '管理项目': 'Manage project',
+  '强制归档': 'Force archive',
+  '系统会结束当前运行并撤销对应的执行授权。任务、历史与已提交的证据会保留。恢复项目后，可重新领取被中断的任务。': 'The system ends current runs and revokes their execution leases. Tasks, history, and submitted evidence are retained. Interrupted tasks can be claimed again after the project is restored.',
   '编辑团队': 'Edit team',
   '管理操作会记录审计日志，请说明调整原因。': 'Administrative changes are audited. Include the reason for this change.',
   '归档项目仅在系统管理中显示。恢复后，成员可再次打开项目工作区。': 'Archived projects appear in Administration. Restoring a project lets members open its workspace again.',

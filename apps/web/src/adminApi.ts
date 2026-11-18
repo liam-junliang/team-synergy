@@ -31,5 +31,5 @@ export function adminListProjects(input: { q?: string; cursor?: string; team_cod
   return fetchEnvelope(`/admin/projects?${new URLSearchParams({ limit: '50', ...input })}`);
 }
 export const adminUpdateTeam = (code: string, input: { name: string; reason: string }): Promise<unknown> => fetchEnvelope(`/admin/teams/${encodeURIComponent(code)}`, { method: 'PATCH', body: JSON.stringify(input) });
-export const adminUpdateProject = (code: string, input: { name: string; description: string | null; status: 'active' | 'archived'; reason: string; base_snapshot: number }): Promise<unknown> => fetchEnvelope(`/admin/projects/${encodeURIComponent(code)}`, { method: 'PATCH', body: JSON.stringify(input) });
+export const adminUpdateProject = (code: string, input: { name: string; description: string | null; status: 'active' | 'archived'; reason: string; base_snapshot: number; force_archive?: true }): Promise<unknown> => fetchEnvelope(`/admin/projects/${encodeURIComponent(code)}`, { method: 'PATCH', body: JSON.stringify(input) });
 export const enableUser = (code: string): Promise<unknown> => fetchEnvelope(`/users/${encodeURIComponent(code)}/enable`, { method: 'POST', body: '{}' });

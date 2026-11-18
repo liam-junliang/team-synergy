@@ -448,10 +448,10 @@ export function createProjectUseCases(db: Db) {
 
       const taskCode = createPublicCode();
       await db.transaction(async (tx) => {
+        await lockAggregate(tx, 'project', feature.project_id, true);
         await assertProjectAccess(tx, feature.project_id, principal.id, cmd.source === 'ad-hoc' ? 'write' : 'manage');
         let requirementBaselineId: bigint | null = null;
         if (cmd.requirementBaselineCode) {
-          await lockAggregate(tx, 'project', feature.project_id, true);
           const [project] = await tx.select().from(schema.projects).where(eq(schema.projects.id, feature.project_id)).for('share').limit(1);
           const [activePrincipal] = await tx.select().from(schema.users).where(eq(schema.users.id, principal.id)).for('share').limit(1);
           const member = await effectiveProjectMember(tx, feature.project_id, principal.id);
@@ -716,6 +716,7 @@ export function createVerificationUseCases(db: Db) {
       }
 
       const result = await db.transaction(async (tx) => {
+        await lockAggregate(tx, 'project', feature.project_id, true);
         await assertProjectAccess(tx, feature.project_id, principal.id, 'manage');
         const [currentTask] = await tx.select().from(schema.tasks).where(eq(schema.tasks.id, task.id)).for('update').limit(1);
         if (!currentTask) throw new DomainError('task_not_found', `任务不存在：${cmd.taskCode}`);

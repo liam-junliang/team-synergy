@@ -5,7 +5,7 @@ import { schema, type Db } from '@team-synergy/persistence';
 import { DomainError, assertAuditedChange, toAuditEvent } from '@team-synergy/domain';
 import { createPublicCode } from './public-code.js';
 import { fail, insertAudit, now } from './task-service.js';
-import { assertNoProjectArchiveRuns } from './project-archive.js';
+import { assertNoProjectArchiveRuns, stopProjectExecutionForArchive } from './project-archive.js';
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 export type AdminGovernanceFilter = { q?: string; limit?: number; cursor?: string };
@@ -123,7 +123,7 @@ export function createAdminGovernanceUseCases(db: Db) {
     } catch (error) { return fail(error); }
   }
 
-  async function updateProject(cmd: { principalCode: string; projectCode: string; baseSnapshot: number; name?: string; description?: string | null; status?: string; reason: string }) {
+  async function updateProject(cmd: { principalCode: string; projectCode: string; baseSnapshot: number; name?: string; description?: string | null; status?: string; reason: string; forceArchive?: true }) {
     try {
       return await db.transaction(async tx => {
         await lockProjectByCode(tx, cmd.projectCode);
@@ -139,19 +139,25 @@ export function createAdminGovernanceUseCases(db: Db) {
         const description = cmd.description === undefined ? project.description : cmd.description?.trim() || null;
         if (description && description.length > 10000) throw new DomainError('admin_input_invalid', '项目说明不能超过 10000 个字符');
         const status = cmd.status as 'active' | 'archived' | undefined ?? project.status;
-        if (status === 'archived' && project.status !== status) {
-          await assertNoProjectArchiveRuns(tx, project.id);
+        if (cmd.forceArchive !== undefined && (cmd.forceArchive !== true || cmd.status !== 'archived' || project.status !== 'active')) {
+          throw new DomainError('admin_input_invalid', '强制归档仅用于正在启用的项目');
+        }
+        let forced: Awaited<ReturnType<typeof stopProjectExecutionForArchive>> | undefined;
+        if (status === 'archived' && project.status === 'active') {
+          if (cmd.forceArchive) forced = await stopProjectExecutionForArchive(tx, project.id);
+          else await assertNoProjectArchiveRuns(tx, project.id);
         }
         const changed = name !== project.name || description !== project.description || status !== project.status;
         const snapshot = project.current_snapshot + (changed ? 1 : 0);
         if (changed) {
           await tx.update(schema.projects).set({ name, description, status, current_snapshot: snapshot }).where(eq(schema.projects.id, project.id));
           const audit = { entity_type: 'project', entity_id: project.id, principal_id: actor.id, base_snapshot: project.current_snapshot,
-            action: 'admin.project.updated', payload: { reason, name: { from: project.name, to: name }, description: { from: project.description, to: description }, status: { from: project.status, to: status } } };
+            action: 'admin.project.updated', payload: { reason, name: { from: project.name, to: name }, description: { from: project.description, to: description }, status: { from: project.status, to: status }, ...(forced ? { force_archive: forced } : {}) } };
           assertAuditedChange(audit);
           await insertAudit(tx, toAuditEvent(audit, createPublicCode(), now()));
         }
-        return { ok: true as const, data: { project_code: project.code, name, description, status, current_snapshot: snapshot } };
+        return { ok: true as const, data: { project_code: project.code, name, description, status, current_snapshot: snapshot,
+          ...(forced ? { force_archive: forced } : {}) } };
       });
     } catch (error) { return fail(error); }
   }

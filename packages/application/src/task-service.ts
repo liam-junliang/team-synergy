@@ -1,4 +1,5 @@
 import { redactAuditValue } from './audit-redaction.js';
+import { lockAggregate } from './aggregate-lock.js';
 import { and, count, desc, eq, inArray } from 'drizzle-orm';
 import type { Db } from '@team-synergy/persistence';
 import { schema } from '@team-synergy/persistence';
@@ -990,6 +991,7 @@ export function createTaskService(db: Db) {
 
       const changedAt = now();
       const result = await db.transaction(async (tx) => {
+        await lockAggregate(tx, 'project', feature.project_id, true);
         await assertProjectAccess(tx, feature.project_id, principal.id, 'manage');
         const [currentTask] = await tx.select().from(schema.tasks).where(eq(schema.tasks.id, task.id)).for('update').limit(1);
         if (!currentTask) throw new DomainError('task_not_found', `任务不存在：${cmd.taskCode}`);
@@ -1058,6 +1060,7 @@ export function createTaskService(db: Db) {
 
       const cancelledAt = now();
       const result = await db.transaction(async (tx) => {
+        await lockAggregate(tx, 'project', feature.project_id, true);
         await assertProjectAccess(tx, feature.project_id, principal.id, 'manage');
         const [currentTask] = await tx.select().from(schema.tasks).where(eq(schema.tasks.id, task.id)).for('update').limit(1);
         if (!currentTask) throw new DomainError('task_not_found', `任务不存在：${cmd.taskCode}`);

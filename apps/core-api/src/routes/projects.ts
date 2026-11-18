@@ -93,6 +93,9 @@ export function registerProjectRoutes(app: FastifyInstance, db: Db): void {
   });
 
   app.patch<{ Params: { project_code: string }; Body: Record<string, unknown> }>('/projects/:project_code/status', async (request) => {
+    if (request.body && Object.keys(request.body).includes('force_archive')) {
+      return { ok: false as const, error: { code: 'project_forbidden', message: '只有系统管理员可以强制归档项目' } };
+    }
     const status = parseProjectStatus(['active', 'archived'] as const, request.body?.status);
     if (!status) {
       return { ok: false as const, error: { code: 'project_status_invalid', message: `非法项目状态：${String(request.body?.status ?? '')}`, details: { valid: ['active', 'archived'] } } };
