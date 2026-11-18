@@ -209,6 +209,135 @@ test('admin archival guards all execution and handover run states without changi
   assert.equal((await f.app.inject({ method: 'PATCH', url: `/admin/projects/${f.project.code}`, headers: f.users.system.headers, payload: { base_snapshot: 0, status: 'archived', reason: 'Execution completed' } })).statusCode, 200);
 });
 
+
+test('only a system administrator can force archive and fence project execution without losing evidence', async () => {
+  const f = await fixture();
+  const projectUrl = `/admin/projects/${f.project.code}`;
+  const [device] = await f.db.select().from(schema.devices).where(eq(schema.devices.principal_id, f.users.owner.id));
+  const feature = await insertFeature(f.db, { project_id: f.project.id, title: 'Force archive execution' });
+  const neighbor = await insertProject(f.db, { team_id: f.team.id, name: 'Neighbor', created_at: createdAt });
+  const neighborFeature = await insertFeature(f.db, { project_id: neighbor.id, title: 'Unaffected execution' });
+  const taskWithRun = async ({ at = feature, status = 'running', runStatus = 'active', profile = 'builder' } = {}) => {
+    const [task] = await f.db.insert(schema.tasks).values({ feature_id: at.id, title: 'Task for archival', profile: 'builder',
+      source: 'ad-hoc', status, assignee_principal_id: f.users.owner.id, acceptance: JSON.stringify([{ id: 'AC-1', text: 'Test' }]),
+      base_snapshot: 8, execution_epoch: 3, created_at: createdAt }).returning();
+    const [run] = await f.db.insert(schema.runs).values({ task_id: task.id, principal_id: f.users.owner.id,
+      profile, workspace_id: 1n, status: runStatus, base_snapshot: task.base_snapshot, execution_epoch: task.execution_epoch,
+      started_at: createdAt }).returning();
+    return { task, run };
+  };
+  const running = await taskWithRun();
+  const moving = await taskWithRun({ runStatus: 'suspended' });
+  const verifying = await taskWithRun({ status: 'submitted', profile: 'verifier' });
+  const selfTested = await taskWithRun({ status: 'self_tested' });
+  const failed = await taskWithRun({ status: 'failed' });
+  const previous = await taskWithRun({ status: 'verified', runStatus: 'completed' });
+  const [leftoverSession] = await f.db.insert(schema.agentSessions).values({ run_id: previous.run.id, device_id: device.id,
+    execution_epoch: 3, start_key: 'terminal-run', agent_command: 'test worker', launch_kind: 'custom', status: 'running',
+    started_at: createdAt, last_output: 'previous output' }).returning();
+  const [leftoverLease] = await f.db.insert(schema.runLeases).values({ run_id: previous.run.id, device_id: device.id,
+    epoch: 3, token_hash: 'older run lease', expires_at: '2099-10-18T00:00:00Z', created_at: createdAt }).returning();
+  const outside = await taskWithRun({ at: neighborFeature });
+  const [candidate] = await f.db.insert(schema.runs).values({ task_id: moving.task.id, principal_id: f.users.member.id,
+    profile: 'builder', workspace_id: 1n, status: 'preparing', base_snapshot: 8, execution_epoch: 3, started_at: createdAt }).returning();
+  const [handover] = await f.db.insert(schema.taskHandovers).values({ task_id: moving.task.id, source_run_id: moving.run.id,
+    target_principal_id: f.users.member.id, source_device_id: device.id, target_run_id: candidate.id, status: 'ready',
+    version: 4, source_epoch: 3, preparation_grant_hash: 'preserve hash', preparation_expires_at: '2099-10-18T00:00:00Z',
+    workspace_manifest: '{"snapshot":"preserved"}', created_at: createdAt, updated_at: createdAt, expires_at: '2099-10-18T00:00:00Z' }).returning();
+  const [evidence] = await f.db.insert(schema.evidences).values({ task_id: verifying.task.id, run_id: verifying.run.id,
+    type: 'manual', result: 'pass', summary: 'Retained before archive', recorded_at: createdAt }).returning();
+
+  const owner = f.users.owner.headers;
+  const admin = f.users.system.headers;
+  const route = suffix => `/runs/${running.run.code}/${suffix}`;
+  const leaseResult = await f.app.inject({ method: 'POST', url: route('lease'), headers: owner, payload: { execution_epoch: 3 } });
+  assert.equal(leaseResult.statusCode, 200, leaseResult.body);
+  const { lease_token, execution_epoch } = leaseResult.json().data;
+  const opened = await f.app.inject({ method: 'POST', url: route('sessions'), headers: owner,
+    payload: { lease_token, execution_epoch, start_key: 'force-archive', agent_command: 'test command' } });
+  assert.equal(opened.statusCode, 200, opened.body);
+  const read = async (table, id) => (await f.db.select().from(table).where(eq(table.id, id)))[0];
+  const [started] = await f.db.select().from(schema.agentSessions).where(eq(schema.agentSessions.code, opened.json().data.session_code));
+  const sessionId = started.id;
+  const change = (headers, payload) => f.app.inject({ method: 'PATCH', url: projectUrl, headers, payload });
+  const request = { status: 'archived', reason: 'No further execution', base_snapshot: 0, force_archive: true };
+  assert.equal((await change(owner, request)).statusCode, 403);
+  assert.equal((await f.app.inject({ method: 'PATCH', url: `/projects/${f.project.code}/status`,
+    headers: owner, payload: { status: 'archived', force_archive: true } })).statusCode, 403);
+  for (const patch of [{ force_archive: 'true' }, { force_archive: false }, { status: 'active' }, { reason: '  ' }]) {
+    const result = await change(admin, { ...request, ...patch });
+    assert.equal(result.statusCode, 400, result.body);
+  }
+  assert.equal((await change(admin, { ...request, base_snapshot: 1 })).statusCode, 409);
+  assert.equal((await read(schema.runs, running.run.id)).status, 'active');
+  assert.equal((await read(schema.agentSessions, sessionId)).status, 'starting');
+  assert.equal((await read(schema.projects, f.project.id)).status, 'active');
+  assert.equal((await f.db.select().from(schema.auditEvents).where(eq(schema.auditEvents.action, 'admin.project.updated'))).length, 0);
+
+  const forced = await change(admin, request);
+  assert.equal(forced.statusCode, 200, forced.body);
+  assert.deepEqual(forced.json().data.force_archive, {
+    cancelled_runs: 6, cancelled_handovers: 1, cancelled_sessions: 2, reset_tasks: 3,
+  });
+  assert.equal(forced.json().data.current_snapshot, 1);
+  assert.equal((await read(schema.projects, f.project.id)).status, 'archived');
+  for (const row of [running.run, moving.run, candidate, verifying.run, selfTested.run, failed.run]) {
+    const ended = await read(schema.runs, row.id);
+    assert.equal(ended.status, 'cancelled');
+    assert.ok(ended.finished_at);
+  }
+  for (const row of [running.task, moving.task, selfTested.task]) {
+    const reset = await read(schema.tasks, row.id);
+    assert.equal(reset.status, 'assigned');
+    assert.equal(reset.assignee_principal_id, f.users.owner.id);
+    assert.equal(reset.base_snapshot, 9);
+    assert.equal(reset.execution_epoch, 4);
+  }
+  assert.equal((await read(schema.tasks, verifying.task.id)).status, 'submitted');
+  assert.equal((await read(schema.tasks, verifying.task.id)).execution_epoch, 4);
+  assert.equal((await read(schema.tasks, failed.task.id)).status, 'failed');
+  assert.deepEqual(await read(schema.tasks, previous.task.id), previous.task);
+  assert.deepEqual(await read(schema.runs, previous.run.id), previous.run);
+  assert.equal((await read(schema.agentSessions, leftoverSession.id)).status, 'cancelled');
+  assert.equal((await read(schema.agentSessions, leftoverSession.id)).last_output, 'previous output');
+  assert.ok((await read(schema.runLeases, leftoverLease.id)).revoked_at);
+  assert.deepEqual(await read(schema.runs, outside.run.id), outside.run);
+  assert.deepEqual(await read(schema.tasks, outside.task.id), outside.task);
+  assert.deepEqual(await read(schema.evidences, evidence.id), evidence);
+  const session = await read(schema.agentSessions, sessionId);
+  assert.equal(session.status, 'cancelled');
+  assert.ok(session.finished_at);
+  const [revoked] = await f.db.select().from(schema.runLeases).where(eq(schema.runLeases.run_id, running.run.id));
+  assert.ok(revoked.revoked_at);
+  const cancelled = await read(schema.taskHandovers, handover.id);
+  assert.equal(cancelled.status, 'cancelled');
+  assert.equal(cancelled.version, 5);
+  assert.equal(cancelled.workspace_manifest, handover.workspace_manifest);
+  assert.equal(cancelled.preparation_expires_at, revoked.revoked_at);
+  const [audit] = await f.db.select().from(schema.auditEvents).where(eq(schema.auditEvents.action, 'admin.project.updated'));
+  assert.equal(audit.principal_id, f.users.system.id);
+  assert.equal(JSON.parse(audit.payload).reason, request.reason);
+  assert.deepEqual(JSON.parse(audit.payload).force_archive, forced.json().data.force_archive);
+
+  const renew = () => f.app.inject({ method: 'POST', url: route('lease/renew'), headers: owner, payload: { lease_token, execution_epoch } });
+  assert.equal((await renew()).json().error.code, 'run_inactive');
+  const restored = await change(admin, { status: 'active', reason: 'Resume project', base_snapshot: 1 });
+  assert.equal(restored.statusCode, 200, restored.body);
+  assert.equal((await renew()).json().error.code, 'run_inactive');
+  const reassign = await f.app.inject({ method: 'POST', url: `/tasks/${failed.task.code}/assign`, headers: owner,
+    payload: { assignee_principal_code: f.users.owner.code, base_snapshot: 9 } });
+  assert.equal(reassign.statusCode, 200, reassign.body);
+  assert.equal(reassign.json().data.status, 'assigned');
+  assert.equal((await f.app.inject({ method: 'POST', url: `/runs/${running.run.code}/resume`, headers: owner, payload: {} })).json().ok, false);
+  const claim = await f.app.inject({ method: 'POST', url: `/tasks/${running.task.code}/claim`, headers: owner,
+    payload: { profile: 'builder', base_snapshot: 9, workspace_path: 'C:/fixture/new-worktree', git_base: 'a'.repeat(40),
+      run_code: '00000000000000001001', workspace_code: '00000000000000001002' } });
+  assert.equal(claim.statusCode, 200, claim.body);
+  assert.notEqual(claim.json().data.run_code, running.run.code);
+  const [freshRun] = await f.db.select().from(schema.runs).where(eq(schema.runs.code, claim.json().data.run_code));
+  assert.equal(freshRun.execution_epoch, 4);
+});
+
 test('stale administrator edits cannot restore an archived project or overwrite newer metadata', async () => {
   const f = await fixture();
   const headers = f.users.system.headers;
@@ -243,6 +372,7 @@ async function waitForProjectLock(db, blockerPid, settled, stage = 'row') {
     const { rows } = await db.$client.query(`select pid from pg_stat_activity
       where $1::integer = any(pg_blocking_pids(pid))
         and (($2 = 'row' and query like '%"projects"%' and query ilike '%for update%')
+          or ($2 = 'task' and query like '%"tasks"%' and query ilike '%for update%')
           or ($2 = 'fence' and query ilike '%pg_advisory_xact_lock%'))`, [blockerPid, stage]);
     if (rows.length) return rows[0].pid;
     assert.equal(settled(), false, 'Project write must reach the lock barrier before completing');
@@ -250,6 +380,68 @@ async function waitForProjectLock(db, blockerPid, settled, stage = 'row') {
   }
   assert.fail('Project write did not wait on the expected database lock');
 }
+
+
+test('force archive waits for an in-flight task write and leaves the completed submission intact', async () => {
+  const f = await fixture();
+  const feature = await insertFeature(f.db, { project_id: f.project.id, title: 'Task write in progress' });
+  const [task] = await f.db.insert(schema.tasks).values({ feature_id: feature.id, title: 'Task submission in flight',
+    profile: 'builder', source: 'ad-hoc', status: 'running', acceptance: '[]', base_snapshot: 2, created_at: createdAt }).returning();
+  const [run] = await f.db.insert(schema.runs).values({ task_id: task.id, principal_id: f.users.owner.id,
+    profile: 'builder', workspace_id: 1n, status: 'active', base_snapshot: 2, started_at: createdAt }).returning();
+  const blocker = await f.db.$client.connect();
+  const owner = f.users.owner.headers;
+  const lease = await f.app.inject({ method: 'POST', url: `/runs/${run.code}/lease`, headers: owner, payload: {} });
+  assert.equal(lease.statusCode, 200, lease.body);
+  let archiving;
+  let starting;
+  let creating;
+  try {
+    await blocker.query('begin');
+    await blocker.query('select id from tasks where id=$1 for update', [task.id]);
+    const pid = (await blocker.query('select pg_backend_pid() as pid')).rows[0].pid;
+    let settled = false;
+    archiving = f.app.inject({ method: 'PATCH', url: `/admin/projects/${f.project.code}`,
+      headers: f.users.system.headers, payload: { status: 'archived', reason: 'Stop remaining activity', base_snapshot: 0, force_archive: true } })
+      .then(result => { settled = true; return result; });
+    const archivePid = await waitForProjectLock(f.db, pid, () => settled, 'task');
+    let startSettled = false;
+    starting = f.app.inject({ method: 'POST', url: `/runs/${run.code}/sessions`, headers: owner,
+      payload: { ...lease.json().data, start_key: 'wait for archive fence', agent_command: 'test command' } })
+      .then(result => { startSettled = true; return result; });
+    await waitForProjectLock(f.db, archivePid, () => startSettled, 'fence');
+    let createSettled = false;
+    creating = f.app.inject({ method: 'POST', url: '/tasks', headers: owner,
+      payload: { feature_code: feature.code, title: 'Do not save after archive', profile: 'builder', source: 'ad-hoc',
+        acceptance: [{ id: 'AC-1', text: 'Test' }] } })
+      .then(result => { createSettled = true; return result; });
+    await waitForProjectLock(f.db, archivePid, () => createSettled, 'fence');
+    await blocker.query("update tasks set status='submitted',base_snapshot=3 where id=$1", [task.id]);
+    await blocker.query("update runs set status='completed',finished_at=$2 where id=$1", [run.id, createdAt]);
+    await blocker.query(`insert into evidences(task_id,run_id,type,result,summary,recorded_at)
+      values ($1,$2,'self_test','pass','Completed before archive',$3)`, [task.id, run.id, createdAt]);
+    await blocker.query('commit');
+    const archived = await archiving;
+    assert.equal(archived.statusCode, 200, archived.body);
+    assert.equal((await starting).json().error.code, 'run_inactive');
+    assert.equal((await creating).json().error.code, 'project_archived');
+    assert.equal((await f.db.select().from(schema.tasks).where(eq(schema.tasks.feature_id, feature.id))).length, 1);
+    assert.deepEqual(archived.json().data.force_archive, {
+      cancelled_runs: 0, cancelled_handovers: 0, cancelled_sessions: 0, reset_tasks: 0,
+    });
+    const [submitted] = await f.db.select().from(schema.tasks).where(eq(schema.tasks.id, task.id));
+    assert.equal(submitted.status, 'submitted');
+    assert.equal(submitted.base_snapshot, 3);
+    const [completed] = await f.db.select().from(schema.runs).where(eq(schema.runs.id, run.id));
+    assert.equal(completed.status, 'completed');
+    assert.equal((await f.db.select().from(schema.evidences).where(eq(schema.evidences.task_id, task.id)))[0].summary,
+      'Completed before archive');
+  } finally {
+    await blocker.query('rollback');
+    blocker.release();
+    await Promise.allSettled([archiving, starting, creating]);
+  }
+});
 
 for (const operation of ['rename', 'archive', 'repository-create', 'repository-update']) {
   test(`normal ${operation} racing an administrator edit keeps project snapshots monotonic`, async () => {

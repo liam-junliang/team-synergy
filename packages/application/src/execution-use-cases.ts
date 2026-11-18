@@ -1,4 +1,5 @@
 import { insertAudit } from './task-service.js';
+import { lockAggregate } from './aggregate-lock.js';
 import { createHmac } from 'node:crypto';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { DomainError, toAuditEvent } from '@team-synergy/domain';
@@ -16,6 +17,9 @@ export const RUN_LEASE_TTL_MS = 30_000;
 async function requireOwnedRun(tx: Tx, runId: bigint, identity: ExecutionIdentity) {
   let [run] = await tx.select().from(schema.runs).where(eq(schema.runs.id, runId)).limit(1);
   if (!run) throw new DomainError('run_not_found', 'Run 不存在');
+  const [scope] = await tx.select({ projectId: schema.features.project_id }).from(schema.tasks)
+    .innerJoin(schema.features, eq(schema.features.id, schema.tasks.feature_id)).where(eq(schema.tasks.id, run.task_id)).limit(1);
+  if (scope) await lockAggregate(tx, 'project', scope.projectId, true);
   await tx.select({ id: schema.tasks.id }).from(schema.tasks).where(eq(schema.tasks.id, run.task_id)).for('update');
   [run] = await tx.select().from(schema.runs).where(eq(schema.runs.id, runId)).limit(1);
   if (!run) throw new DomainError('run_not_found', 'Run 不存在');

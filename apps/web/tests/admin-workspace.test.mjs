@@ -82,6 +82,8 @@ test('team governance displays global ownership and no personal project entry', 
   assert.match(dialog, /归档项目仅在系统管理中显示/);
   assert.match(dialog, /<option value="active">恢复项目<\/option>/);
   assert.doesNotMatch(dialog, /删除项目|转移/);
+  const activeDialog = render(directory.AdminEditDialog, { selection: { kind: 'project', item: { project_code: 'P', name: 'Project', status: 'active', current_snapshot: 8 } }, onClose() {} });
+  assert.match(activeDialog, /<option value="archived">强制归档<\/option>/);
 });
 
 test('archived links stop before project providers and guide members and administrators in their current language', async () => {
@@ -129,9 +131,10 @@ test('admin API preserves optimistic revision, reason and paginated query encodi
   await api.adminListProjects({ q: 'A & B', team_code: 'T/1', cursor: 'P/2', status: 'archived' });
   const params = new URL(requests[1].url, 'http://local').searchParams;
   assert.equal(params.get('q'), 'A & B'); assert.equal(params.get('team_code'), 'T/1'); assert.equal(params.get('cursor'), 'P/2');
-  await api.adminUpdateProject('P/2', { name: 'New', description: null, status: 'archived', reason: 'Completed', base_snapshot: 8 });
+  await api.adminUpdateProject('P/2', { name: 'New', description: null, status: 'archived', reason: 'Completed', base_snapshot: 8, force_archive: true });
   assert.equal(requests[2].url, '/api/admin/projects/P%2F2'); assert.equal(JSON.parse(requests[2].init.body).reason, 'Completed');
   assert.equal(JSON.parse(requests[2].init.body).base_snapshot, 8);
+  assert.equal(JSON.parse(requests[2].init.body).force_archive, true);
 });
 
 test('new administrative errors follow locale changes and retain original diagnostics', () => {

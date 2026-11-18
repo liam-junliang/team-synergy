@@ -55,18 +55,33 @@ export function AdminEditDialog({ selection, onClose }: { selection: Selection; 
   const [description, setDescription] = useState(selection.kind === 'project' ? selection.item.description ?? '' : '');
   const [status, setStatus] = useState<'active' | 'archived'>(selection.kind === 'project' ? selection.item.status : 'active');
   const [reason, setReason] = useState('');
-  const mutation = useMutation({ mutationFn: () => selection.kind === 'team' ? adminUpdateTeam(selection.item.team_code, { name: name.trim(), reason: reason.trim() }) : adminUpdateProject(selection.item.project_code, { name: name.trim(), description: description.trim() || null, status, reason: reason.trim(), base_snapshot: selection.item.current_snapshot }), onSuccess: async () => {
+  const isArchiving = selection.kind === 'project' && selection.item.status === 'active' && status === 'archived';
+  const isRestoring = selection.kind === 'project' && selection.item.status === 'archived' && status === 'active';
+  const mutation = useMutation({ mutationFn: () => selection.kind === 'team' ? adminUpdateTeam(selection.item.team_code, { name: name.trim(), reason: reason.trim() }) : adminUpdateProject(selection.item.project_code, {
+    name: name.trim(), description: description.trim() || null, status, reason: reason.trim(),
+    base_snapshot: selection.item.current_snapshot, ...(isArchiving ? { force_archive: true as const } : {}),
+  }), onSuccess: async () => {
     await Promise.all(['admin-teams', 'admin-projects', 'teams', 'projects', 'project', 'team-projects-governance'].map(key => queryClient.invalidateQueries({ queryKey: [key] }))); onClose();
   } });
-  const isRestoring = selection.kind === 'project' && selection.item.status === 'archived' && status === 'active';
+  const submitLabel = mutation.isPending ? '保存中…' : isRestoring ? '恢复项目' : isArchiving ? '强制归档' : '保存';
   function submit(event: FormEvent) { event.preventDefault(); if (name.trim() && reason.trim()) mutation.mutate(); }
   return <WorkspaceDialog id="admin-resource-edit" title={t(selection.kind === 'team' ? '编辑团队' : '管理项目')} description={t('管理操作会记录审计日志，请说明调整原因。')} onClose={() => { if (!mutation.isPending) onClose(); }}>
     <form className="space-y-4" onSubmit={submit}>
       <label className="ui-field-label block">{t('名称')}<input className="form-control mt-2" required maxLength={200} value={name} onChange={event => setName(event.target.value)} /></label>
-      {selection.kind === 'project' && <><label className="ui-field-label block">{t('项目说明')}<textarea className="form-control mt-2" rows={4} value={description} onChange={event => setDescription(event.target.value)} maxLength={10000} /></label><label className="ui-field-label block">{t('项目状态')}<select className="form-control mt-2" value={status} onChange={event => setStatus(event.target.value as 'active' | 'archived')}><option value="active">{t(selection.item.status === 'archived' ? '恢复项目' : '启用')}</option><option value="archived">{t('已归档')}</option></select></label>{status === 'archived' && <p className="text-xs leading-5 text-slate-600">{t('归档项目仅在系统管理中显示。恢复后，成员可再次打开项目工作区。')}</p>}</>}
+      {selection.kind === 'project' && <>
+        <label className="ui-field-label block">{t('项目说明')}<textarea className="form-control mt-2" rows={4} value={description} onChange={event => setDescription(event.target.value)} maxLength={10000} /></label>
+        <label className="ui-field-label block">{t('项目状态')}<select className="form-control mt-2" value={status} onChange={event => setStatus(event.target.value as 'active' | 'archived')}>
+          <option value="active">{t(selection.item.status === 'archived' ? '恢复项目' : '启用')}</option>
+          <option value="archived">{t(selection.item.status === 'active' ? '强制归档' : '已归档')}</option>
+        </select></label>
+        {isArchiving && <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-950">
+          {t('系统会结束当前运行并撤销对应的执行授权。任务、历史与已提交的证据会保留。恢复项目后，可重新领取被中断的任务。')}
+        </p>}
+        {status === 'archived' && <p className="text-xs leading-5 text-slate-600">{t('归档项目仅在系统管理中显示。恢复后，成员可再次打开项目工作区。')}</p>}
+      </>}
       <label className="ui-field-label block">{t('调整原因')}<textarea required maxLength={1000} className="form-control mt-2" rows={3} value={reason} onChange={event => setReason(event.target.value)} /></label>
       <SkillError error={mutation.error} />
-      <div className="flex justify-end gap-2"><button type="button" disabled={mutation.isPending} onClick={onClose} className="ui-button ui-button-secondary">{t('取消')}</button><button type="submit" disabled={mutation.isPending || !name.trim() || !reason.trim()} className="ui-button ui-button-primary">{t(mutation.isPending ? '保存中…' : isRestoring ? '恢复项目' : '保存')}</button></div>
+      <div className="flex justify-end gap-2"><button type="button" disabled={mutation.isPending} onClick={onClose} className="ui-button ui-button-secondary">{t('取消')}</button><button type="submit" disabled={mutation.isPending || !name.trim() || !reason.trim()} className={`ui-button ${isArchiving ? 'ui-button-danger' : 'ui-button-primary'}`}>{t(submitLabel)}</button></div>
     </form>
   </WorkspaceDialog>;
 }

@@ -34,14 +34,14 @@ export function registerAdminGovernanceRoutes(app: FastifyInstance, db: Db): voi
   app.patch<{ Params: { project_code: string }; Body: Record<string, unknown> }>('/admin/projects/:project_code', async (request, reply) => {
     if (!hasAuthenticatedSession(request) || !request.principal) return unauthorized(reply);
     const body = request.body ?? {};
-    if (Object.keys(body).some(key => !['name', 'description', 'status', 'reason', 'base_snapshot'].includes(key))) {
+    if (Object.keys(body).some(key => !['name', 'description', 'status', 'reason', 'base_snapshot', 'force_archive'].includes(key))) {
       return { ok: false, error: { code: 'admin_input_invalid', message: '仅允许修改项目名称、说明和归档状态' } };
     }
-    if (typeof body.base_snapshot !== 'number' || (body.name !== undefined && typeof body.name !== 'string') || (body.description !== undefined && body.description !== null && typeof body.description !== 'string') || (body.status !== undefined && typeof body.status !== 'string')) {
+    if (typeof body.base_snapshot !== 'number' || (body.name !== undefined && typeof body.name !== 'string') || (body.description !== undefined && body.description !== null && typeof body.description !== 'string') || (body.status !== undefined && typeof body.status !== 'string') || (body.force_archive !== undefined && body.force_archive !== true)) {
       return { ok: false, error: { code: 'admin_input_invalid', message: '项目信息格式无效' } };
     }
     return uc.updateProject({ principalCode: request.principal, projectCode: request.params.project_code,
-      baseSnapshot: body.base_snapshot,
+      baseSnapshot: body.base_snapshot, forceArchive: body.force_archive,
       name: body.name as string | undefined, description: body.description as string | null | undefined,
       status: body.status as string | undefined, reason: typeof body.reason === 'string' ? body.reason : '',
     });
