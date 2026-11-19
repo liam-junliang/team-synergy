@@ -4,7 +4,7 @@
 
 ### 优先使用 HTTP Connector
 
-从平台「Agent 接入」复制 HTTP Connector 服务地址，在宿主的 MCP 或 Connector 设置中添加远程连接。宿主发起 OAuth 后，在浏览器登录 TeamSynergy。已有登录会话时会直接进入授权页。核对账号、客户端和回调地址，按需授权后返回宿主。账号授权允许同一个会话按项目权限操作多个项目，无需安装 `tsp` 或绑定本地目录。
+无需下载 Connector 或安装 CLI。在支持远程 HTTP MCP 与 OAuth 的宿主中，从平台「Agent 接入」复制 HTTP Connector 服务地址，并在宿主的 MCP 或 Connector 设置中添加远程连接。宿主发起 OAuth 后，在浏览器登录 TeamSynergy。已有登录会话时会直接进入授权页。核对账号、客户端和回调地址，按需授权后返回宿主。账号授权允许同一个会话按项目权限操作多个项目，无需安装 `tsp` 或绑定本地目录。
 
 默认按需查项目资料。要创建和推进任务，在授权页选择「可协作」。账号个人记忆读取单独授权，连接保持会话采集关闭。无法发起 OAuth 且支持自定义请求头的宿主，可在接入页的高级设置生成有期限的授权凭据。
 
@@ -21,9 +21,9 @@ list_projects  {}
 search_tools  {"projectCode":"PROJECT_CODE","module":"tasks","query":"草稿"}
 ```
 
-### 本地 CLI / MCP 接入
+### 本地 CLI 接入
 
-需要本机工作树、设备绑定或显式启用采集时，在接入页选择本地 CLI / MCP。已安装并授权 `tsp` 后，可以在宿主启动 stdio MCP，也可以用 `tsp tools list` 查看查询工具的输入定义。`tsp tools call` 用 `--input` 接收 JSON，用 `--project` 指定该次调用的项目。使用本机连接时，从该连接发现项目，并在该连接内使用其返回的编码。
+需要本机工作树、设备绑定或显式启用采集时，在接入页选择「本地 CLI」。安装并授权 `tsp` 后，用 `tsp tools list` 查看查询工具的输入定义。`tsp tools call` 用 `--input` 接收 JSON，用 `--project` 指定该次调用的项目。使用 CLI 时，从当前登录的平台发现项目，并在该平台内使用其返回的编码。宿主直接调用平台工具时，配置 HTTP Connector。
 
 ```bash
 tsp tools call get_connection_context
@@ -110,9 +110,9 @@ tsp defect report --feature FEATURE_CODE --title "DEFECT_TITLE" --severity mediu
 
 ### 找到适用的记忆并确认来源
 
-近期项目背景用 `read_memory_brief`，明确的主题用 `search_memory`。在 Connector 中用 `read_memory_sources` 回读来源，按来源类型读取资料或记忆文档。区分讨论、决定与实现或测试确认的事实。可复用本会话仍适用的来源。使用本机 MCP 时，`read_memory_source` 可回读单个来源，`context_receipt` 可帮助核对同一上下文的更新。
+近期项目背景用 `read_memory_brief`，明确的主题用 `search_memory`。在 Connector 中用 `read_memory_sources` 回读来源，按来源类型读取资料或记忆文档。区分讨论、决定与实现或测试确认的事实。可复用本会话仍适用的来源。通过 CLI 可用 `tsp tools call read_memory_source` 回读单个来源；参数以 `tsp tools list` 返回的定义为准。
 
-Connector 的个人记忆需单独授权。确认授权后，在当前项目调用 `search_memory` 并将 `scope` 设为 `personal`。本机连接可用 `list_personal_memories` 查看账号通用偏好。个人信息仅用于当前账号授权的工作。
+Connector 的个人记忆需单独授权。确认授权后，在当前项目调用 `search_memory` 并将 `scope` 设为 `personal`。CLI 可用 `tsp tools call list_personal_memories` 查看账号通用偏好。个人信息仅用于当前账号授权的工作。
 
 ### 用固定版本的代码图取证
 
@@ -145,12 +145,15 @@ read_project_skill  {"projectCode":"PROJECT_CODE","run":"RUN_CODE","skill":"SKIL
 
 ### 核对检索与宿主采集状态
 
-HTTP Connector 提供按需检索和任务工具。需要会话采集时，进入本地 CLI / MCP 接入，在已登录且明确绑定项目的工作区注册原生 Hook 或插件。将 `HARNESS` 替换为 `codex`、`dsh` 或 `opencode`。Codex 安装后由操作者在 `/hooks` 审阅信任，并用新会话验证。
+HTTP Connector 提供按需检索和任务工具，配置连接不会自动开启会话采集。只有操作者明确同意保存当前工作区的新会话时，才进入「本地 CLI」接入，安装并授权 CLI，在项目工作区根目录注册原生 Hook 或插件。先确认 `tsp project current` 返回目标项目；未绑定时先绑定，绑定不符时停止并核对。将 `HARNESS` 替换为 `codex`、`dsh` 或 `opencode`。Codex 安装后由操作者在 `/hooks` 审阅信任，并用新会话验证。Claude Code 的会话采集暂未开放，可使用 HTTP Connector 查询和协作。
 
 ```bash
+tsp project current
 tsp memory native install --harness HARNESS
 tsp memory native doctor --harness HARNESS
 ```
+
+停止当前工作区的采集时，执行 `tsp memory native uninstall --harness HARNESS`。该命令只移除平台管理的采集条目，保留其他插件和已入队记录。
 
 依次核对宿主注册、本地入队、平台接收、整理和记忆可检索状态。`doctor` 报告本机状态。平台采集与处理记录用于核实服务端进展。查看或纠正私有偏好时使用账号的「我的记忆」，保持项目来源与私人偏好分开。
 

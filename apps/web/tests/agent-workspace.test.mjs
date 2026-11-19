@@ -233,7 +233,7 @@ test('sharing and adoption forms disclose exact revisions, scope and external-me
   assert.match(adopt, /r1 · Revision 1/); assert.doesNotMatch(adopt, /r2 · Revision 2/);
 });
 
-test('Agent connection guide supplies real CLI and MCP setup without exposing device records', () => {
+test('local connection guide supplies CLI tools without legacy MCP setup or device records', () => {
   i18n.setLocale('en-US', false);
   const html = render(agent.CliConnectionGuide, { user: { code: 'U', account: 'liam', display_name: 'Liam' }, project }, [
     [['platform-client-config'], { public_web_url: null, public_api_url: null }],
@@ -243,18 +243,13 @@ test('Agent connection guide supplies real CLI and MCP setup without exposing de
   assert.doesNotMatch(html, /tsp auth login-password|BIND_TOKEN|npm link|pnpm -r build/); assert.match(html, /tsp auth login --api/); assert.match(html, /tsp project bind P/); assert.match(html, /tsp skill sync --project P --check/);
   assert.doesNotMatch(html, /My laptop|Private device|Devices &amp; sessions|device_token|web-login|在线设备/);
   assert.match(html, /href="\/account"/);
-  assert.match(html, /MCP/);
-  const decode = value => value.replaceAll('&quot;', '"').replaceAll('&#x27;', "'").replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&');
-  const configurations = [...html.matchAll(/<code>([\s\S]*?)<\/code>/g)].map(match => decode(match[1])).filter(text => text.startsWith('{')).map(text => JSON.parse(text));
-  assert.deepEqual(configurations.map(config => config.mcpServers.team_synergy), [
-    { command: 'cmd', args: ['/d', '/c', 'tsp', 'mcp', '--project', 'P'] },
-    { command: 'tsp', args: ['mcp', '--project', 'P'] },
-  ]);
+  assert.match(html, /Call tools through the CLI/);
+  assert.doesNotMatch(html, /stdio|mcpServers|tsp mcp|tsp agent connect|Manual CLI and MCP/);
+  assert.match(html, /tsp tools list/);
   assert.match(html, /tsp tools call read_code_catalog --project P/);
   assert.match(html, /get_connection_context/);
   assert.match(html, /list_projects/);
   assert.doesNotMatch(html, /Set the working directory to the project bound/);
-  assert.match(html, /list_project_materials/);
   assert.match(html, /read_code_catalog/);
 });
 
@@ -267,12 +262,9 @@ test('Agent connection guide never offers an unbound placeholder as an executabl
   assert.match(html, /get_connection_context/);
   assert.match(html, /list_projects/);
   assert.match(html, /projectCode/);
-  assert.match(html, /不设置工作目录或项目也能启动 MCP/);
-  const jsonCommands = [...html.matchAll(/<code>([\s\S]*?)<\/code>/g)].map(match => match[1].replaceAll('&quot;', '"')).filter(text => text.startsWith('{')).map(text => JSON.parse(text));
-  assert.deepEqual(jsonCommands.map(config => config.mcpServers.team_synergy.args), [
-    ['/d', '/c', 'tsp', 'mcp'], ['mcp'],
-  ]);
-  assert.ok(jsonCommands.every(config => !('cwd' in config.mcpServers.team_synergy)));
+  assert.doesNotMatch(html, /stdio|mcpServers|tsp mcp|tsp agent connect/);
+  assert.match(html, /先在页首选择一个已启用项目，再配置会话采集/);
+  assert.match(html, /<input type="checkbox"[^>]*disabled=""/);
 });
 
 test('Agent connection defaults to HTTP Connector and offers local setup when the endpoint is unavailable', () => {
@@ -282,6 +274,8 @@ test('Agent connection defaults to HTTP Connector and offers local setup when th
   assert.match(loading, /aria-pressed="true"[^>]*>HTTP Connector（推荐）<\/button>/);
   assert.match(loading, /正在读取平台接入配置/);
   assert.doesNotMatch(loading, /tsp auth login|复制服务地址/);
+  assert.match(loading, />本地 CLI<\/button>/);
+  assert.doesNotMatch(loading, /本地 CLI \/ MCP/);
   const unconfigured = render(agent.AgentConnectionWorkspace, { user, project }, [[['platform-client-config'], base]]);
   assert.match(unconfigured, /aria-pressed="true"[^>]*>HTTP Connector（推荐）<\/button>/);
   assert.match(unconfigured, /此站点尚未启用 HTTP Connector/);
@@ -289,8 +283,9 @@ test('Agent connection defaults to HTTP Connector and offers local setup when th
   assert.doesNotMatch(unconfigured, /复制服务地址|tsp auth login/);
 
   const local = render(agent.CliConnectionGuide, { user, project }, [[['platform-client-config'], base]]);
-  assert.match(local, /tsp agent connect --harness codex --project P<\/code>/);
-  assert.doesNotMatch(local, /--capture|复制授权头|Bearer/);
+  assert.match(local, /可选：配置会话采集/);
+  assert.match(local, /<input type="checkbox"(?![^>]*checked=)(?![^>]*disabled=)/);
+  assert.doesNotMatch(local, /tsp agent connect|tsp memory native install|--capture|复制授权头|Bearer/);
   for (const host of ['codex', 'dsh', 'opencode', 'claudecode']) assert.ok(local.includes(`value="${host}"`));
 
   const endpoint = 'https://workspace.example/agent/mcp';
@@ -303,6 +298,9 @@ test('Agent connection defaults to HTTP Connector and offers local setup when th
   assert.match(remote, /aria-pressed="true"[^>]*>HTTP Connector \(recommended\)<\/button>/);
   assert.match(remote, /https:\/\/workspace\.example\/agent\/mcp/);
   assert.match(remote, /Add TeamSynergy Connector/);
+  assert.match(remote, /No Connector download or CLI installation is needed/);
+  assert.match(remote, /supports remote HTTP MCP and OAuth/);
+  assert.match(remote, /Authorization is tied to your account/);
   assert.match(remote, /Sign in and authorize in the browser/);
   assert.match(remote, /straight to the consent page/);
   assert.match(remote, /browser returns the authorization result/);
@@ -318,6 +316,19 @@ test('Agent connection defaults to HTTP Connector and offers local setup when th
   const noProject = render(agent.AgentConnectionWorkspace, { user, project: { ...project, status: 'archived' } }, entries);
   assert.match(noProject, /<button(?![^>]*disabled=)[^>]*>New connection<\/button>/);
   assert.match(noProject, /create a time-limited credential for this account/);
+});
+
+test('both manuals describe remote HTTP authorization and explicit local capture without legacy MCP setup', () => {
+  for (const locale of ['zh-CN', 'en-US']) {
+    const manual = readFileSync(new URL(`../public/agent/guide.${locale}.md`, import.meta.url), 'utf8');
+    assert.doesNotMatch(manual, /stdio|mcpServers|tsp agent connect|Local CLI \/ MCP|本地 CLI \/ MCP|tsp tools call context_receipt/);
+    assert.match(manual, /HTTP MCP/);
+    assert.match(manual, /OAuth/);
+    assert.match(manual, /tsp project current\r?\ntsp memory native install --harness HARNESS\r?\ntsp memory native doctor --harness HARNESS/);
+    assert.match(manual, /tsp memory native uninstall --harness HARNESS/);
+    assert.match(manual, /\/hooks/);
+    assert.match(manual, locale === 'zh-CN' ? /配置连接不会自动开启会话采集/ : /Configuring a connection does not enable session capture/);
+  }
 });
 
 test('Connector consent loads and submits decisions to the private request route without caching', async (context) => {
