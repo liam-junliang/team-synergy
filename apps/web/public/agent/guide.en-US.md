@@ -4,7 +4,7 @@
 
 ### Start with the HTTP Connector
 
-Copy the HTTP Connector URL from the platform's Agent connection page. Add a remote connection in your host's MCP or connector settings. When the host starts OAuth, sign in to TeamSynergy in the browser. An existing browser session takes you directly to the consent page. Check the account, client, and return address, approve the permissions you need, and return to the host. The account connection works across accessible projects in one conversation, with no `tsp` installation or local directory binding.
+No Connector download or CLI installation is needed. In a host that supports remote HTTP MCP and OAuth, copy the HTTP Connector URL from the platform's Agent connection page and add a remote connection in your host's MCP or connector settings. When the host starts OAuth, sign in to TeamSynergy in the browser. An existing browser session takes you directly to the consent page. Check the account, client, and return address, approve the permissions you need, and return to the host. The account connection works across accessible projects in one conversation, with no `tsp` installation or local directory binding.
 
 The default permission covers on-demand project reads. To create or advance tasks, select Allow collaboration at consent. Personal memory requires separate permission. Session capture stays off. A host that supports custom headers and cannot start OAuth can use a time-limited credential from Advanced setup.
 
@@ -21,9 +21,9 @@ list_projects  {}
 search_tools  {"projectCode":"PROJECT_CODE","module":"tasks","query":"draft"}
 ```
 
-### Connect with local CLI or MCP
+### Connect with the local CLI
 
-Choose Local CLI / MCP on the Agent connection page for local worktrees, device-bound runs, or explicit session capture. After installing and authorizing `tsp`, you can start a stdio MCP connection in your host or use `tsp tools list` to inspect lookup schemas. `tsp tools call` accepts JSON through `--input` and can set the project through `--project`. Discover projects and use their returned codes on the same connection.
+Choose Local CLI on the Agent connection page for local worktrees, device-bound runs, or explicit session capture. After installing and authorizing `tsp`, use `tsp tools list` to inspect lookup schemas. `tsp tools call` accepts JSON through `--input` and can set the project through `--project`. Discover projects on the currently signed-in platform and use their returned codes on that platform. Configure the HTTP Connector for direct tool calls from your host.
 
 ```bash
 tsp tools call get_connection_context
@@ -110,9 +110,9 @@ tsp defect report --feature FEATURE_CODE --title "DEFECT_TITLE" --severity mediu
 
 ### Find applicable memory and check its source
 
-Use `read_memory_brief` for recent project context and `search_memory` for a specific subject. In the Connector, use `read_memory_sources` to check your sources, then open the relevant material or memory document. Distinguish proposals, confirmed decisions, and facts backed by implementation or testing. Reuse sources that still apply in this session. Local MCP provides `read_memory_source` for one source, and `context_receipt` helps check for updates in the same context.
+Use `read_memory_brief` for recent project context and `search_memory` for a specific subject. In the Connector, use `read_memory_sources` to check your sources, then open the relevant material or memory document. Distinguish proposals, confirmed decisions, and facts backed by implementation or testing. Reuse sources that still apply in this session. With the CLI, use `tsp tools call read_memory_source` for one source. Follow the input schemas from `tsp tools list`.
 
-Confirm personal memory permission before using `search_memory` with `scope` set to `personal` in the target project. The local connection provides `list_personal_memories` for account-wide preferences. Use personal information for work authorized by that account.
+Confirm personal memory permission before using `search_memory` with `scope` set to `personal` in the target project. The CLI provides `tsp tools call list_personal_memories` for account-wide preferences. Use personal information for work authorized by that account.
 
 ### Gather code evidence from a pinned analysis
 
@@ -145,12 +145,15 @@ read_project_skill  {"projectCode":"PROJECT_CODE","run":"RUN_CODE","skill":"SKIL
 
 ### Check retrieval and host capture separately
 
-The HTTP Connector provides on-demand retrieval and task tools. For session capture, select Local CLI / MCP and register the host hook or plugin in a signed-in workspace with an explicit project binding. Replace `HARNESS` with `codex`, `dsh`, or `opencode`. After Codex setup, have the operator review and trust the definition in `/hooks` and verify with a new session.
+The HTTP Connector provides on-demand retrieval and task tools. Configuring a connection does not enable session capture. Only after the operator explicitly agrees to save new conversations in the current workspace, select Local CLI, install and authorize the CLI, and register the host hook or plugin from the project workspace root. Confirm that `tsp project current` returns the target project; bind an unbound workspace first, and stop to check any mismatched binding. Replace `HARNESS` with `codex`, `dsh`, or `opencode`. After Codex setup, have the operator review and trust the definition in `/hooks` and verify with a new session. Claude Code session capture is not available yet; use the HTTP Connector for lookups and collaboration.
 
 ```bash
+tsp project current
 tsp memory native install --harness HARNESS
 tsp memory native doctor --harness HARNESS
 ```
+
+To stop capture in this workspace, run `tsp memory native uninstall --harness HARNESS`. It removes only platform-managed capture entries and keeps other plugins and queued records.
 
 Check host registration, local queuing, platform receipt, processing, and retrieval in order. `doctor` reports local status. Check platform capture and processing records for server progress. Use the account's My Memory page to inspect or correct private preferences, and keep project sources and personal preferences separate.
 

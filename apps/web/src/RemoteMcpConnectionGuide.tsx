@@ -27,7 +27,8 @@ export function RemoteMcpConnectionGuide({ accountCode, projects, onLocalSetup }
   return <div className="space-y-4">
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="remote-mcp-setup-title">
       <h2 id="remote-mcp-setup-title" className="text-base font-bold">{t('添加 TeamSynergy Connector')}</h2>
-      <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">{t('授权一次，即可让 Agent 按账号权限查资料、读记忆并参与多个项目。接入无需安装 CLI 或绑定本机工作区。')}</p>
+      <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">{t('无需下载 Connector 或安装 CLI。在支持远程 HTTP MCP 与 OAuth 的 Agent 中添加服务地址，完成浏览器授权后即可使用。')}</p>
+      <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">{t('授权绑定你的账号，Agent 可按权限查资料、读记忆并参与多个项目。每次调用指定项目，无需绑定本机目录。')}</p>
       {config.isPending ? <p role="status" className="mt-4 text-sm text-slate-500">{t('正在读取平台接入配置…')}</p>
         : config.isError ? <div className="mt-4 flex flex-wrap items-center gap-3"><p role="alert" className="text-sm text-slate-700">{t('无法读取平台接入配置。')}</p><button type="button" className="ui-button ui-button-secondary" onClick={() => void config.refetch()}>{t('重试')}</button></div>
         : endpoint ? <div className="mt-4 max-w-3xl space-y-3">
