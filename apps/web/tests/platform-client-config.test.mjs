@@ -38,6 +38,22 @@ test('configuration is read only from the authenticated same-origin API, never f
   } finally { globalThis.fetch = previous; }
 });
 
+test('the remote MCP URL must be configured and cannot carry credentials or route context', () => {
+  const base = { public_web_url: 'https://teams.example', public_api_url: 'https://api.example' };
+  assert.equal(config.remoteMcpEndpoint(base), null);
+  assert.equal(config.remoteMcpEndpoint({ ...base, remote_mcp_url: 'https://agents.example/mcp' }), 'https://agents.example/mcp');
+  for (const value of ['/mcp', 'http://example.com/mcp', 'https://user:token@example.com/mcp', 'https://example.com/mcp?token=secret', 'https://example.com/mcp#pin']) {
+    assert.equal(config.remoteMcpEndpoint({ ...base, remote_mcp_url: value }), null);
+  }
+});
+
+test('the remote MCP URL can use loopback HTTP in a local browser preview', () => {
+  const local = { public_web_url: null, public_api_url: null, remote_mcp_url: 'http://127.0.0.1:5173/api/mcp' };
+  assert.equal(config.remoteMcpEndpoint(local, 'http://127.0.0.1:5173'), local.remote_mcp_url);
+  assert.equal(config.remoteMcpEndpoint(local, 'https://platform.example'), null);
+  assert.equal(config.remoteMcpEndpoint({ ...local, remote_mcp_url: 'http://remote.example/mcp' }, 'http://127.0.0.1:5173'), null);
+});
+
 test('the CLI guide waits for settings instead of offering potentially incorrect local connection commands', () => {
   function render(settings) {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });

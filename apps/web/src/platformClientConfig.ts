@@ -3,6 +3,7 @@ import { fetchEnvelope } from './api';
 export interface PlatformClientConfig {
   public_web_url: string | null;
   public_api_url: string | null;
+  remote_mcp_url?: string | null;
 }
 
 export const PLATFORM_CLIENT_CONFIG_QUERY_KEY = ['platform-client-config'] as const;
@@ -15,6 +16,18 @@ export function getPlatformClientConfig(): Promise<PlatformClientConfig> {
 export function clientConnectionUrls(config: PlatformClientConfig, currentOrigin: string) {
   const webUrl = config.public_web_url ?? currentOrigin;
   return { webUrl, apiUrl: config.public_api_url ?? `${webUrl}/api` };
+}
+
+export function remoteMcpEndpoint(config?: PlatformClientConfig, workspaceOrigin = typeof window === 'undefined' ? undefined : window.location.origin): string | null {
+  if (!config?.remote_mcp_url) return null;
+  try {
+    const endpoint = new URL(config.remote_mcp_url);
+    if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash) return null;
+    if (endpoint.protocol === 'https:') return endpoint.href;
+    const loopback = ['localhost', '127.0.0.1', '[::1]'];
+    if (endpoint.protocol === 'http:' && workspaceOrigin && loopback.includes(endpoint.hostname) && loopback.includes(new URL(workspaceOrigin).hostname)) return endpoint.href;
+  } catch { /* An invalid configuration cannot be used as a remote connection. */ }
+  return null;
 }
 
 export function cliLoginCommand(config: PlatformClientConfig, currentOrigin: string): string {

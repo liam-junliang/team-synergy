@@ -79,13 +79,14 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 
 export function listAgentTools(options: AgentToolOptions = {}) {
+  const fixed = options.lockProject && options.projectCode;
   return [...connectionTools, ...platformSkillDefinitions, ...[search, brief, sourceTool, documentTool, personalListTool, personalReadTool,
     ...agentCapabilityDefinitions(options)].map(tool => ({ ...tool,
-    description: tool.description + ([personalListTool.name, personalReadTool.name].includes(tool.name)
+    description: tool.description + (fixed ? ' 此连接只查询已固定的项目；无需重复传项目编码。' : [personalListTool.name, personalReadTool.name].includes(tool.name)
       ? ' 可选 projectCode 限定项目；无需为账号通用偏好查找或绑定项目。'
       : ' 可显式传 projectCode；省略时采用启动 --project 或有效工作区绑定，未选择项目时先 list_projects。'),
     inputSchema: { ...tool.inputSchema, properties: { ...tool.inputSchema.properties,
-      projectCode: { ...z.toJSONSchema(PublicCodeSchema), description: '本次调用的准确项目编号；不改变连接的默认项目或本机绑定。' } } },
+      projectCode: { ...z.toJSONSchema(PublicCodeSchema), description: fixed ? '省略或使用此连接固定的项目编号。' : '本次调用的准确项目编号；不改变连接的默认项目或本机绑定。' } } },
   }))];
 }
 
@@ -204,6 +205,9 @@ export function createAgentToolSession(options: AgentToolOptions = {}) {
         boundContext();
         return content([page]);
       }
+      if (![brief.name, sourceTool.name, search.name].includes(name)) {
+        throw new AgentToolInputError('Unknown or disabled tool: ' + name);
+      }
       const isBrief = name === brief.name;
       const isSource = name === sourceTool.name;
       const common = ['context_receipt'];
@@ -212,7 +216,7 @@ export function createAgentToolSession(options: AgentToolOptions = {}) {
           (args.context_receipt !== undefined && (typeof args.context_receipt !== 'string' || !args.context_receipt || args.context_receipt.length > 64)) ||
           (isBrief ? (args.scope !== 'project' && args.scope !== 'personal')
           : isSource ? typeof args.source !== 'string' || !args.source || args.source.length > 64
-          : name !== search.name || typeof args.query !== 'string' || !args.query.trim() || args.query.trim().length > 256 ||
+          : typeof args.query !== 'string' || !args.query.trim() || args.query.trim().length > 256 ||
             (args.scope !== undefined && args.scope !== 'project' && args.scope !== 'personal'))) {
         throw new AgentToolInputError('Expected a memory read with its documented arguments');
       }
@@ -269,7 +273,9 @@ export async function serveMemoryMcp(options: AgentToolOptions = {}) {
       reply(id, { result: { protocolVersion: versions.includes(params.protocolVersion) ? params.protocolVersion : versions[0],
         capabilities: { tools: {}, resources: {} }, serverInfo: { name: 'tsp-memory', version: '0.3.1' },
         instructions: [
-          '平台连接与项目选择相互独立。首次需要项目资料但默认项目不明时，用 get_connection_context 查看账号和默认项目，list_projects 按操作者意图查找准确项目；随后在工具参数中传 projectCode，或使用启动 --project。不要自动选第一个项目，不要在 DSH 等宿主的安装目录创建工作区绑定。已明确项目后不必每题重复发现；不同项目的回执不能混用。',
+          ...(options.readOnly ? ['该 MCP 仅提供只读检索。'] : []),
+          options.lockProject && options.projectCode ? '此连接固定当前项目。用 get_connection_context 核实账号和项目，后续调用沿用此项目。'
+            : '平台连接与项目选择相互独立。首次需要项目资料但默认项目不明时，用 get_connection_context 查看账号和默认项目，list_projects 按操作者意图查找准确项目；随后在工具参数中传 projectCode，或使用启动 --project。不要自动选第一个项目，不要在 DSH 等宿主的安装目录创建工作区绑定。已明确项目后不必每题重复发现；不同项目的回执不能混用。',
           ...projectRetrievalPolicy,
         ].join('\n') } });
     } else if (msg.method === 'ping') reply(id, { result: {} });

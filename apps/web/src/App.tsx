@@ -11,7 +11,7 @@ import { Component, lazy, Suspense, useCallback, useEffect, useState, type CSSPr
 import { cancelTask, getProject, listFeatures, listMembers, listTasks, getTask, logoutWebSession, restoreWebSession, taskHistory, updateTaskContract, type AuthUser, type Feature, type Member, type TaskDetail as TaskDetailData, type TaskSummary, type UpdateTaskContractInput } from './api';
 import { ApiError } from './apiError';
 import { STATUS_META, BOARD_COLUMNS, PROFILE_META, SOURCE_META, isStale } from './status';
-import { AGENT_WORKSPACE_TABS, agentWorkspacePath, safeAgentReturnPath, projectWorkspacePath, workspacePathAfterLogin, type ProjectSection, type WorkspaceRoute } from './workspaceRouting';
+import { AGENT_WORKSPACE_TABS, agentWorkspacePath, safeAgentReturnPath, projectWorkspacePath, taskWorkspacePath, workspacePathAfterLogin, type ProjectSection, type WorkspaceRoute } from './workspaceRouting';
 import { listenWorkspaceNavigation, navigateWorkspace, readWorkspaceRoute } from './workspaceNavigation';
 import { LoginPage } from './LoginPage';
 import { PasswordChangePage } from './PasswordChangePage';
@@ -376,7 +376,7 @@ export function AuthenticatedWorkspace({ route, session, onLogout, onClosed }: {
         <nav className="col-start-1 row-start-3 flex min-w-0 flex-wrap sm:col-span-2 sm:row-start-2 xl:col-span-1 xl:col-start-2 xl:row-start-1" aria-label={t("工作台导航")}>
           {inAdminConsole ? <AdminNavigation tab={route.adminTab ?? (view === 'admin' ? 'teams' : undefined)} /> : view === 'agent' ? <>
             <a href={session.is_system_admin ? '/admin/teams' : safeAgentReturnPath(route.agentReturnPath, projectCode)} className="inline-flex shrink-0 items-center gap-1.5 border-b-2 border-transparent px-3 py-2 text-sm font-medium text-slate-400 hover:text-slate-100"><svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M7 4 3 8l4 4M3 8h8a5 5 0 0 1 0 10H9" /></svg>{t(session.is_system_admin ? '系统管理' : projectCode ? '返回项目' : '团队与项目')}</a>
-            {route.agentTab !== 'authorize' && AGENT_WORKSPACE_TABS.map(tab => <a key={tab} href={agentWorkspacePath(tab, route)} aria-current={route.agentTab === tab ? 'page' : undefined} className={`shrink-0 border-b-2 px-3 py-2 text-sm font-medium transition ${route.agentTab === tab ? 'border-cyan-400 text-white' : 'border-transparent text-slate-400 hover:text-slate-100'}`}>{t(AGENT_TAB_LABELS[tab])}</a>)}
+            {route.agentTab !== 'authorize' && route.agentTab !== 'mcp-consent' && AGENT_WORKSPACE_TABS.map(tab => <a key={tab} href={agentWorkspacePath(tab, route)} aria-current={route.agentTab === tab ? 'page' : undefined} className={`shrink-0 border-b-2 px-3 py-2 text-sm font-medium transition ${route.agentTab === tab ? 'border-cyan-400 text-white' : 'border-transparent text-slate-400 hover:text-slate-100'}`}>{t(AGENT_TAB_LABELS[tab])}</a>)}
           </> : <>
           <a href="/teams" aria-current={view === 'teams' ? 'page' : undefined} className={`shrink-0 border-b-2 px-3 py-2 text-sm font-medium transition ${view === 'teams' ? 'border-cyan-400 text-white' : 'border-transparent text-slate-400 hover:text-slate-100'}`}>{t("团队与项目")}</a>
         {projectCode && PROJECT_VIEWS.map((item) => (
@@ -386,7 +386,7 @@ export function AuthenticatedWorkspace({ route, session, onLogout, onClosed }: {
         </nav>
         <div className="col-start-1 row-start-2 flex w-full max-w-full flex-wrap items-center justify-self-end gap-2 text-xs sm:col-start-2 sm:row-start-1 sm:w-auto xl:col-start-3">
           {!inAdminConsole && <a href={agentWorkspacePath('connect', { projectCode, agentReturnPath: view === 'agent' ? route.agentReturnPath : `${window.location.pathname}${window.location.search}` })} aria-label={t('Agent 集成')} title={t('Agent 集成')} aria-current={view === 'agent' ? 'page' : undefined} className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${view === 'agent' ? 'border-cyan-500 bg-cyan-500/15 text-cyan-300' : 'border-slate-700 bg-slate-900 text-slate-300 hover:border-cyan-500 hover:text-cyan-300'}`}><svg aria-hidden="true" viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="7" width="14" height="13" rx="3" /><path d="M12 3v4M9 12v1m6-1v1m-6 4h6M2 11v5m20-5v5" /><circle cx="12" cy="2.5" r=".5" /></svg><span>{t('Agent 集成')}</span></a>}
-          {!inAdminConsole && (projectCode || view === 'agent') && <ProjectSwitcher route={route} currentProjectName={projectQuery.data?.name} />}
+          {!inAdminConsole && (projectCode || (view === 'agent' && route.agentTab !== 'mcp-consent')) && <ProjectSwitcher route={route} currentProjectName={projectQuery.data?.name} />}
           <LanguageSwitcher />
           <AccountMenu key={window.location.pathname + window.location.search} user={session} currentView={view} onLogout={onLogout} />
         </div>
@@ -397,7 +397,7 @@ export function AuthenticatedWorkspace({ route, session, onLogout, onClosed }: {
         {view === 'teams' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载团队…")}</div>}><TeamsWorkspace /></Suspense>}
         {view === 'personal-memory' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t('正在读取记忆中心…')}</div>}><MemoryCenterWorkbench key={`${session.code}:${route.personalMemoryProject ?? ''}`} ownerCode={session.code} initialProject={route.personalMemoryProject} /></Suspense>}
         {projectCode && view === 'overview' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载项目…")}</div>}><ProjectWorkspace key={projectCode} projectCode={projectCode} tab={route.projectTab} documentCode={route.documentCode} /></Suspense>}
-        {projectCode && view === 'board' && <TeamBoard key={projectCode} projectCode={projectCode} />}
+        {projectCode && view === 'board' && <TeamBoard key={projectCode} projectCode={projectCode} selectedId={route.taskCode} />}
         {projectCode && view === 'understanding' && <Suspense fallback={<div className="p-8 text-sm text-slate-500">{t('正在加载代码理解…')}</div>}><CodeUnderstandingWorkbench key={projectCode} projectCode={projectCode} route={route} /></Suspense>}
         {projectCode && view === 'requirements' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载需求…")}</div>}><RequirementsWorkbench key={projectCode} projectCode={projectCode} documentCode={route.documentCode} initialTab={route.requirementsTab} /></Suspense>}
         {projectCode && view === 'design' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载设计原型…")}</div>}><DesignWorkbench key={projectCode} projectCode={projectCode} /></Suspense>}
@@ -695,11 +695,10 @@ export function TaskBoardControls({
   );
 }
 
-function TeamBoard({ projectCode }: { projectCode: string }) {
+function TeamBoard({ projectCode, selectedId }: { projectCode: string; selectedId?: string }) {
   const { projectName, featureName, memberName } = useProjectDisplayNames();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filters, setFilters] = useState<TaskBoardFilters>(DEFAULT_TASK_BOARD_FILTERS);
-  const closeModal = useCallback(() => setSelectedId(null), []);
+  const closeModal = useCallback(() => navigateWorkspace(projectWorkspacePath(projectCode, 'board'), { replace: true }), [projectCode]);
   const { data: tasks, error, isLoading, isFetching, dataUpdatedAt } = useQuery({
     queryKey: ['tasks', projectCode],
     queryFn: () => listTasks('', projectCode),
@@ -719,6 +718,7 @@ function TeamBoard({ projectCode }: { projectCode: string }) {
   }
 
   const allTasks = tasks ?? [];
+  const selectedTask = selectedId && allTasks.find(task => task.code === selectedId);
   const filteredTasks = filterBoardTasks(allTasks, filters);
   const visibleColumns = BOARD_COLUMNS.filter((column) => column.id !== 'cancelled' || allTasks.some((task) => task.status === 'cancelled'));
   const board = visibleColumns.map((col) => ({
@@ -735,6 +735,9 @@ function TeamBoard({ projectCode }: { projectCode: string }) {
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
       <main className="flex-1 overflow-x-auto p-6">
+        {selectedId && !selectedTask && <div role="alert" className="mb-3 flex flex-wrap items-center gap-3 rounded-xl bg-slate-100 p-3 text-sm text-slate-700">
+          {t('当前项目中找不到这条任务。')} <button type="button" className="ui-button ui-button-secondary ui-button-compact" onClick={closeModal}>{t('关闭提示')}</button>
+        </div>}
         <div className="mb-3 flex min-w-[980px] items-end justify-between gap-6">
           <div className="shrink-0"><p className="text-xs font-bold tracking-[0.18em] text-cyan-700">PROJECT DELIVERY</p><h1 className="mt-1 text-2xl font-bold">{projectName || t("项目")}{t(" · 任务看板")}</h1><code title={t("项目编码")} className="text-xs text-slate-400">{projectCode}</code></div>
           <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5 pb-0.5">
@@ -772,7 +775,7 @@ function TeamBoard({ projectCode }: { projectCode: string }) {
                     </div>
                     <div className="space-y-2">
                       {featureTasks.map((t) => (
-                        <TaskCard key={t.code} task={t} onSelect={() => setSelectedId(t.code)} />
+                        <TaskCard key={t.code} task={t} onSelect={() => navigateWorkspace(taskWorkspacePath(projectCode, t.code), { replace: true })} />
                       ))}
                     </div>
                   </div>
@@ -790,7 +793,7 @@ function TeamBoard({ projectCode }: { projectCode: string }) {
           />
         </div>
       </main>
-      {selectedId && <TaskDetailModal taskId={selectedId} projectCode={projectCode} onClose={closeModal} />}
+      {selectedTask && <TaskDetailModal key={selectedTask.code} taskId={selectedTask.code} projectCode={projectCode} onClose={closeModal} />}
     </div>
   );
 }

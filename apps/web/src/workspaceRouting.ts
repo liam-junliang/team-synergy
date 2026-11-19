@@ -4,6 +4,7 @@ export type WorkspaceView = 'teams' | 'account' | 'personal-memory' | 'agent' | 
 export type AdminSection = 'teams' | 'users' | 'settings';
 export type ProjectWorkspaceTab = 'overview' | 'structure' | 'architecture' | 'intake';
 export const AGENT_WORKSPACE_TABS = ['connect', 'guide', 'skills'] as const;
+export const MCP_CONSENT_PATH = '/agent/connect/authorize';
 type AgentWorkspaceTab = (typeof AGENT_WORKSPACE_TABS)[number];
 
 function isAgentWorkspaceTab(tab: string | undefined): tab is AgentWorkspaceTab {
@@ -17,13 +18,15 @@ export interface WorkspaceRoute {
   folderCode?: string;
   createDocument?: boolean;
   handoverCode?: string;
+  taskCode?: string;
   projectTab?: ProjectWorkspaceTab;
   requirementsTab?: 'ideas' | 'topics' | 'documents' | 'checklist';
   testingTab?: 'cases' | 'assets' | 'executions';
   testingCode?: string;
   testingRevision?: string;
-  agentTab?: AgentWorkspaceTab | 'authorize';
+  agentTab?: AgentWorkspaceTab | 'authorize' | 'mcp-consent';
   authorizationCode?: string;
+  mcpConsentRequest?: string;
   teamCode?: string;
   agentReturnPath?: string;
   adminTab?: AdminSection;
@@ -39,6 +42,11 @@ export function parseWorkspacePath(pathname: string): WorkspaceRoute {
   const parts = (path ?? '').split('/').filter(Boolean);
   if (parts[0] === 'admin') {
     return { view: 'admin', adminTab: parts[1] === 'settings' || parts[1] === 'users' ? parts[1] : 'teams' };
+  }
+  if (path === MCP_CONSENT_PATH || path === `${MCP_CONSENT_PATH}/`) {
+    const requests = new URLSearchParams(query).getAll('request');
+    const request = requests.length === 1 && /^[a-f0-9]{64}$/.test(requests[0]) ? requests[0] : undefined;
+    return { view: 'agent', agentTab: 'mcp-consent', ...(request ? { mcpConsentRequest: request } : {}) };
   }
   if (parts[0] === 'agent' && parts[1] === 'authorize') {
     const code = new URLSearchParams(query).get('code')?.trim().toUpperCase();
@@ -94,6 +102,10 @@ export function parseWorkspacePath(pathname: string): WorkspaceRoute {
       const handoverCode = new URLSearchParams(query).get('handover');
       if (handoverCode) route.handoverCode = handoverCode;
     }
+    if (section === 'board') {
+      const tasks = new URLSearchParams(query).getAll('task');
+      if (tasks.length === 1 && tasks[0]) route.taskCode = tasks[0];
+    }
     if (section === 'requirements') {
       const params = new URLSearchParams(query);
       const documentCode = params.get('document');
@@ -123,6 +135,10 @@ export function parseWorkspacePath(pathname: string): WorkspaceRoute {
 
 export function projectWorkspacePath(projectCode: string, section: ProjectSection = 'overview'): string {
   return `/projects/${encodeURIComponent(projectCode)}/${section}`;
+}
+
+export function taskWorkspacePath(projectCode: string, taskCode: string): string {
+  return `${projectWorkspacePath(projectCode, 'board')}?${new URLSearchParams({ task: taskCode })}`;
 }
 
 export function personalMemoryWorkspacePath(projectCode?: string): string {
@@ -208,6 +224,7 @@ export function requirementWorkspacePath(projectCode: string, options: { documen
 /** Recognize UI locations exactly; never swallow API, asset or download paths. */
 export function isWorkspacePath(path: string): boolean {
   const pathname = path.split(/[?#]/, 1)[0];
+  if (pathname === MCP_CONSENT_PATH || pathname === `${MCP_CONSENT_PATH}/`) return true;
   if (/^\/(?:teams\/?|account\/?)?$/.test(pathname)) return true;
   if (/^\/account\/memory\/?$/.test(pathname)) return true;
   const agent = /^\/agent\/([^/]+)\/?$/.exec(pathname);
@@ -232,6 +249,8 @@ export function workspaceShareUrl(path: string, baseUrl: string): string {
 export function workspacePathAfterLogin(href: string, isSystemAdmin: boolean): string {
   const location = new URL(href);
   const legacy = legacyWorkspacePath(location.hash);
+  const consent = parseWorkspacePath(`${location.pathname}${location.search}`);
+  if (consent.agentTab === 'mcp-consent') return MCP_CONSENT_PATH + (consent.mcpConsentRequest ? `?request=${consent.mcpConsentRequest}` : '');
   if (legacy) return isSystemAdmin && parseWorkspacePath(legacy).view === 'teams' ? '/admin/teams' : legacy;
   if (isSystemAdmin && /^\/(?:teams\/?)?$/.test(location.pathname)) return '/admin/teams';
   if (location.pathname !== '/' && isWorkspacePath(location.pathname)) return `${location.pathname}${location.search}${location.hash}`;

@@ -27,6 +27,14 @@ http {
             proxy_set_header X-Forwarded-Proto $scheme;
             client_max_body_size 32m;
         }
+        location = /.well-known/oauth-authorization-server {
+            proxy_pass http://127.0.0.1:${TSP_API_PORT}/.well-known/oauth-authorization-server;
+            proxy_set_header Host $http_host;
+        }
+        location = /.well-known/oauth-protected-resource/api/mcp {
+            proxy_pass http://127.0.0.1:${TSP_API_PORT}/.well-known/oauth-protected-resource;
+            proxy_set_header Host $http_host;
+        }
         location /assets/ { try_files $uri =404; }
         location ~ ^/agent/guide\.(zh-CN|en-US)\.md$ {
             types { text/markdown md; }

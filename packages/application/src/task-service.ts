@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { redactAuditValue } from './audit-redaction.js';
 import { lockAggregate } from './aggregate-lock.js';
 import { and, count, desc, eq, inArray } from 'drizzle-orm';
@@ -57,6 +58,8 @@ export interface ClaimCommand {
   baseSnapshot: number;
   workspacePath: string;
   gitBase: string;
+  /** Set only by the authorized in-process Connector handler. */
+  remoteConnectionCode?: string;
 }
 
 export interface SubmitCommand {
@@ -67,6 +70,7 @@ export interface SubmitCommand {
   deviceCode?: string;
   executionEpoch?: number;
   leaseToken?: string;
+  remoteConnectionCode?: string;
   artifact: { kind: ArtifactKind; uri: string; contentHash: string };
   evidence: {
     type: 'self_test' | 'verifier_review' | 'deployment' | 'manual';
@@ -169,6 +173,11 @@ function parseScope(raw: string | null): { writable_paths: string[] } | null {
 }
 
 let workspacePlaceholderSequence = 0n;
+const connectorRunClaim = 'connector.run.claim';
+
+function connectorClaimHash(connectionCode: string): string {
+  return createHash('sha256').update(connectionCode).digest('hex');
+}
 
 function nextWorkspacePlaceholderRunId(): bigint {
   workspacePlaceholderSequence += 1n;
@@ -428,6 +437,9 @@ export function createTaskService(db: Db) {
         const [currentTask] = await tx.select().from(schema.tasks).where(eq(schema.tasks.id, task.id)).for('update').limit(1);
         if (!currentTask) throw new DomainError('task_not_found', `任务不存在：${cmd.taskCode}`);
         await assertNoPendingHandover(tx, currentTask.id);
+        if (cmd.remoteConnectionCode && (currentTask.execution_epoch !== 0 || cmd.profile !== 'builder')) {
+          throw new DomainError('connector_local_execution_required', '该任务需要对应执行设备，请从本地工作区领取');
+        }
 
         const [activeRun] = await tx.select().from(schema.runs).where(and(
           eq(schema.runs.task_id, currentTask.id),
@@ -540,6 +552,11 @@ export function createTaskService(db: Db) {
           baseSnapshot: cmd.baseSnapshot + 1,
           startedAt,
         });
+        if (cmd.remoteConnectionCode) {
+          await tx.insert(schema.commandReceipts).values({ principal_id: principal.id,
+            operation: connectorRunClaim, key: run.code, request_hash: connectorClaimHash(cmd.remoteConnectionCode),
+            result: '{}', created_at: startedAt });
+        }
 
         const audit = {
           entity_type: 'task',
@@ -551,6 +568,7 @@ export function createTaskService(db: Db) {
           run_id: run.id,
           base_snapshot: cmd.baseSnapshot,
           action: 'task.claimed',
+          ...(cmd.remoteConnectionCode ? { payload: { connector_code: cmd.remoteConnectionCode } } : {}),
         };
         assertAuditedChange(audit);
         await insertAudit(tx, toAuditEvent(audit, createPublicCode(), startedAt));
@@ -821,6 +839,15 @@ export function createTaskService(db: Db) {
       if (!run) return fail<TaskServiceSubmitResult>(new DomainError('submit_run_mismatch', `Run 不存在：${cmd.runCode}`));
 
       const result = await db.transaction(async (tx) => {
+        if (cmd.remoteConnectionCode) {
+          const [feature] = await tx.select({ projectId: schema.features.project_id }).from(schema.features)
+            .where(eq(schema.features.id, task.feature_id)).limit(1);
+          if (!feature) throw new DomainError('feature_not_found', '任务项目不存在');
+          // Match archive/membership lock ordering before taking the task lock.
+          await lockAggregate(tx, 'project', feature.projectId, true);
+          await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, principal.id)).for('share');
+          await lockTaskProject(tx, feature.projectId);
+        }
         const [currentTask] = await tx.select().from(schema.tasks).where(eq(schema.tasks.id, task.id)).for('update').limit(1);
         const [currentRun] = await tx.select().from(schema.runs).where(eq(schema.runs.id, run.id)).limit(1);
         if (!currentTask) throw new DomainError('task_not_found', `任务不存在：${cmd.taskCode}`);
@@ -833,6 +860,12 @@ export function createTaskService(db: Db) {
             run_principal_code: currentRun.code,
             principal_code: principal.code,
           });
+        }
+        if (cmd.remoteConnectionCode) {
+          const [receipt] = await tx.select({ code: schema.commandReceipts.code }).from(schema.commandReceipts)
+            .where(and(eq(schema.commandReceipts.principal_id, principal.id), eq(schema.commandReceipts.operation, connectorRunClaim),
+              eq(schema.commandReceipts.key, currentRun.code), eq(schema.commandReceipts.request_hash, connectorClaimHash(cmd.remoteConnectionCode)))).limit(1);
+          if (!receipt) throw new DomainError('connector_run_forbidden', '只能提交由当前连接领取的执行记录');
         }
         await assertExecutionWrite(tx, { taskId: currentTask.id, runId: currentRun.id, principalId: principal.id, deviceId: await executionDeviceId(tx, principal.id, cmd.deviceCode), epoch: cmd.executionEpoch, leaseToken: cmd.leaseToken });
         if (currentRun.status !== 'active') {
@@ -936,6 +969,7 @@ export function createTaskService(db: Db) {
           run_id: currentRun.id,
           base_snapshot: cmd.baseSnapshot,
           action: 'task.self_tested',
+          ...(cmd.remoteConnectionCode ? { payload: { connector_code: cmd.remoteConnectionCode } } : {}),
         };
         const auditSubmitted = {
           ...auditSelfTested,

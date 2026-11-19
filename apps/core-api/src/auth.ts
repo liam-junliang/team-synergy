@@ -2,6 +2,9 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { createAuthUseCases } from '@team-synergy/application';
 import type { Db } from '@team-synergy/persistence';
 import { isSafeMethod, readWebCookies, trustedWebOrigin, verifyWebCsrf, webCookieSecure } from './web-session.js';
+/** In-process only. An HTTP caller cannot set a property on the request prototype. */
+export const connectorReadPrincipal = Symbol('connector-read-principal');
+type ConnectorReadIdentity = { principalCode: string; projectCode: string };
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -9,7 +12,7 @@ declare module 'fastify' {
     authDeviceToken: string | null;
     authDeviceCode: string | null;
     authSessionCode: string | null;
-    authKind: 'bearer' | 'cookie' | 'legacy' | null;
+    authKind: 'bearer' | 'cookie' | 'legacy' | 'connector' | null;
     passwordChangeRequired: boolean;
   }
 }
@@ -21,9 +24,9 @@ export function unauthorized(reply: FastifyReply) {
   });
 }
 
-/** Both kinds are cryptographically resolved by middleware; legacy declarations do not qualify. */
+/** Accept verified browser/device sessions and the scoped in-process Connector read. */
 export function hasAuthenticatedSession(request: FastifyRequest): boolean {
-  return new Set<string>(['bearer', 'cookie']).has(request.authKind ?? '') && !!request.principal;
+  return (request.authKind === 'bearer' || request.authKind === 'cookie' || request.authKind === 'connector') && !!request.principal;
 }
 
 /** Exact anonymous endpoints; release filenames remain validated by the distribution handler. */
@@ -34,7 +37,7 @@ export function isPublicRoute(method: string, pathname: string): boolean {
 }
 
 /** Resolve Bearer credentials before routes, retaining x-principal-code for non-bearer transition flows. */
-export function registerAuthMiddleware(app: FastifyInstance, db: Db): void {
+export function registerAuthMiddleware(app: FastifyInstance, db: Db, connectorRoute: typeof isPublicRoute = () => false): void {
   const auth = createAuthUseCases(db);
   app.decorateRequest('principal', null);
   app.decorateRequest('authDeviceToken', null);
@@ -45,6 +48,18 @@ export function registerAuthMiddleware(app: FastifyInstance, db: Db): void {
 
   app.addHook('onRequest', async (request, reply) => {
     const path = request.url.split('?', 1)[0] ?? request.url;
+    if (connectorRoute(request.method, path)) return;
+    const grant = (request.raw as { [connectorReadPrincipal]?: ConnectorReadIdentity })[connectorReadPrincipal];
+    if (grant && request.method === 'POST' && [
+      `/projects/${grant.projectCode}/memory/search`,
+      `/projects/${grant.projectCode}/memory/sources`,
+      `/projects/${grant.projectCode}/memory/brief`,
+      `/projects/${grant.projectCode}/memory/documents/read`,
+    ].includes(path)) {
+      request.principal = grant.principalCode;
+      request.authKind = 'connector';
+      return;
+    }
     // Browser CSP telemetry carries no platform authority or state mutation.
     if (request.method === 'POST' && path === '/security/csp-report') return;
     // A stale Cookie must not prevent a new login; Origin protects this anonymous boundary.
@@ -111,7 +126,7 @@ export function registerAuthMiddleware(app: FastifyInstance, db: Db): void {
   });
   app.addHook('preHandler', async (request, reply) => {
     const path = request.url.split('?', 1)[0];
-    if (isPublicRoute(request.method, path ?? '')) return;
+    if (isPublicRoute(request.method, path ?? '') || connectorRoute(request.method, path ?? '')) return;
     if (!request.principal) return unauthorized(reply);
   });
 }

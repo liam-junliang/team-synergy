@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import { lockAggregate } from './aggregate-lock.js';
+import { canonicalContextJson } from './handover-use-cases.js';
 import { writeFeature } from './intake-entity-writers.js';
 import type { EvidenceType, Profile, TaskSource } from '@team-synergy/contracts';
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
@@ -370,6 +372,7 @@ export function createProjectUseCases(db: Db) {
     validationSeams?: string[];
     dependsOnCodes?: string[];
     principalCode: string;
+    idempotencyKey?: string;
   }) {
     try {
       const [feature, principal] = await Promise.all([
@@ -447,9 +450,22 @@ export function createProjectUseCases(db: Db) {
       }
 
       const taskCode = createPublicCode();
-      await db.transaction(async (tx) => {
+      const idempotencyKey = cmd.idempotencyKey;
+      const requestHash = idempotencyKey === undefined ? undefined : createHash('sha256').update(canonicalContextJson(cmd)).digest('hex');
+      const data = await db.transaction(async (tx) => {
         await lockAggregate(tx, 'project', feature.project_id, true);
         await assertProjectAccess(tx, feature.project_id, principal.id, cmd.source === 'ad-hoc' ? 'write' : 'manage');
+        if (idempotencyKey !== undefined) {
+          if (!/^[a-zA-Z0-9._:-]{1,128}$/.test(idempotencyKey)) throw new DomainError('validation_failed', '任务创建的幂等键无效');
+          await lockAggregate(tx, 'task.create', `${principal.id}:${idempotencyKey}`);
+          const [receipt] = await tx.select({ requestHash: schema.commandReceipts.request_hash, result: schema.commandReceipts.result })
+            .from(schema.commandReceipts).where(and(eq(schema.commandReceipts.principal_id, principal.id),
+              eq(schema.commandReceipts.operation, 'task.create'), eq(schema.commandReceipts.key, idempotencyKey))).limit(1);
+          if (receipt) {
+            if (receipt.requestHash !== requestHash) throw new DomainError('idempotency_conflict', '同一幂等键已经用于其他任务请求');
+            return JSON.parse(receipt.result) as { task_code: string; status: 'draft'; base_snapshot: number };
+          }
+        }
         let requirementBaselineId: bigint | null = null;
         if (cmd.requirementBaselineCode) {
           const [project] = await tx.select().from(schema.projects).where(eq(schema.projects.id, feature.project_id)).for('share').limit(1);
@@ -524,11 +540,17 @@ export function createProjectUseCases(db: Db) {
         };
         assertAuditedChange(audit);
         await insertAudit(tx, toAuditEvent(audit, createPublicCode(), now()));
+        const result = { task_code: taskCode, status: 'draft' as const, base_snapshot: 0 };
+        if (idempotencyKey !== undefined && requestHash !== undefined) {
+          await tx.insert(schema.commandReceipts).values({ code: createPublicCode(), principal_id: principal.id,
+            operation: 'task.create', key: idempotencyKey, request_hash: requestHash, result: JSON.stringify(result), created_at: now() });
+        }
+        return result;
       });
 
       return {
         ok: true as const,
-        data: { task_code: taskCode, status: 'draft' as const, base_snapshot: 0 },
+        data,
       };
     } catch (error) {
       return fail(error);

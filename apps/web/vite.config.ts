@@ -23,6 +23,14 @@ export default defineConfig({
     headers: webSecurityHeaders({ development: true }),
     // 页面使用正常路径；接口统一放在 /api，避免 /projects、/teams 冲突。
     proxy: {
+      '^/\\.well-known/oauth-(?:authorization-server|protected-resource/api/mcp)(?:\\?|$)': {
+        target: process.env.ACP_CORE_API_URL ?? 'http://127.0.0.1:8080',
+        rewrite: (path) => path.replace('/oauth-protected-resource/api/mcp', '/oauth-protected-resource'),
+      },
+      '^/api/mcp(?:/|\\?|$)': {
+        target: process.env.ACP_CORE_API_URL ?? 'http://127.0.0.1:8080',
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
       '^/api(?:/|$)': {
         target: process.env.ACP_CORE_API_URL ?? 'http://127.0.0.1:8080',
         changeOrigin: true,

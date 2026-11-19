@@ -23,6 +23,10 @@
 !skills/
 !skills/spec-production/**
 !skills/reverse-project-docs/**
+!skills/team-synergy-connector/
+!skills/team-synergy-connector/SKILL.md
+!skills/team-synergy-connector/references/
+!skills/team-synergy-connector/references/*.md
 !deploy/
 !deploy/containers/
 !deploy/containers/api-entrypoint.mjs

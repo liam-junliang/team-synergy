@@ -449,6 +449,20 @@
       "when": 1794475200000,
       "tag": "0064_code_hosted_analysis",
       "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1795046400000,
+      "tag": "0065_remote_mcp_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1795046460000,
+      "tag": "0066_remote_mcp_account_scope",
+      "breakpoints": true
     }
   ]
 }

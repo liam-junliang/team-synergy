@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
@@ -79,6 +79,7 @@ async function fixture(t, { auth = true, bound } = {}) {
       if (suffix === '/code-understanding/context') {
         answer({ project_code: code, repositories: [{ code: 'R'.repeat(20), name: code === projectA ? 'alpha-repo' : 'beta-repo' }], runs: [] }); return;
       }
+      if (suffix === '/memory/binding') { answer({}); return; }
       if (suffix === '/memory/brief') { answer(body.scope === 'personal' ? personalEvidence(code) : [rows[code]]); return; }
       if (suffix === '/memory/sources') { answer([rows[code], ...personalEvidence(code)].filter(row => body.sources.includes(row.source))); return; }
       if (suffix === '/materials/list') { answer({ project_code: code, items: [{ title: code === projectA ? 'Alpha guide' : 'Beta guide' }] }); return; }
@@ -311,4 +312,153 @@ test('global built-in tools use account authentication without resolving even a 
   f.assertUnbound();
   f.writeAuth('device-token-2');
   toolError(await client.call('list_platform_skills', {}), /memory_binding_changed/u);
+});
+
+
+test('read-only MCP cannot discover or invoke mutations or override its selected project', async t => {
+  const f = await fixture(t, { bound: projectB });
+  const client = await f.mcp(['--read-only', '--project', projectA, '--lock-project']);
+  const available = (await client.rpc('tools/list')).result.tools;
+  assert.ok(available.length > 0);
+  assert.ok(available.every(tool => tool.annotations.readOnlyHint === true));
+  assert.equal(available.some(tool => ['request_code_analysis', 'edit_personal_memory', 'withdraw_personal_memory'].includes(tool.name)), false);
+  for (const name of ['request_code_analysis', 'edit_personal_memory', 'withdraw_personal_memory']) {
+    const denied = await client.call(name, { projectCode: projectA });
+    assert.equal(denied.error?.code, -32602);
+    assert.match(denied.error.message, /Unknown or disabled tool/u);
+  }
+  toolError(await client.call('list_project_materials', { projectCode: projectB }), /agent_project_scope_mismatch/u);
+  assert.equal(f.requests.length, 0);
+  const projects = parseContent(await client.call('list_projects', {}))[0];
+  assert.deepEqual(projects.items.map(row => row.projectCode), [projectA]);
+  const materials = parseContent(await client.call('list_project_materials', {}))[0];
+  assert.equal(materials.project_code, projectA);
+  const auth = await f.command(['mcp', '--read-only', '--allow-personal-management']);
+  assert.notEqual(auth.code, 0);
+  assert.match(auth.err, /agent_options_conflict/u);
+});
+
+test('one-click OpenCode connection is interactive, idempotent and preserves unrelated settings and binding', async t => {
+  const f = await fixture(t, { bound: projectB });
+  const home = path.join(f.account, 'opencode-fixture');
+  mkdirSync(home);
+  const file = path.join(home, 'opencode.json');
+  const before = { $schema: 'https://opencode.ai/config.json', mcp: { foreign: { type: 'remote', url: 'https://example.test' } }, plugin: ['external'] };
+  writeFileSync(file, JSON.stringify(before));
+  const args = ['agent', 'connect', '--harness', 'opencode', '--host-home', home, '--project', projectA];
+  const first = await f.command(args);
+  assert.equal(first.code, 0, first.out || first.err);
+  assert.deepEqual(first.json().data, {
+    harness: 'opencode', projectCode: projectA, workspace: f.cwd, serverName: 'team_synergy_local',
+    status: 'configured', access: 'interactive', capture: 'not_requested', restartRequired: true,
+  });
+  const current = JSON.parse(readFileSync(file, 'utf8'));
+  assert.equal(existsSync(path.join(f.cwd, 'opencode.json')), false);
+  assert.deepEqual(current.mcp.foreign, before.mcp.foreign);
+  assert.deepEqual(current.plugin, before.plugin);
+  assert.deepEqual(current.mcp.team_synergy_local.command.slice(-4), ['mcp', '--project', projectA, '--lock-project']);
+  assert.deepEqual(current.mcp.team_synergy_local.environment, { AGENTCTL_HOME: f.account });
+  const client = await f.mcp(current.mcp.team_synergy_local.command.slice(3));
+  const catalog = (await client.rpc('tools/list')).result.tools;
+  assert.ok(catalog.some(tool => tool.name === 'request_code_analysis' && tool.annotations.readOnlyHint === false));
+  assert.ok(catalog.some(tool => tool.name === 'read_personal_memory' && tool.annotations.readOnlyHint === true));
+  assert.ok(!catalog.some(tool => ['edit_personal_memory', 'withdraw_personal_memory'].includes(tool.name)));
+  assert.equal(existsSync(path.join(f.account, 'memory-harness')), false);
+  assert.match(readFileSync(path.join(f.cwd, '.agent', 'bound-project.yaml'), 'utf8'), new RegExp(projectB, 'u'));
+  const second = await f.command(args);
+  assert.equal(second.code, 0, second.out || second.err);
+  assert.equal(second.json().data.status, 'unchanged');
+  const dirty = readFileSync(file, 'utf8');
+  const different = await f.command([...args.slice(0, -1), projectB]);
+  assert.equal(different.json().error.code, 'agent_mcp_conflict');
+  assert.equal(readFileSync(file, 'utf8'), dirty);
+  assert.ok(f.requests.every(request => request.method === 'GET'));
+});
+
+test('one-click capture rejects a conflicting binding or unsupported Claude Code before changing any settings', async t => {
+  const f = await fixture(t, { bound: projectB });
+  const args = ['agent', 'connect', '--project', projectA, '--capture', '--harness'];
+  for (const [harness, errorCode] of [['opencode', 'agent_capture_workspace_mismatch'], ['claudecode', 'agent_capture_unsupported']]) {
+    const result = await f.command([...args, harness]);
+    assert.notEqual(result.code, 0);
+    assert.equal(result.json().error.code, errorCode);
+  }
+  assert.equal(existsSync(path.join(f.cwd, 'opencode.json')), false);
+  assert.equal(existsSync(path.join(f.account, 'memory-harness')), false);
+  assert.ok(f.requests.every(request => request.method === 'GET'));
+});
+
+test('one-click DSH preserves existing patch entries and registers its local stdio service', async t => {
+  const f = await fixture(t);
+  const home = path.join(f.account, 'dsh-fixture');
+  mkdirSync(home);
+  const patchFile = path.join(home, 'cordis.patch.yml'), runtime = path.join(home, 'dsh-fixture.mjs');
+  const existing = { insert: [{ id: 'configured-before', name: 'other-plugin' }] };
+  writeFileSync(patchFile, JSON.stringify([existing]));
+  writeFileSync(runtime, "console.log('dsh 0.2.1-rc.2');\n");
+  const args = ['agent', 'connect', '--harness', 'dsh', '--project', projectA, '--host-home', home, '--runtime', runtime];
+  const first = await f.command(args);
+  assert.equal(first.code, 0, first.out || first.err);
+  const [foreign, own] = JSON.parse(readFileSync(patchFile, 'utf8'));
+  assert.deepEqual(foreign, existing);
+  assert.equal(own.insert[0].name, '@deepseek-ai/dsh-mcp-client');
+  assert.deepEqual(own.insert[0].config.args.slice(-4), ['mcp', '--project', projectA, '--lock-project']);
+  const repeated = await f.command(args);
+  assert.equal(repeated.json().data.status, 'unchanged');
+  f.assertUnbound();
+});
+
+
+test('one-click Codex uses the native registration command without changing Hooks', async t => {
+  const f = await fixture(t);
+  const home = path.join(f.account, 'codex-fixture');
+  mkdirSync(home);
+  const runtime = path.join(home, 'codex-fixture.mjs'), hooks = path.join(home, 'hooks.json');
+  const hookBytes = '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"preserve"}]}]}}';
+  writeFileSync(hooks, hookBytes);
+  writeFileSync(runtime, [
+    "import { readFileSync, writeFileSync } from 'node:fs';",
+    "import path from 'node:path';",
+    "const file = path.join(process.env.CODEX_HOME, 'servers.json');",
+    "const [, method, ...args] = process.argv.slice(2);",
+    "let servers; try { servers = JSON.parse(readFileSync(file, 'utf8')); } catch { servers = [{ name: 'unrelated' }]; }",
+    "if (method === 'list') console.log(JSON.stringify(servers));",
+    "else if (method === 'get') console.log(JSON.stringify(servers.find(row => row.name === args[0])));",
+    "else if (method === 'add') {",
+    "  const [name, envFlag, env, separator, command, ...mcpArgs] = args;",
+    "  if (envFlag !== '--env' || !env.startsWith('AGENTCTL_HOME=') || separator !== '--') process.exit(1);",
+    "  servers.push({ name, enabled: true, transport: { type: 'stdio', command, args: mcpArgs, env: { AGENTCTL_HOME: env.slice(14) } } });",
+    "  writeFileSync(file, JSON.stringify(servers));",
+    "} else process.exit(1);",
+  ].join('\n'));
+  const args = ['agent', 'connect', '--harness', 'codex', '--project', projectA, '--host-home', home, '--runtime', runtime, '--read-only'];
+  const first = await f.command(args);
+  assert.equal(first.code, 0, first.out || first.err);
+  assert.equal(first.json().data.access, 'read-only');
+  assert.deepEqual(JSON.parse(readFileSync(path.join(home, 'servers.json'), 'utf8')).map(row => row.name), ['unrelated', 'team_synergy_local']);
+  assert.equal(readFileSync(hooks, 'utf8'), hookBytes);
+  assert.equal((await f.command(args)).json().data.restartRequired, false);
+  f.assertUnbound();
+});
+
+test('explicit DSH capture and its local MCP coexist and do not enqueue any conversation', async t => {
+  const f = await fixture(t, { bound: projectA });
+  const home = path.join(f.account, 'dsh-opt-in-fixture');
+  mkdirSync(home);
+  const patchFile = path.join(home, 'cordis.patch.yml'), runtime = path.join(home, 'dsh-fixture.mjs');
+  writeFileSync(runtime, "console.log('dsh 0.2.1-rc.2');\n");
+  const args = ['agent', 'connect', '--harness', 'dsh', '--project', projectA, '--host-home', home, '--runtime', runtime, '--capture'];
+  const first = await f.command(args);
+  assert.equal(first.code, 0, first.out || first.err);
+  assert.equal(first.json().data.capture, 'configured');
+  const patch = JSON.parse(readFileSync(patchFile, 'utf8'));
+  assert.equal(patch.length, 2);
+  assert.match(patch[0].insert[0].id, /^tsp-memory-auto-/u);
+  assert.equal(patch[1].insert[0].id, 'tsp-agent-local');
+  const repeated = await f.command(args);
+  assert.equal(repeated.code, 0, repeated.out || repeated.err);
+  assert.equal(repeated.json().data.capture, 'unchanged');
+  assert.equal(repeated.json().data.status, 'unchanged');
+  assert.deepEqual(JSON.parse(readFileSync(patchFile, 'utf8')), patch);
+  assert.ok(f.requests.every(request => request.method === 'GET'));
 });

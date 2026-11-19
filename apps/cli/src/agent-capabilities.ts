@@ -8,7 +8,7 @@ import { editPersonalMemory, readPersonalMemory, withdrawPersonalMemory } from '
 import { queryLocalCodeRun } from './code-understanding.js';
 
 export class AgentToolInputError extends Error {}
-export interface AgentToolOptions { personalManagement?: boolean; projectCode?: string }
+export interface AgentToolOptions { personalManagement?: boolean; projectCode?: string; readOnly?: boolean; lockProject?: boolean }
 export const documentPlacementGuide = '文档库用于长期复用的项目背景、需求、设计、规范、指南和测试策略；测试资料按用途仅收录 guide/environment。交付源码包或构建包用 tsp task submit 引用原件；单次测试的结果和日志归入 tsp test execution record，缺陷截图和录屏用 tsp defect report。查执行证据用 tsp task status 或 tsp test execution show，原始测试资料用 tsp test asset show/download；文档可引用原记录。';
 
 const localCodeInput = z.object({ run: PublicCodeSchema,
@@ -121,14 +121,19 @@ const catalog = [
     (context, { source, ...args }) => managePersonal(context, source, args, true), true),
 ];
 
+function canUseCapability(tool: (typeof catalog)[number], options: AgentToolOptions) {
+  return (!options.readOnly || tool.definition.annotations.readOnlyHint === true) &&
+    (!tool.management || options.personalManagement === true);
+}
+
 export function agentCapabilityDefinitions(options: AgentToolOptions = {}) {
-  return catalog.filter(tool => !tool.management || options.personalManagement).map(tool => tool.definition);
+  return catalog.filter(tool => canUseCapability(tool, options)).map(tool => tool.definition);
 }
 export function hasAgentCapability(name: string, options: AgentToolOptions = {}) {
-  return catalog.some(tool => tool.name === name && (!tool.management || options.personalManagement));
+  return catalog.some(tool => tool.name === name && canUseCapability(tool, options));
 }
 export async function executeAgentCapability(context: MemoryContext, name: string, args: unknown, options: AgentToolOptions = {}) {
-  const tool = catalog.find(tool => tool.name === name && (!tool.management || options.personalManagement));
+  const tool = catalog.find(tool => tool.name === name && canUseCapability(tool, options));
   if (!tool) throw new AgentToolInputError('Unknown or disabled tool: ' + name);
   const result = await tool.call(context, args);
   // The API/queries impose their own pagination; never silently truncate JSON or turn omitted evidence into a complete answer.

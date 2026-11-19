@@ -3,7 +3,7 @@ import { PROJECT_SECTIONS, agentWorkspacePath, projectHomeWorkspacePath, project
 
 /** Carry navigation context across projects, never identifiers owned by the previous project. */
 export function projectSwitchPath(route: WorkspaceRoute, projectCode: string): string {
-  if (route.view === 'agent') return agentWorkspacePath(route.agentTab === 'authorize' ? 'connect' : route.agentTab, { projectCode });
+  if (route.view === 'agent') return agentWorkspacePath(route.agentTab === 'authorize' || route.agentTab === 'mcp-consent' ? 'connect' : route.agentTab, { projectCode });
   if (route.view === 'overview') return projectHomeWorkspacePath(projectCode, route.projectTab);
   if (route.view === 'requirements') return requirementWorkspacePath(projectCode, { tab: route.requirementsTab });
   if (route.view === 'testing') return testingWorkspacePath(projectCode, route.testingTab);

@@ -16,7 +16,7 @@ const projectCode = (value: string) => {
 const selectionHelp = '没有默认项目：用户只说“这个项目”等不明确指代时，先询问项目，停止读取项目内容，不自行猜选。用户已明确项目名称时，可调用 list_projects 定位对应编码，再传入 projectCode。也可用 tsp mcp --project <编码> 或 tsp project bind 设置默认项目。';
 
 /** A connection can advertise tools before login or project selection. */
-export function createAgentConnection(options: { projectCode?: string } = {}) {
+export function createAgentConnection(options: { projectCode?: string; lockProject?: boolean } = {}) {
   let accountIdentity: string | undefined;
   let defaultOwner: string | undefined;
 
@@ -57,6 +57,9 @@ export function createAgentConnection(options: { projectCode?: string } = {}) {
 
     projectContext(explicitProjectCode?: string) {
       authenticated();
+      if (options.lockProject && options.projectCode && explicitProjectCode && explicitProjectCode !== options.projectCode) {
+        throw new DomainError('agent_project_scope_mismatch', '该连接已固定项目，不能读取其他项目');
+      }
       const selected = explicitProjectCode ?? options.projectCode;
       let context;
       try { context = memoryContext(12000, selected); }
@@ -88,7 +91,8 @@ export function createAgentConnection(options: { projectCode?: string } = {}) {
           ...(typeof user.account === 'string' ? { account: user.account } : {}),
           ...(typeof user.display_name === 'string' ? { displayName: user.display_name } : {}) },
         ...selected, projectParameter: 'projectCode',
-        nextStep: selected.projectCode ? '项目工具可沿用当前默认项目；其他项目须显式传入 projectCode。' : selectionHelp };
+        nextStep: options.lockProject && options.projectCode ? '该连接已固定项目。'
+          : selected.projectCode ? '项目工具可沿用当前默认项目；其他项目须显式传入 projectCode。' : selectionHelp };
     },
 
     async listProjects(input: { query?: string; limit?: number } = {}) {
@@ -106,7 +110,8 @@ export function createAgentConnection(options: { projectCode?: string } = {}) {
           ...(typeof row.team_code === 'string' ? { teamCode: row.team_code } : {}),
           ...(typeof row.team_name === 'string' ? { teamName: row.team_name } : {}),
           ...(row.status === 'active' || row.status === 'archived' ? { status: row.status } : {}) }];
-      }).filter(row => !query || [row.projectCode, row.name, row.teamName ?? ''].some(value => value.toLocaleLowerCase().includes(query.toLocaleLowerCase())));
+      }).filter(row => !options.lockProject || !options.projectCode || row.projectCode === options.projectCode)
+        .filter(row => !query || [row.projectCode, row.name, row.teamName ?? ''].some(value => value.toLocaleLowerCase().includes(query.toLocaleLowerCase())));
       return { items: items.slice(0, limit), total: items.length, truncated: items.length > limit,
         selection: '仅用此列表匹配用户明确给出的项目；用户未说明且无默认项目时先询问，不能通过读取各项目内容来猜选。在后续项目工具参数中传入所选 projectCode；不会修改本机工作区绑定。' };
     },
