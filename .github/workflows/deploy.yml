@@ -142,7 +142,7 @@ jobs:
             remote="$prefix-$role:$SOURCE_SHA"
             docker tag "tsp-$role:$SOURCE_SHA" "$remote"
             docker push "$remote"
-            ref=$(docker image inspect "$remote" --format '{{json .RepoDigests}}' | node -e 'let s="";process.stdin.on("data",x=>s+=x);process.stdin.on("end",()=>{const r=JSON.parse(s).find(x=>x.startsWith(process.argv[1]+"@sha256:"));if(!r)process.exit(1);process.stdout.write(r)})' "$prefix-$role")
+            ref=$(node deploy/containers/resolve-published-image.mjs bundle/release.json "$SOURCE_SHA" "$GITHUB_REPOSITORY" "$role")
             echo "$role=$ref" >> "$GITHUB_OUTPUT"
           done
           docker logout ghcr.io
