@@ -339,17 +339,17 @@ export function createMemorySliceUseCases(db: Db) {
   async function search(cmd: Parameters<typeof searchEvidence>[0]) {
     return (await searchEvidence(cmd)).map(row => row.data);
   }
-  async function readSources(cmd: Actor & { sources: readonly string[] }) {
+  async function readSources(cmd: Actor & { sources: readonly string[]; scope?: 'project' | 'personal' }) {
     if (!Array.isArray(cmd.sources) || !cmd.sources.length || cmd.sources.length > 40 ||
         cmd.sources.some(code => typeof code !== 'string' || !/^[0-9A-HJKMNP-TV-Z]{20}$/u.test(code))) {
       reject('memory_invalid', '请提供最多四十个有效来源编码');
     }
     return db.transaction(async tx => {
       const actor = await authorize(tx, cmd, 'read');
-      const rows = await visibleRows(tx,actor,undefined,or(inArray(entries.code,[...cmd.sources]),
+      const rows = await visibleRows(tx,actor,cmd.scope,or(inArray(entries.code,[...cmd.sources]),
         inArray(fragments.code,[...cmd.sources])),undefined,[],40);
-      const documents = await documentMemoryEvidence(tx, actor.projectId, { sources: cmd.sources, limit: 40 });
-      const materials = await projectMaterialMemoryEvidence(tx, actor.projectId, { sources: cmd.sources, limit: 40 });
+      const documents = cmd.scope === 'personal' ? [] : await documentMemoryEvidence(tx, actor.projectId, { sources: cmd.sources, limit: 40 });
+      const materials = cmd.scope === 'personal' ? [] : await projectMaterialMemoryEvidence(tx, actor.projectId, { sources: cmd.sources, limit: 40 });
       const materialSources = new Set(materials.map(row => row.data.source));
       return [...rows, ...materials, ...documents.filter(row => !materialSources.has(row.data.source))].map(row => row.data);
     });

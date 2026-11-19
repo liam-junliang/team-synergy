@@ -54,6 +54,7 @@ const MemoryScope = z.enum(['project', 'personal']);
 export const MemoryBriefInput = z.object({ scope: MemoryScope }).strict();
 export const MemorySourcesInput = z.object({
   sources: z.array(PublicCodeSchema).min(1).max(40),
+  scope: MemoryScope.optional(),
 }).strict();
 export const MemoryDocumentReadInput = z.object({
   source: PublicCodeSchema,

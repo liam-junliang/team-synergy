@@ -1,6 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { PROJECT_SECTIONS, parseWorkspacePath, projectWorkspacePath, projectHomeWorkspacePath, projectDocumentWorkspacePath, projectFolderWorkspacePath, requirementWorkspacePath, isWorkspacePath, legacyWorkspacePath, workspacePathAfterLogin, workspaceShareUrl } from '../src/workspaceRouting.ts';
+import { PROJECT_SECTIONS, parseWorkspacePath, projectWorkspacePath, taskWorkspacePath, projectHomeWorkspacePath, projectDocumentWorkspacePath, projectFolderWorkspacePath, requirementWorkspacePath, isWorkspacePath, legacyWorkspacePath, workspacePathAfterLogin, workspaceShareUrl } from '../src/workspaceRouting.ts';
+
+test('任务详情链接保留项目和任务编码，并在登录后恢复', () => {
+  const path = taskWorkspacePath('PROJECT/A', 'TASK #1');
+  assert.equal(path, '/projects/PROJECT%2FA/board?task=TASK+%231');
+  assert.ok(isWorkspacePath(path));
+  assert.deepEqual(parseWorkspacePath(path), { view: 'board', projectCode: 'PROJECT/A', taskCode: 'TASK #1' });
+  assert.equal(workspacePathAfterLogin(`https://app.example${path}`, false), path);
+  assert.deepEqual(parseWorkspacePath('/projects/P/board?task=A&task=B'), { view: 'board', projectCode: 'P' });
+  assert.equal(parseWorkspacePath('/projects/P/documents?task=A').taskCode, undefined);
+});
 
 test('工作区路由：顶层只保留团队/账号，项目能力必须携带 project code', () => {
   assert.deepEqual(parseWorkspacePath('/teams'), { view: 'teams' });

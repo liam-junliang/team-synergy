@@ -127,6 +127,8 @@ const messages: Record<string, string> = {
   "确认该问题无需处理？此操作会结束当前缺陷流程。": "Mark this issue as requiring no action? This ends the current defect workflow.",
   "优先级": " priority",
   "打开任务看板": "Open task board",
+  '当前项目中找不到这条任务。': 'This task could not be found in the current project.',
+  '关闭提示': 'Dismiss notice',
   "问题描述与复现信息": "Description and reproduction details",
   "未填写问题描述。": "No description provided.",
   "修复任务": "Repair tasks",

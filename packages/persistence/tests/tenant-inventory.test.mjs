@@ -14,7 +14,7 @@ test('customer inventory catalog reviews every schema table exactly once', () =>
   const names = TENANT_INVENTORY_CATALOG.flatMap(group => group.tables.split(' '));
   assert.equal(new Set(names).size, names.length);
   assert.deepEqual(names.sort(), Object.values(schema).map(table => getTableConfig(table).name).sort());
-  assert.equal(names.length, 88);
+  assert.equal(names.length, 92);
 });
 
 test('inventory is pending, complete as a metadata read and never exposes private bodies or invents customer acceptance', {skip:!baseUrl}, async () => {
@@ -42,7 +42,7 @@ test('inventory is pending, complete as a metadata read and never exposes privat
     const before = await q('select (select count(*) from audit_events)::int as audits,(select count(*) from command_receipts)::int as receipts');
     const report = await planTenantMapping(db);
     assert.equal(report.status,'pending'); assert.equal(report.read_complete,true); assert.equal(report.ready_for_backfill,false); assert.equal(report.ownership_complete,false); assert.equal(report.tenant_id,null);
-    assert.equal(report.inventory.length,88);
+    assert.equal(report.inventory.length,92);
     assert.equal(report.teams.length,3); // Historical migration also retains its empty default team.
     assert.equal(report.projects.length,2);
     assert.equal(report.projects.find(p=>p.project_code===original.code).external_members,1);
@@ -172,5 +172,61 @@ test('platform releases carry their own provenance in the inventory of project i
     assert.equal(report.issues.unresolved_skill_scopes,0);
     assert.equal(report.issues.unresolved_installation_scopes,0);
     assert.ok(!JSON.stringify(report).includes(secret));
+  });
+});
+
+
+test('Connector inventory counts private grants and OAuth state without exporting credentials or metadata', {skip:!baseUrl}, async () => {
+  await withIntegrityFixture(baseUrl, 'connector', async db => {
+    const query = (sql, params = []) => db.$client.query(sql, params).then(result => result.rows[0]);
+    const project = await query('SELECT id FROM projects LIMIT 1');
+    const owner = await query('SELECT id FROM users LIMIT 1');
+    const privateFields = {
+      clientId: 'CONNECTOR_CLIENT_SENTINEL',
+      clientName: 'CONNECTOR_NAME_SENTINEL',
+      clientSecretHash: '1'.repeat(64),
+      callback: 'https://private-connector.example/callback',
+      state: 'CONNECTOR_STATE_SENTINEL',
+      challenge: 'CONNECTOR_CHALLENGE_SENTINEL',
+      browserSessionCode: 'CONNECTOR_BROWSER_SESSION_SENTINEL',
+      codeHash: '2'.repeat(64),
+      bearerHash: '3'.repeat(64),
+      refreshHash: '4'.repeat(64),
+      accountBearerHash: '5'.repeat(64),
+    };
+    const remoteResource = 'https://private-platform.example/api/mcp';
+    await query("INSERT INTO remote_mcp_oauth_clients(id,name,secret_hash,token_auth_method,redirect_uris,allow_refresh,created_at) VALUES ($1,$2,$3,'client_secret_post',to_jsonb(ARRAY[$4::text]),true,now())",
+      [privateFields.clientId, privateFields.clientName, privateFields.clientSecretHash, privateFields.callback]);
+    const grant = await query("INSERT INTO remote_mcp_grants(principal_id,project_id,name,token_hash,oauth_client_id,resource_uri,access_expires_at,expires_at) VALUES ($1,$2,$3,$4,$5,$6,now()+interval '1 hour',now()+interval '7 days') RETURNING id, code",
+      [owner.id, project.id, privateFields.clientName, privateFields.bearerHash, privateFields.clientId, remoteResource]);
+    const accountGrant = await query("INSERT INTO remote_mcp_grants(principal_id,name,token_hash,expires_at) VALUES ($1,$2,$3,now()+interval '7 days') RETURNING code",
+      [owner.id, privateFields.clientName, privateFields.accountBearerHash]);
+    await query('INSERT INTO remote_mcp_oauth_requests(id,client_id,resource_uri,redirect_uri,state,challenge,browser_session_code,principal_id,project_id,requested_task_write,requested_personal_memory,code_hash,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,false,false,$10,now())',
+      [secret, privateFields.clientId, remoteResource, privateFields.callback, privateFields.state, privateFields.challenge, privateFields.browserSessionCode, owner.id, project.id, privateFields.codeHash]);
+    await query('INSERT INTO remote_mcp_oauth_refresh_tokens(token_hash,grant_id) VALUES ($1,$2)', [privateFields.refreshHash, grant.id]);
+    await query("INSERT INTO audit_events(timestamp,principal_id,action,entity_type,entity_id,payload,base_snapshot) VALUES ($1,$2,'remote_mcp.connection_created','remote_mcp_connection',$3,$4,0)",
+      [time, owner.id, grant.id, secret]);
+
+    const report = await planTenantMapping(db);
+    assert.deepEqual(report.inventory.filter(row => row.table.startsWith('remote_mcp')).map(({ table, category, rows }) => ({ table, category, rows })), [
+      { table: 'remote_mcp_grants', category: 'connector_authorization', rows: 2 },
+      { table: 'remote_mcp_oauth_clients', category: 'global_identity_control', rows: 1 },
+      { table: 'remote_mcp_oauth_refresh_tokens', category: 'connector_ephemeral', rows: 1 },
+      { table: 'remote_mcp_oauth_requests', category: 'connector_ephemeral', rows: 1 },
+    ]);
+    assert.equal(report.audit.find(row => row.family === 'connector_authorization_review').rows, 1);
+    assert.equal(report.issues.unknown_audit_rows, 0);
+    const serialized = JSON.stringify(report);
+    for (const value of [...Object.values(privateFields), secret, remoteResource, grant.code, accountGrant.code]) {
+      assert.equal(serialized.includes(value), false);
+    }
+
+    assert.equal((await checkDatabaseIntegrity(db)).total_orphans, 0);
+    const other = await query("INSERT INTO users(account,display_name,created_at) VALUES ('connector-integrity-fixture','Other user',$1) RETURNING id", [time]);
+    await query("UPDATE audit_events SET principal_id=$1 WHERE entity_type='remote_mcp_connection'", [other.id]);
+    const mismatched = await checkDatabaseIntegrity(db);
+    assert.equal(mismatched.relations.find(row => row.name === 'audit_events.entity_id.remote_mcp_connection.principal').count, 1);
+    await query('DELETE FROM remote_mcp_grants WHERE id=$1', [grant.id]);
+    assert.equal((await query('SELECT count(*)::int AS rows FROM remote_mcp_oauth_refresh_tokens')).rows, 0);
   });
 });

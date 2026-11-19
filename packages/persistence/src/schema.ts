@@ -5,6 +5,7 @@ import {
   index,
   foreignKey,
   integer,
+  jsonb,
   pgTable,
   primaryKey,
   text,
@@ -795,6 +796,73 @@ export const deviceAuthorizationRequests = pgTable('device_authorization_request
   last_polled_at: text('last_polled_at'), interval_seconds: integer('interval_seconds').notNull().default(5),
 }, (t) => [uniqueIndex('uq_device_authorization_secret').on(t.device_code_hash), uniqueIndex('uq_device_authorization_user_code').on(t.user_code_hash), index('idx_device_authorization_expiry').on(t.expires_at)]);
 
+
+export const remoteMcpOAuthClients = pgTable('remote_mcp_oauth_clients', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  secret_hash: text('secret_hash'),
+  token_auth_method: text('token_auth_method', { enum: ['none', 'client_secret_post', 'client_secret_basic'] }).notNull(),
+  redirect_uris: jsonb('redirect_uris').$type<string[]>().notNull(),
+  allow_refresh: boolean('allow_refresh').notNull(),
+  created_at: timestamp('created_at', { withTimezone: true }).notNull(),
+});
+
+export const remoteMcpOAuthRequests = pgTable('remote_mcp_oauth_requests', {
+  id: text('id').primaryKey(),
+  client_id: text('client_id').notNull().references(() => remoteMcpOAuthClients.id, { onDelete: 'cascade' }),
+  resource_uri: text('resource_uri').notNull(),
+  redirect_uri: text('redirect_uri').notNull(),
+  state: text('state'),
+  challenge: text('challenge').notNull(),
+  requested_task_write: boolean('requested_task_write').notNull(),
+  requested_personal_memory: boolean('requested_personal_memory').notNull(),
+  browser_session_code: text('browser_session_code'),
+  principal_id: bigint('principal_id', { mode: 'bigint' }).references(() => users.id, { onDelete: 'cascade' }),
+  project_id: bigint('project_id', { mode: 'bigint' }).references(() => projects.id, { onDelete: 'cascade' }),
+  allow_task_write: boolean('allow_task_write').notNull().default(false),
+  allow_personal_memory: boolean('allow_personal_memory').notNull().default(false),
+  code_hash: text('code_hash'),
+  expires_at: timestamp('expires_at', { withTimezone: true }).notNull(),
+}, (t) => [
+  uniqueIndex('uq_remote_mcp_oauth_request_code').on(t.code_hash),
+  index('idx_remote_mcp_oauth_requests_expiry').on(t.expires_at),
+  index('idx_remote_mcp_oauth_requests_client').on(t.client_id),
+  index('idx_remote_mcp_oauth_requests_principal').on(t.principal_id),
+]);
+/** Account-scoped remote MCP grants, with an optional legacy project binding. */
+export const remoteMcpGrants = pgTable('remote_mcp_grants', {
+  id: identityId(),
+  code: publicCode(),
+  principal_id: bigint('principal_id', { mode: 'bigint' }).notNull(),
+  project_id: bigint('project_id', { mode: 'bigint' }),
+  name: text('name').notNull(),
+  token_hash: text('token_hash').notNull(),
+  oauth_client_id: text('oauth_client_id').references(() => remoteMcpOAuthClients.id, { onDelete: 'restrict' }),
+  resource_uri: text('resource_uri'),
+  access_expires_at: timestamp('access_expires_at', { withTimezone: true }),
+  allow_personal_memory: boolean('allow_personal_memory').notNull().default(false),
+  allow_task_write: boolean('allow_task_write').notNull().default(false),
+  created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  expires_at: timestamp('expires_at', { withTimezone: true }).notNull(),
+  revoked_at: timestamp('revoked_at', { withTimezone: true }),
+}, (t) => [
+  ...codeConstraints('remote_mcp_grants', t),
+  foreignKey({ name: 'fk_remote_mcp_grants_principal', columns: [t.principal_id], foreignColumns: [users.id] }).onDelete('cascade'),
+  foreignKey({ name: 'fk_remote_mcp_grants_project', columns: [t.project_id], foreignColumns: [projects.id] }).onDelete('cascade'),
+  uniqueIndex('uq_remote_mcp_grants_token_hash').on(t.token_hash),
+  index('idx_remote_mcp_grants_principal').on(t.principal_id, t.created_at),
+  index('idx_remote_mcp_grants_project').on(t.project_id),
+  index('idx_remote_mcp_grants_oauth_client').on(t.oauth_client_id),
+  check('ck_remote_mcp_grants_name', sql`char_length(btrim(${t.name})) BETWEEN 1 AND 100`),
+  check('ck_remote_mcp_grants_token_hash', sql`${t.token_hash} ~ '^[0-9a-f]{64}$'`),
+  check('ck_remote_mcp_grants_expiry', sql`${t.expires_at} > ${t.created_at} AND ${t.expires_at} <= ${t.created_at} + interval '168 hours'`),
+]);
+
+export const remoteMcpOAuthRefreshTokens = pgTable('remote_mcp_oauth_refresh_tokens', {
+  token_hash: text('token_hash').primaryKey(),
+  grant_id: bigint('grant_id', { mode: 'bigint' }).notNull().references(() => remoteMcpGrants.id, { onDelete: 'cascade' }),
+  used_at: timestamp('used_at', { withTimezone: true }),
+}, (t) => [index('idx_remote_mcp_oauth_refresh_grant').on(t.grant_id)]);
 export const features = pgTable(
   'features',
   {

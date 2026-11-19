@@ -22,6 +22,9 @@ const parents = {
   memory_fragments: 'receipt_id:memory_capture_receipts entry_id:requirement_topic_entries adopted_from_id:memory_fragments root_id:memory_fragments supersedes_id:memory_fragments withdrawn_by:users',
   memory_projection_jobs: 'fragment_id:memory_fragments project_document_revision_id:project_document_revisions material_index_id:project_material_index_versions',
   project_memory_bindings: 'project_id:projects updated_by:users',
+  remote_mcp_grants: 'project_id:projects principal_id:users oauth_client_id:remote_mcp_oauth_clients',
+  remote_mcp_oauth_requests: 'project_id:projects principal_id:users client_id:remote_mcp_oauth_clients',
+  remote_mcp_oauth_refresh_tokens: 'grant_id:remote_mcp_grants',
   project_material_index_events: 'project_id:projects',
   project_material_index_versions: 'project_id:projects',
   context_edges: 'snapshot_id:context_graph_snapshots from_node_id:context_nodes to_node_id:context_nodes',
@@ -108,6 +111,7 @@ const auditTypes = {
   requirement_document: 'requirement_documents', requirement_idea: 'requirement_ideas', requirement_topic: 'requirement_topics',
   requirement_topic_entry: 'requirement_topic_entries', requirement_document_review: 'requirement_document_reviews',
   requirement_baseline: 'requirement_baselines', architecture_document: 'architecture_documents', design_prototype: 'design_prototypes',
+  remote_mcp_connection: 'remote_mcp_grants',
   test_case: 'test_cases', test_asset: 'test_assets', test_execution: 'test_executions', skill: 'skills', system_agent_job: 'system_agent_jobs', system_settings: 'system_settings', intake_batch: 'intake_batches',
 } as const;
 const polymorphic = Object.entries(auditTypes).map(([kind, target]) => reference('audit_events', 'entity_id', target, `AND s.entity_type = '${kind}'`, `.${kind}`));
@@ -145,6 +149,7 @@ const scopeRules = [
   rule('runs.workspace_id.reciprocal', 'SELECT count(*)::text AS count FROM runs s JOIN workspaces p ON p.id=s.workspace_id WHERE p.run_id<>s.id', 'runs.workspace_id','workspaces.run_id'),
   rule('agent_sessions.device_id.same_principal', 'SELECT count(*)::text AS count FROM agent_sessions s JOIN runs r ON r.id=s.run_id JOIN devices d ON d.id=s.device_id WHERE d.principal_id<>r.principal_id', 'agent_sessions.device_id'),
   rule('run_leases.device_id.same_principal', 'SELECT count(*)::text AS count FROM run_leases s JOIN runs r ON r.id=s.run_id JOIN devices d ON d.id=s.device_id WHERE d.principal_id<>r.principal_id', 'run_leases.device_id'),
+  rule('audit_events.entity_id.remote_mcp_connection.principal', "SELECT count(*)::text AS count FROM audit_events s JOIN remote_mcp_grants g ON g.id=s.entity_id WHERE s.entity_type='remote_mcp_connection' AND s.principal_id IS DISTINCT FROM g.principal_id", 'audit_events.entity_id', 'audit_events.principal_id'),
   rule('command_receipts.device_id.same_principal', 'SELECT count(*)::text AS count FROM command_receipts s JOIN devices p ON p.id=s.device_id WHERE p.principal_id<>s.principal_id', 'command_receipts.device_id'),
 ];
 // Requirements have no direct project_id: compare every non-null structural parent pair.
@@ -177,7 +182,7 @@ const projectScopes: Record<string,string> = {
 for (const table of ['project_repositories','project_workspaces','project_document_folders','project_documents','system_agent_jobs','code_hosted_analysis_jobs',
   'project_modules','project_phases','project_milestones','requirement_documents','requirement_ideas','requirement_topics','design_prototypes',
   'architecture_documents','features','requirement_baselines','context_snapshots','artifacts','context_graphs','test_cases','test_assets',
-  'test_executions','intake_batches','intake_bindings','project_skill_installations','memory_capture_jobs','memory_capture_receipts','project_memory_bindings']) projectScopes[table] = `SELECT id,project_id FROM ${table}`;
+  'test_executions','intake_batches','intake_bindings','project_skill_installations','memory_capture_jobs','memory_capture_receipts','project_memory_bindings','remote_mcp_grants']) projectScopes[table] = `SELECT id,project_id FROM ${table}`;
 for (const [table,column,target] of [
   ['memory_fragments','receipt_id','memory_capture_receipts'],['memory_projection_jobs','fragment_id','memory_fragments'],
   ['project_document_revisions','document_id','project_documents'],['requirement_document_revisions','document_id','requirement_documents'],

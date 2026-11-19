@@ -4,6 +4,8 @@
 
 ## 安装与诊断
 
+需要在同一步配置本机 MCP 和已验证宿主的会话采集时，先绑定当前工作区，再执行 `tsp agent connect --harness codex --project <项目编码> --capture`。DSH 和 OpenCode 使用各自的 `--harness` 值。省略 `--capture` 时只配置本机 MCP，仍可按需读取记忆。Claude Code 的本机入口提供 MCP 配置，原生采集需要宿主验证。
+
 在已经 `tsp login` 且 `tsp project bind` 的工作区根目录运行，工作区绑定不要求议题或需求绑定：
 
 ```sh

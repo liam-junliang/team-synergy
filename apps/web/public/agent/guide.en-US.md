@@ -2,26 +2,28 @@
 
 ## 1. Confirm the account, project, and authorization
 
-### Confirm the target project
+### Start with the HTTP Connector
 
-After connecting, look up relevant material whenever a question depends on the state of a project or a team decision. Use `get_connection_context` to check the signed-in account and default project. If the default is unclear or the operator names a different project, use `list_projects` to identify the intended project. Ask the operator if ambiguity remains. Pass the returned `projectCode` to project tools, and check the project again when switching.
+Copy the HTTP Connector URL from the platform's Agent connection page. Add a remote connection in your host's MCP or connector settings. When the host starts OAuth, sign in to TeamSynergy in the browser. An existing browser session takes you directly to the consent page. Check the account, client, and return address, approve the permissions you need, and return to the host. The account connection works across accessible projects in one conversation, with no `tsp` installation or local directory binding.
 
-### Use MCP directly
+The default permission covers on-demand project reads. To create or advance tasks, select Allow collaboration at consent. Personal memory requires separate permission. Session capture stays off. A host that supports custom headers and cannot start OAuth can use a time-limited credential from Advanced setup.
 
-Call tools from the host's Team Synergy tool list. Each line below is a separate call with its arguments. After confirming the project, replace `PROJECT_CODE` with the actual project code and `SOURCE_CITATION` with the complete citation returned by the search.
+### Check the account, project, and tools on this connection
+
+Call `read_connector_skill {}` for the built-in workflow. Pass `module` when you need a detailed reference. Use `get_connection_context {}` to check the account and connection permissions, then `list_projects {}` to find the project and role. Pass the target `projectCode` on each project call using the same connection. Check the scope when switching projects and keep each document, code, or task reference with its project. Ask the operator when a write target is unclear.
+
+Use `search_tools {}` for an overview. Filter by `module` and `query` to find specific tools. Provide `projectCode` to see actions for the current role in that project. Follow the tool schemas returned by the current connection.
 
 ```text
+read_connector_skill  {"module":"tasks"}
 get_connection_context  {}
 list_projects  {}
-grep_project_materials  {"projectCode":"PROJECT_CODE","pattern":"KEYWORD"}
-read_project_material  {"projectCode":"PROJECT_CODE","sourceCitation":"SOURCE_CITATION"}
+search_tools  {"projectCode":"PROJECT_CODE","module":"tasks","query":"draft"}
 ```
 
-Use MCP to read source material, project or personal memory, code evidence, and skill revisions. Use the CLI or workspace steps in the relevant chapters to create, assign, claim, submit, verify, or close tasks. The memory and skills chapters provide additional MCP call arguments.
+### Connect with local CLI or MCP
 
-### Use the same lookup tools from the CLI
-
-Use `tsp tools list` to inspect the shared input schemas. `tsp tools call` accepts JSON through `--input` and can set the project for one call through `--project`.
+Choose Local CLI / MCP on the Agent connection page for local worktrees, device-bound runs, or explicit session capture. After installing and authorizing `tsp`, you can start a stdio MCP connection in your host or use `tsp tools list` to inspect lookup schemas. `tsp tools call` accepts JSON through `--input` and can set the project through `--project`. Discover projects and use their returned codes on the same connection.
 
 ```bash
 tsp tools call get_connection_context
@@ -38,19 +40,11 @@ Follow both platform permissions and the operator's authorization. Read permitte
 
 Use the index to find material by title, summary, or path. Use Glob to narrow virtual paths and Grep to search the contents. Index keywords and Grep use literal matching by default. Select `regex` explicitly for multi-pattern matching. Read the necessary passages by returned citation or virtual path and verify their revision and current status. Cite the title, revision, and relevant lines. If a search returns nothing, shorten the keyword or adjust the search scope.
 
-### CLI and MCP lookup examples
+### Find material and read the source through the Connector
 
-Replace uppercase placeholders in these examples with real values for the current project. Use `VIRTUAL_PATH` and `SOURCE_CITATION` returned by your lookup.
+Replace uppercase placeholders with actual values for the current project. Use the complete `SOURCE_CITATION` returned by the lookup.
 
-```bash
-tsp project home PROJECT_CODE
-tsp docs index --project PROJECT_CODE --limit 10
-tsp docs glob 'requirement/*.md' --project PROJECT_CODE
-tsp docs grep "KEYWORD" --project PROJECT_CODE
-tsp docs read "VIRTUAL_PATH" --project PROJECT_CODE
-```
-
-In MCP, call each named tool separately with the JSON object on its line.
+On the current Connector, call each tool separately with the JSON on its line. Call `read_connector_skill {"module":"materials"}` for supported locators, line ranges, and citation inputs.
 
 ```text
 list_project_materials  {"projectCode":"PROJECT_CODE","limit":10}
@@ -58,6 +52,8 @@ glob_project_materials  {"projectCode":"PROJECT_CODE","pattern":"requirement/*.m
 grep_project_materials  {"projectCode":"PROJECT_CODE","pattern":"KEYWORD"}
 read_project_material  {"projectCode":"PROJECT_CODE","sourceCitation":"SOURCE_CITATION"}
 ```
+
+For local CLI workflows, specify the project and use `tsp docs index`, `tsp docs glob`, `tsp docs grep`, or `tsp docs read`.
 
 ### Archive durable material and link individual evidence
 
@@ -69,6 +65,8 @@ Keep reusable background, requirements, architecture, designs, standards, guides
 
 Start with project home, modules, and Features to understand the business boundaries. Phases and milestones on the Plan page provide timing and dependency context. Check the requirement state, current revision, and linked delivery tasks on the Requirements page. A prototype and its design notes describe intended interactions. Architecture materials describe system boundaries. If the task links to a frozen baseline, use that baseline for implementation scope and ask the owner about changes in a newer revision. Check the implementation version on the Specs page or with code tools.
 
+Use `list_project_features`, `list_project_materials`, and the code tools to look up records available through the Connector. For dedicated requirements, prototypes, and plans, use the platform pages or the local CLI below.
+
 ```bash
 tsp feature list --project PROJECT_CODE
 tsp requirement show REQUIREMENT_CODE
@@ -79,7 +77,9 @@ tsp architecture list --project PROJECT_CODE
 
 ### Check test cases, executions, and defects
 
-Test cases provide steps and expectations. Execution records provide observed results, pinned versions, and evidence. A defect records what was done, what was expected, what happened, and the original evidence. Use these records to establish whether the failure is reproducible and what it affects. When using `tsp test execution record --project PROJECT_CODE --file EXECUTION_FILE` to save an actual run, include real case revisions and material references. Check task delivery through its task and verification records.
+Test cases provide steps and expectations. Execution records provide observed results, pinned versions, and evidence. A defect records what was done, what was expected, what happened, and the original evidence. Use these records to establish whether the failure is reproducible and what it affects. Through the Connector, find cases with `list_test_cases` and log actual results with `record_test_execution`. Call `read_connector_skill {"module":"testing"}` for inputs and examples. Check task delivery through its task and verification records.
+
+For local CLI workflows, add a record with `tsp test execution record --project PROJECT_CODE --file EXECUTION_FILE`. Review detailed test executions and defects on their platform pages.
 
 ```bash
 tsp test case list --project PROJECT_CODE
@@ -110,9 +110,9 @@ tsp defect report --feature FEATURE_CODE --title "DEFECT_TITLE" --severity mediu
 
 ### Find applicable memory and check its source
 
-Use `read_memory_brief` for recent project context, `search_memory` for a specific subject, and `read_memory_source` when you need to check the original record. Identify proposals under discussion, confirmed decisions, and implementation supported by evidence. Check implementation or execution evidence to establish what has been delivered. Reuse evidence already sufficient in the current session. To check for an update, use the latest `context_receipt` returned in the same context.
+Use `read_memory_brief` for recent project context and `search_memory` for a specific subject. In the Connector, use `read_memory_sources` to check your sources, then open the relevant material or memory document. Distinguish proposals, confirmed decisions, and facts backed by implementation or testing. Reuse sources that still apply in this session. Local MCP provides `read_memory_source` for one source, and `context_receipt` helps check for updates in the same context.
 
-Use `list_personal_memories` for account-wide preferences. To find personal preferences in a specific project, pass the project explicitly or call `search_memory` with `scope` set to `personal`. Use personal information for work authorized by that account.
+Confirm personal memory permission before using `search_memory` with `scope` set to `personal` in the target project. The local connection provides `list_personal_memories` for account-wide preferences. Use personal information for work authorized by that account.
 
 ### Gather code evidence from a pinned analysis
 
@@ -121,15 +121,18 @@ Start with `read_code_catalog` to select the repository and analysis version. Pa
 ```text
 read_memory_brief  {"projectCode":"PROJECT_CODE","scope":"project"}
 search_memory  {"projectCode":"PROJECT_CODE","scope":"project","query":"KEYWORD"}
-read_memory_source  {"projectCode":"PROJECT_CODE","source":"MEMORY_SOURCE"}
-list_personal_memories  {}
+read_memory_sources  {"projectCode":"PROJECT_CODE","scope":"project","sources":["MEMORY_SOURCE"]}
 read_code_catalog  {"projectCode":"PROJECT_CODE"}
 query_code_graph  {"projectCode":"PROJECT_CODE","run_code":"ANALYSIS_RUN_CODE","query":"SYMBOL"}
 ```
 
 ## 5. Use skills and session capture
 
-### Select the platform, project, or run skill version
+### Read the Connector's built-in workflow
+
+Call `read_connector_skill {}` for the workflow or pass `module` for one of its six tool references. Read this guidance directly over the current HTTP connection. Your role in each project determines the available actions.
+
+### Select a platform, project, or run skill version locally
 
 Use the platform skill catalog to find published built-in skills and the project catalog to find adopted skills. When a task run already exists, use its `run_code` to read the skill pinned for that run. Confirm the skill scope and revision first, then read the necessary `SKILL.md` or reference files. Use the `revision` returned by the catalog in the examples.
 
@@ -142,7 +145,7 @@ read_project_skill  {"projectCode":"PROJECT_CODE","run":"RUN_CODE","skill":"SKIL
 
 ### Check retrieval and host capture separately
 
-The CLI and MCP provide active lookup. Session capture uses a separate native hook or plugin to receive eligible new operator input in a registered workspace. Register the actual host only when the operator requests capture, from the signed-in workspace with an explicit project binding. Replace `HARNESS` with `codex`, `dsh`, or `opencode`. After Codex setup, have the operator review and trust the definition in `/hooks` and verify with a new session.
+The HTTP Connector provides on-demand retrieval and task tools. For session capture, select Local CLI / MCP and register the host hook or plugin in a signed-in workspace with an explicit project binding. Replace `HARNESS` with `codex`, `dsh`, or `opencode`. After Codex setup, have the operator review and trust the definition in `/hooks` and verify with a new session.
 
 ```bash
 tsp memory native install --harness HARNESS
@@ -153,9 +156,11 @@ Check host registration, local queuing, platform receipt, processing, and retrie
 
 ## 6. Draft and assign the task
 
-### Write a brief an assignee can act on
+### Draft and assign through the Connector
 
-Use the CLI or platform pages for task transitions. MCP can look up project context. Use the CLI to claim tasks and create local worktrees.
+Use `list_project_features` to identify the Feature and `create_task_draft` to write the context and observable acceptance criteria. Reuse the same `idempotency_key` on retries of that request. Use `get_task` to confirm `draft` and check `base_snapshot`. When assignment is requested, a project owner or administrator identifies the assignee with `list_project_members`, uses `assign_task`, and reads back `assigned`. Call `read_connector_skill {"module":"tasks"}` for exact inputs.
+
+### Draft a task with the local CLI
 
 Find the Feature in the target project. In `brief.md`, describe the background, upstream and downstream dependencies, writable scope, and observable acceptance criteria. Project members with write access can draft `ad-hoc` tasks. A project owner or administrator creates the other task sources, including `--source requirement --requirement REQUIREMENT_CODE` for requirements and `--source defect-fix --defect DEFECT_CODE` for fixes. The example creates an ad hoc task. Use `--depends-on` for known task dependencies and separate multiple task codes with commas.
 
@@ -172,7 +177,7 @@ $scope = '{"writable_paths":["WRITABLE_PATH"]}'.Replace('"', '\"')
 tsp.cmd task create --feature FEATURE_CODE --title 'TASK_TITLE' --profile builder --source ad-hoc --acceptance $acceptance --scope $scope --brief-file brief.md
 ```
 
-### Review the draft and assign a member
+### Review and assign a draft with the local CLI
 
 Read back the task code and confirm `draft`. A project owner or administrator reviews the draft and assigns it to an authorized project member. Assignment checks the acceptance criteria. Read back the state and confirm `assigned`.
 
@@ -181,9 +186,13 @@ tsp task assign TASK_CODE --assignee USER_CODE
 tsp task status TASK_CODE
 ```
 
-## 7. Claim the task and work in a separate worktree
+## 7. Claim and execute the task
 
-### Check the task and repository baseline
+### Claim through the Connector with a prepared workspace
+
+Use `list_tasks` and `get_task` to confirm your `assigned` task and current snapshot. Prepare a real HTTPS `workspace_url` and its Git baseline `git_base`, then call `claim_task`. Keep the returned `run_code` and task link. The host or operator prepares the execution workspace. Use local setup for tasks that require a device lease.
+
+### Check the task and baseline locally
 
 As the assignee, find the task in your assignments, which may span multiple projects. Check the project, brief, acceptance criteria, assignment, and whether dependencies are closed. Confirm that the source repository and its `HEAD` match the task baseline. Claim creates a worktree from the repository's `HEAD`. Uncommitted changes stay in the source checkout.
 
@@ -203,7 +212,11 @@ Read the project's Git rules, then check the target branch and baseline. Change 
 
 ## 8. Self-test and submit delivery evidence
 
-### Submit actual self-test results and artifact references
+### Submit artifacts and evidence through the Connector
+
+After self-testing, use `get_task` to read the current run and `base_snapshot`. In `submit_task_evidence`, put the verifiable HTTPS artifact link in `artifact.uri`, put the artifact's content hash in `artifact.content_hash`, and link the acceptance criteria that actually passed in `evidence.acceptance_refs`. Read back `submitted` and hand off for independent verification. Use `record_test_execution` to log actual results for existing test cases. That record can be created independently of a task transition.
+
+### Submit self-test results and artifact references with the local CLI
 
 Test each criterion and record the commands you ran, covered acceptance IDs, actual results, and any gaps. When a PR is required, follow the project process and current authorization. Check the real PR link and commit SHA. Submit after the self-test passes. Use the delivered commit for `COMMIT_SHA` and replace `AC-1` with the acceptance IDs covered by your evidence, separated by commas.
 
@@ -217,6 +230,8 @@ tsp task status TASK_CODE
 Read back and confirm `submitted`. If the self-test fails or the evidence is incomplete, record the result and resolve it before submitting. Hand off the actual artifact, results, PR, and reviewed revision to the independent verifier.
 
 ## 9. Verify independently and close
+
+Use `get_task` on the Connector to follow the status and evidence of a submitted task. Complete independent verification and closure on the platform or through the local workflow below.
 
 ### Retest the reviewed commit in a separate run
 

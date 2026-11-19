@@ -24,6 +24,17 @@ async function call(name: string, input: unknown, print: Print, personalManageme
   }
 }
 export function registerAgentToolCommands(program: Command, print: Print) {
+  const agent = program.command('agent').description('配置成员自带 Agent 的平台 MCP');
+  agent.command('connect').requiredOption('--harness <name>', 'codex / dsh / opencode / claudecode')
+    .requiredOption('--project <code>', '固定项目编号').option('--capture', '显式注册已验证的原生会话采集')
+    .option('--read-only', '仅开放查询工具，与 --capture 互斥')
+    .option('--host-home <directory>', '已配置的 Codex/DSH/OpenCode 宿主目录')
+    .option('--runtime <file>', '宿主可执行文件绝对路径')
+    .action(async opts => {
+      const { connectAgent } = await import('./agent-connect.js');
+      print({ ok: true, data: await connectAgent(opts) });
+    });
+
   const tools = program.command('tools').description('与 MCP 共用的成员 Agent 能力目录与调用入口');
   tools.command('list').option('--allow-personal-management', '额外列出本人记忆编辑/撤回工具').action(opts =>
     print({ ok: true, data: listAgentTools({ personalManagement: !!opts.allowPersonalManagement }) }));
@@ -34,8 +45,19 @@ export function registerAgentToolCommands(program: Command, print: Print) {
   program.command('mcp').description('启动项目记忆、资料和代码检索 MCP stdio 服务')
     .option('--project <code>', '默认项目编号；可由各工具的 projectCode 覆盖，不要求本机绑定')
     .option('--allow-personal-management', '额外开放本人记忆编辑/撤回；不扩大平台权限')
+    .option('--read-only', '只开放读取工具')
+    .option('--lock-project', '固定 --project，拒绝其他项目参数')
     .action(async opts => {
-      try { await serveMemoryMcp({ personalManagement: !!opts.allowPersonalManagement, projectCode: opts.project }); }
+      try {
+        if (opts.readOnly && opts.allowPersonalManagement) {
+          throw new DomainError('agent_options_conflict', '只读模式不能开放个人记忆写入');
+        }
+        if (opts.lockProject && !PublicCodeSchema.safeParse(opts.project).success) {
+          throw new DomainError('invalid_project_code', '固定项目需要有效的 --project 公开编码');
+        }
+        await serveMemoryMcp({ personalManagement: !!opts.allowPersonalManagement, projectCode: opts.project,
+          readOnly: !!opts.readOnly, lockProject: !!opts.lockProject });
+      }
       catch (error) {
         process.stderr.write((error instanceof DomainError ? error.code + ': ' + error.message : 'agent_mcp_failed') + '\n');
         process.exitCode = 1;

@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 import { listProjects, listTeams, type AuthUser, type ProjectSummary } from './api';
 import { agentWorkspacePath, type WorkspaceRoute } from './workspaceRouting';
 import { navigateWorkspace } from './workspaceNavigation';
@@ -10,6 +11,22 @@ import { CliInstaller } from './CliInstaller';
 import { SkillsWorkbench, type SkillLibraryTab } from './SkillsWorkbench';
 import { CopyCommand, SkillError } from './SkillShared';
 import { clientConnectionUrls, cliLoginCommand, getPlatformClientConfig, PLATFORM_CLIENT_CONFIG_QUERY_KEY } from './platformClientConfig';
+import { RemoteMcpConnectionGuide } from './RemoteMcpConnectionGuide';
+import { McpConsentWorkspace } from './McpConsentWorkspace';
+
+export function AgentConnectionWorkspace({ user, project, projects }: { user: AuthUser; project?: ProjectSummary; projects?: ProjectSummary[] }) {
+  const [mode, setMode] = useState<'remote' | 'local'>('remote');
+
+  return <>
+    <div aria-label={t('Agent 接入方式')} role="group" className="mb-5 inline-flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1">
+      {(['remote', 'local'] as const).map(value => <button key={value} type="button" aria-pressed={mode === value}
+        className={`rounded-lg px-4 py-2 text-sm font-semibold focus-visible:outline-cyan-600 ${mode === value ? 'bg-white text-cyan-900 shadow-sm' : 'text-slate-600 hover:text-slate-950'}`}
+        onClick={() => setMode(value)}>{t(value === 'remote' ? 'HTTP Connector（推荐）' : '本地 CLI / MCP')}</button>)}
+    </div>
+    {mode === 'remote' ? <RemoteMcpConnectionGuide key={user.code} accountCode={user.code} projects={projects} onLocalSetup={() => setMode('local')} />
+      : <CliConnectionGuide user={user} project={project} />}
+  </>;
+}
 
 export function CliConnectionGuide({ user, project }: { user: AuthUser; project?: ProjectSummary }) {
   const settings = useQuery({ queryKey: PLATFORM_CLIENT_CONFIG_QUERY_KEY, queryFn: getPlatformClientConfig, retry: false });
@@ -39,8 +56,9 @@ export function CliConnectionGuide({ user, project }: { user: AuthUser; project?
           {projectCode ? <CopyCommand command={`tsp project bind ${projectCode}\ntsp project current\ntsp docs index --limit 10`} /> : <p className="text-xs text-slate-500">{t('先在右上角选择项目，再复制对应的绑定命令。')}</p>}
         </details>
       </section>
+      <LocalAgentSetup projectCode={project?.status === 'active' ? projectCode : undefined} />
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" aria-label={t('CLI 与 MCP 接入说明')}>
-        <h2 className="text-base font-bold">4. {t('选择 Agent 的接入方式')}</h2>
+        <h2 className="text-base font-bold">{t('手动配置 CLI 与 MCP')}</h2>
         <p className="mt-2 text-sm leading-6 text-slate-500">{t('可使用 CLI 从终端调用，也可通过 MCP 让 Agent 直接选择工具。两种方式提供相同的项目资料、记忆和代码查询能力。')}</p>
         <div className="mt-4 grid min-w-0 gap-4 lg:grid-cols-2">
           <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
@@ -73,6 +91,39 @@ export function CliConnectionGuide({ user, project }: { user: AuthUser; project?
   </div>;
 }
 
+const localHarnesses = [
+  { value: 'codex', label: 'Codex' },
+  { value: 'dsh', label: 'DSH' },
+  { value: 'opencode', label: 'OpenCode' },
+  { value: 'claudecode', label: 'Claude Code' },
+] as const;
+
+function LocalAgentSetup({ projectCode }: { projectCode?: string }) {
+  const [harness, setHarness] = useState<(typeof localHarnesses)[number]['value']>('codex');
+  const [capture, setCapture] = useState(false);
+  const captureAvailable = harness !== 'claudecode';
+  const connect = projectCode ? `tsp agent connect --harness ${harness} --project ${projectCode}${capture && captureAvailable ? ' --capture' : ''}` : null;
+
+  return <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="local-agent-setup-title">
+    <h2 id="local-agent-setup-title" className="text-base font-bold">4. {t('配置本地 Agent')}</h2>
+    <p className="mt-2 text-sm leading-6 text-slate-600">{t('安装并授权 CLI 后，在实际项目工作区根目录执行下方命令。记忆可查询，任务协作遵循项目权限。')}</p>
+    <label className="ui-field-label mt-3 block max-w-xs">{t('Agent 宿主')}
+      <select className="form-control mt-2" value={harness} onChange={event => {
+        const selected = localHarnesses.find(option => option.value === event.target.value);
+        if (selected) { setHarness(selected.value); setCapture(false); }
+      }}>{localHarnesses.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
+    </label>
+    {captureAvailable ? <label className="mt-3 flex items-start gap-2 text-sm text-slate-700">
+      <input type="checkbox" className="mt-1 accent-cyan-700" checked={capture} disabled={!projectCode} onChange={event => setCapture(event.target.checked)} />
+      <span>{t('启用当前工作区的新会话采集')}</span>
+    </label> : <p className="mt-3 text-sm text-slate-600">{t('Claude Code 可配置 MCP。会话采集暂未开放。')}</p>}
+    {capture && captureAvailable && <p className="mt-2 text-xs leading-5 text-slate-600">{t('先用 tsp project current 核对本机已绑定到这个项目。配置后重开宿主，用新会话验证。')}
+      {harness === 'codex' && <> {t('Codex 需在 /hooks 中审阅并信任采集定义。')}</>}</p>}
+    {connect ? <div className="mt-3"><CopyCommand command={connect} /></div>
+      : <p className="mt-3 text-sm text-slate-600">{t('先在页首选择一个已启用项目，再生成本地接入命令。')}</p>}
+  </section>;
+}
+
 function McpConnectionGuide({ projectCode }: { projectCode?: string }) {
   const projectArgs = projectCode ? ['--project', projectCode] : [];
   const configurations = [
@@ -96,6 +147,7 @@ function McpConnectionGuide({ projectCode }: { projectCode?: string }) {
 export function AgentWorkspace({ route, user, guideProject }: { route: WorkspaceRoute; user: AuthUser; guideProject?: ProjectSummary }) {
   useLocale();
   if (route.agentTab === 'authorize') return <DeviceAuthorization key={route.authorizationCode ?? ''} user={user} code={route.authorizationCode} />;
+  if (route.agentTab === 'mcp-consent') return <McpConsentWorkspace key={`${user.code}:${route.mcpConsentRequest ?? ''}`} request={route.mcpConsentRequest} user={user} />;
   if (route.agentTab === 'guide') return <AgentUsageGuide route={route} project={guideProject} />;
   return <AgentLibraryWorkspace route={route} user={user} />;
 }
@@ -116,11 +168,11 @@ function AgentLibraryWorkspace({ route, user }: { route: WorkspaceRoute; user: A
   const team = teams.data?.find(item => item.code === route.teamCode) ?? (!route.teamCode ? teams.data?.find(item => item.code === project?.team_code) : undefined);
   const projectIssue = route.projectCode && projects.isSuccess && !project ? t('无法访问所选项目，请切换到有权限的项目。') : undefined;
   return <main className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-slate-50"><section className="mx-auto max-w-[1440px] p-4 sm:p-6">
-    <header className="mb-6"><p className="text-xs font-bold tracking-[0.16em] text-cyan-700">AGENT WORKSPACE</p><h1 className="mt-1 text-2xl font-bold text-slate-950">{t(route.agentTab === 'skills' ? '技能库' : 'Agent 接入')}</h1><p className="mt-2 text-sm text-slate-500">{t(route.agentTab === 'skills' ? '管理可用技能、项目固定版本和本机同步。' : '安装并授权 CLI，通过终端或 MCP 让 Agent 访问项目资料、代码背景与记忆。')}</p></header>
+    <header className="mb-6"><p className="text-xs font-bold tracking-[0.16em] text-cyan-700">AGENT WORKSPACE</p><h1 className="mt-1 text-2xl font-bold text-slate-950">{t(route.agentTab === 'skills' ? '技能库' : 'Agent 接入')}</h1><p className="mt-2 text-sm text-slate-500">{t(route.agentTab === 'skills' ? '管理可用技能、项目固定版本和本机同步。' : '日常查询和协作使用 HTTP Connector。需要本机工作树或会话采集时，选择本地接入。')}</p></header>
     <SkillError error={projects.error || teams.error} />
     {route.agentTab === 'skills' ? <SkillsWorkbench key={user.code} initialTab={initialTab} project={project} team={team} projects={projects.data} teams={teams.data} projectIssue={projectIssue}
       onProjectChange={(code, view) => navigateWorkspace(skillLibraryContextPath({ ...route, projectCode: code || undefined }, view))}
-      onTeamChange={(code, view) => navigateWorkspace(skillLibraryContextPath({ ...route, teamCode: code || undefined }, view))} /> : projectIssue ? <SkillError error={projectIssue} /> : <CliConnectionGuide user={user} project={project} />}
+      onTeamChange={(code, view) => navigateWorkspace(skillLibraryContextPath({ ...route, teamCode: code || undefined }, view))} /> : <AgentConnectionWorkspace user={user} project={project} projects={projects.data} />}
   </section></main>;
 
 }

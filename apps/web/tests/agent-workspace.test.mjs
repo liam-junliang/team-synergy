@@ -7,10 +7,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createServer } from 'vite';
 
-let vite, api, routing, switching, helpers, workbench, agent, dialogs, i18n, guide;
+let vite, api, routing, switching, helpers, workbench, agent, dialogs, i18n, guide, mcpConnections, mcpConsent;
 before(async () => {
   vite = await createServer({ root: fileURLToPath(new URL('..', import.meta.url)), appType: 'custom', optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true, hmr: false } });
-  [api, routing, switching, helpers, workbench, agent, dialogs, i18n, guide] = await Promise.all(['api.ts', 'workspaceRouting.ts', 'projectSwitching.ts', 'skills.ts', 'SkillsWorkbench.tsx', 'AgentWorkspace.tsx', 'SkillDialogs.tsx', 'i18n.ts', 'AgentUsageGuide.tsx'].map(file => vite.ssrLoadModule(`/src/${file}`)));
+  [api, routing, switching, helpers, workbench, agent, dialogs, i18n, guide, mcpConnections, mcpConsent] = await Promise.all(['api.ts', 'workspaceRouting.ts', 'projectSwitching.ts', 'skills.ts', 'SkillsWorkbench.tsx', 'AgentWorkspace.tsx', 'SkillDialogs.tsx', 'i18n.ts', 'AgentUsageGuide.tsx', 'mcpConnectionsApi.ts', 'McpConsentWorkspace.tsx'].map(file => vite.ssrLoadModule(`/src/${file}`)));
 });
 after(async () => vite?.close());
 afterEach(() => i18n.setLocale('zh-CN', false));
@@ -46,6 +46,41 @@ test('Agent integration entry is visibly named and original navigation retains T
   assert.equal(routing.PROJECT_SECTIONS.at(-3), 'testing'); assert.equal(routing.PROJECT_SECTIONS.at(-2), 'defects'); assert.equal(routing.PROJECT_SECTIONS.at(-1), 'handovers');
 });
 
+test('Connector consent resumes after login with a single opaque request identifier', () => {
+  const request = 'a'.repeat(64);
+  const consentPath = routing.MCP_CONSENT_PATH;
+  const validPath = `${consentPath}?request=${request}`;
+  assert.equal(routing.isWorkspacePath(validPath), true);
+  assert.deepEqual(routing.parseWorkspacePath(validPath), { view: 'agent', agentTab: 'mcp-consent', mcpConsentRequest: request });
+  for (const isAdmin of [false, true]) {
+    assert.equal(routing.workspacePathAfterLogin(`https://app.example${validPath}&return=https%3A%2F%2Fother.example#extra`, isAdmin), validPath);
+    assert.equal(routing.workspacePathAfterLogin(`https://app.example${validPath}&request=${request}`, isAdmin), consentPath);
+  }
+  assert.equal(routing.parseWorkspacePath(`${consentPath}?request=invalid`).mcpConsentRequest, undefined);
+  assert.equal(switching.projectSwitchPath(routing.parseWorkspacePath(validPath), 'Q'), '/agent/connect?project=Q');
+});
+
+test('Connector authorization accepts only absolute HTTPS or loopback HTTP callback URLs', () => {
+  assert.equal(mcpConsent.safeMcpCallback('https://agent.example/callback?code=fixture'), 'https://agent.example/callback?code=fixture');
+  assert.equal(mcpConsent.safeMcpCallback('http://[::1]:54321/callback?error=access_denied'), 'http://[::1]:54321/callback?error=access_denied');
+  for (const value of ['javascript:alert(1)', 'https://user:pass@agent.example/callback', 'http://notlocalhost.example/callback', 'https://agent.example/callback#fragment', '/callback', '//agent.example/callback']) assert.equal(mcpConsent.safeMcpCallback(value), null);
+});
+
+test('Connector consent authorizes the account with optional permissions and no project selection', () => {
+  const user = { code: 'U', account: 'liam', display_name: 'Liam' };
+  const request = 'a'.repeat(64);
+  const route = { view: 'agent', agentTab: 'mcp-consent', mcpConsentRequest: request };
+  const html = render(agent.AgentWorkspace, { route, user }, [
+    [['mcp-authorization-request', 'U', request], { clientName: 'Personal Assistant', redirectOrigin: 'https://agent.example', requestedTaskWrite: true, requestedPersonalMemory: true }],
+  ]);
+  for (const label of ['Personal Assistant', 'liam', 'https://agent.example', 'Agent 在每次调用时指定项目', '客户端申请了任务协作和个人记忆读取', '记忆仅供读取']) assert.ok(html.includes(label), label);
+  assert.doesNotMatch(html, /<select|正在加载项目|--capture|Bearer/);
+  assert.match(html, /<input type="checkbox"(?![^>]*checked=)/);
+  assert.equal([...html.matchAll(/<input type="radio"[^>]*checked=""/g)].length, 1);
+  assert.match(html, /checked=""[^>]*><span><strong[^>]*>仅查看/);
+  assert.match(html, /<button type="submit"(?![^>]*disabled=)[^>]*>确认授权/);
+});
+
 test('Agent usage guide sits between setup and skills and preserves the current return path', () => {
   assert.deepEqual(routing.AGENT_WORKSPACE_TABS, ['connect', 'guide', 'skills']);
   const route = { view: 'agent', agentTab: 'guide', projectCode: 'P', teamCode: 'T', agentReturnPath: '/projects/P/understanding' };
@@ -73,10 +108,12 @@ test('Agent usage guide links and renders the corresponding Markdown manual inde
   assert.match(localized, /aria-label="Contents"/);
   assert.match(localized, /href="\/agent\/guide\.en-US\.md"[^>]*>Read Markdown<\/a>/);
   assert.match(localized, /Candidate project from this page[^<]*<\/span><code[^>]*>19Q4K7PDARXQ9JHW6R6F<\/code>/);
+  assert.match(localized, /Start with the HTTP Connector/);
   assert.match(localized, /Confirm it through the connection tools before use/);
   assert.match(localized, /<button[^>]*>Copy<\/button>/);
   for (const command of [
-    'tsp tools call get_connection_context', 'read_project_material', 'read_memory_source', 'query_code_graph',
+    'read_connector_skill', 'search_tools', 'tsp tools call get_connection_context', 'read_project_material', 'read_memory_sources', 'query_code_graph',
+    'create_task_draft', 'record_test_execution', 'submit_task_evidence', 'artifact.uri', 'artifact.content_hash',
     'tsp.cmd task create', 'tsp task assign', 'tsp task claim TASK_CODE --profile builder',
     'tsp task submit', 'tsp task claim TASK_CODE --profile verifier', 'tsp task verify', 'tsp task close',
   ]) assert.ok(localized.includes(command), command);
@@ -238,8 +275,83 @@ test('Agent connection guide never offers an unbound placeholder as an executabl
   assert.ok(jsonCommands.every(config => !('cwd' in config.mcpServers.team_synergy)));
 });
 
+test('Agent connection defaults to HTTP Connector and offers local setup when the endpoint is unavailable', () => {
+  const user = { code: 'U', account: 'liam', display_name: 'Liam' };
+  const base = { public_web_url: null, public_api_url: null };
+  const loading = render(agent.AgentConnectionWorkspace, { user });
+  assert.match(loading, /aria-pressed="true"[^>]*>HTTP Connector（推荐）<\/button>/);
+  assert.match(loading, /正在读取平台接入配置/);
+  assert.doesNotMatch(loading, /tsp auth login|复制服务地址/);
+  const unconfigured = render(agent.AgentConnectionWorkspace, { user, project }, [[['platform-client-config'], base]]);
+  assert.match(unconfigured, /aria-pressed="true"[^>]*>HTTP Connector（推荐）<\/button>/);
+  assert.match(unconfigured, /此站点尚未启用 HTTP Connector/);
+  assert.match(unconfigured, /打开本地接入/);
+  assert.doesNotMatch(unconfigured, /复制服务地址|tsp auth login/);
+
+  const local = render(agent.CliConnectionGuide, { user, project }, [[['platform-client-config'], base]]);
+  assert.match(local, /tsp agent connect --harness codex --project P<\/code>/);
+  assert.doesNotMatch(local, /--capture|复制授权头|Bearer/);
+  for (const host of ['codex', 'dsh', 'opencode', 'claudecode']) assert.ok(local.includes(`value="${host}"`));
+
+  const endpoint = 'https://workspace.example/agent/mcp';
+  const entries = [[['platform-client-config'], { ...base, remote_mcp_url: endpoint }], [['remote-mcp-connections', 'U'], [
+    { code: 'G', name: 'Personal office', projectCode: null, allowPersonalMemory: false, allowTaskWrite: false, expiresAt: '2099-01-01T00:00:00Z', revokedAt: null },
+    { code: 'K', name: 'Old personal', projectCode: 'P', allowPersonalMemory: true, allowTaskWrite: true, expiresAt: '2099-01-01T00:00:00Z', revokedAt: '2026-01-01T00:00:00Z' },
+  ]]];
+  i18n.setLocale('en-US', false);
+  const remote = render(agent.AgentConnectionWorkspace, { user, project, projects: [project] }, entries);
+  assert.match(remote, /aria-pressed="true"[^>]*>HTTP Connector \(recommended\)<\/button>/);
+  assert.match(remote, /https:\/\/workspace\.example\/agent\/mcp/);
+  assert.match(remote, /Add TeamSynergy Connector/);
+  assert.match(remote, /Sign in and authorize in the browser/);
+  assert.match(remote, /straight to the consent page/);
+  assert.match(remote, /browser returns the authorization result/);
+  assert.match(remote, /<details[^>]*><summary[^>]*>Advanced: connect with an authorization header/);
+  assert.match(remote, /Personal office/);
+  assert.match(remote, /View only/);
+  assert.match(remote, /Projects accessible to this account · View only/);
+  assert.match(remote, /Project Product only · Allow collaboration/);
+  assert.match(remote, /Session capture stays off after setup/);
+  for (const text of ['Old personal', 'Revoked', 'Allow collaboration', 'Includes account preferences']) assert.ok(remote.includes(text));
+  assert.match(remote, /Revoke connection Personal office/);
+  assert.doesNotMatch(remote, /Revoke connection Old personal|Bearer|tsp auth login/);
+  const noProject = render(agent.AgentConnectionWorkspace, { user, project: { ...project, status: 'archived' } }, entries);
+  assert.match(noProject, /<button(?![^>]*disabled=)[^>]*>New connection<\/button>/);
+  assert.match(noProject, /create a time-limited credential for this account/);
+});
+
+test('Connector consent loads and submits decisions to the private request route without caching', async (context) => {
+  const fetch = context.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({ ok: true, data: { redirectUrl: 'https://agent.example/callback' } }), { headers: { 'Content-Type': 'application/json' } }));
+  const request = 'b'.repeat(64);
+  await mcpConnections.getMcpAuthorizationRequest(request);
+  const denial = { decision: 'deny' };
+  const approval = { decision: 'allow', allowTaskWrite: true, allowPersonalMemory: false };
+  await mcpConnections.decideMcpAuthorization(request, denial);
+  await mcpConnections.decideMcpAuthorization(request, approval);
+  const [read, deny, allow] = fetch.mock.calls.map(call => call.arguments);
+  assert.ok([read, deny, allow].every(([path, init]) => path === `/api/mcp/oauth/requests/${request}` && init.cache === 'no-store' && init.credentials === 'same-origin'));
+  assert.deepEqual(JSON.parse(deny[1].body), denial);
+  assert.deepEqual(JSON.parse(allow[1].body), approval);
+});
+
+test('remote MCP connection calls send the exact API contract without caching credentials', async (context) => {
+  const data = { connection: { code: 'G', name: 'Browser agent', projectCode: null, allowPersonalMemory: false, allowTaskWrite: true, expiresAt: '2099-01-01T00:00:00Z', revokedAt: null }, token: 'fixture-one-time-only' };
+  const fetch = context.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({ ok: true, data }), { headers: { 'Content-Type': 'application/json' } }));
+  await mcpConnections.listMcpConnections();
+  assert.deepEqual(await mcpConnections.createMcpConnection({ name: 'Browser agent', allowPersonalMemory: false, allowTaskWrite: true }), data);
+  await mcpConnections.revokeMcpConnection('G/1');
+  const [list, create, revoke] = fetch.mock.calls.map(call => call.arguments);
+  assert.equal(list[0], '/api/account/mcp-connections');
+  assert.equal(create[0], '/api/account/mcp-connections');
+  assert.equal(create[1].method, 'POST');
+  assert.deepEqual(JSON.parse(create[1].body), { name: 'Browser agent', allowPersonalMemory: false, allowTaskWrite: true });
+  assert.equal(revoke[0], '/api/account/mcp-connections/G%2F1');
+  assert.equal(revoke[1].method, 'DELETE');
+  assert.ok([list, create, revoke].every(([, init]) => init.cache === 'no-store' && init.credentials === 'same-origin'));
+});
+
 test('new UI messages have English translations and keep user-authored names unchanged', () => {
-  for (const name of ['AgentWorkspace.tsx', 'SkillsWorkbench.tsx', 'SkillDialogs.tsx', 'SkillShared.tsx', 'skills.ts']) {
+  for (const name of ['AgentWorkspace.tsx', 'RemoteMcpConnectionGuide.tsx', 'McpConsentWorkspace.tsx', 'McpPermissionFields.tsx', 'SkillsWorkbench.tsx', 'SkillDialogs.tsx', 'SkillShared.tsx', 'skills.ts']) {
     const source = readFileSync(new URL(`../src/${name}`, import.meta.url), 'utf8');
     for (const match of source.matchAll(/'([^'\n]*[\u4e00-\u9fff][^'\n]*)'/g)) assert.ok(i18n.englishMessages[match[1]], `missing ${match[1]}`);
   }

@@ -50,6 +50,9 @@ import { createSystemAgentWorker } from './system-agent-worker.js';
 import { createCodeAnalysisRuntime } from './code-analysis-runtime.js';
 import { createCodeAnalysisWorker } from './code-analysis-worker.js';
 import { registerBackgroundDrain, registerBackgroundLoop } from './background-loop.js';
+import { configuredRemoteMcpUrl, isPublicConnectorRoute, registerRemoteMcp } from './remote-mcp.js';
+import { registerRemoteMcpOAuthRoutes } from './remote-mcp-oauth.js';
+import { registerRemoteMcpGrantRoutes } from './remote-mcp-authorization.js';
 
 export interface BuildServerOptions {
   /** Borrow an existing handle. The caller remains responsible for closing it. */
@@ -67,6 +70,7 @@ function bundledMigrationsFolder(): string {
 
 /** Build the modular Fastify server shared by production and inject-based tests. */
 export async function buildServer(options: BuildServerOptions = {}): Promise<FastifyInstance> {
+  const remoteMcpUrl = configuredRemoteMcpUrl();
   const memoryEnabled = process.env.TSP_MEMORY_ENABLED === '1';
   const memoryFile = options.memoryEnginesFile ?? process.env.TSP_MEMORY_ENGINES_FILE;
   const memoryEngines = memoryEnabled && memoryFile ? await loadMemoryEngines(memoryFile) : undefined;
@@ -138,7 +142,12 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
 
   await registerSecurityHeaders(app);
   registerMetrics(app, db);
-  registerAuthMiddleware(app, db);
+  registerAuthMiddleware(app, db, remoteMcpUrl ? isPublicConnectorRoute : undefined);
+  if (remoteMcpUrl) {
+    registerRemoteMcpGrantRoutes(app, db);
+    registerRemoteMcpOAuthRoutes(app, db, { resourceUrl: remoteMcpUrl });
+    registerRemoteMcp(app, db, remoteMcpUrl);
+  }
   registerAuthRoutes(app, db);
   registerAuditRoutes(app, db);
   registerLoginSecurityRoutes(app, db);
@@ -146,7 +155,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   registerTestingRoutes(app, db);
   registerSkillRoutes(app, db);
   registerCliDistributionRoutes(app);
-  registerSystemSettingsRoutes(app, db);
+  registerSystemSettingsRoutes(app, db, remoteMcpUrl);
   registerAdminGovernanceRoutes(app, db);
   registerIntakeRoutes(app, db);
   // Owned test databases also run native HTTP suites. Never inherit paid engine settings there.
@@ -237,8 +246,8 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
       onError: () => app.log.warn('Project material index maintenance unavailable'),
     });
   }
+  if (memoryEnabled || remoteMcpUrl) registerMemoryRoutes(app, db, memoryEngines, memoryEnabled);
   if (memoryEnabled) {
-    registerMemoryRoutes(app, db, memoryEngines);
     if (ownsDb) {
       registerBackgroundLoop(app, {
         intervalMs: 500,

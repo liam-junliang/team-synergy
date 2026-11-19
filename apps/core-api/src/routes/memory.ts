@@ -36,7 +36,7 @@ export function registerMemoryCenterRoutes(app: FastifyInstance, db: Db, engines
   });
 }
 
-export function registerMemoryRoutes(app: FastifyInstance, db: Db, engines?: EngineConfig) {
+export function registerMemoryRoutes(app: FastifyInstance, db: Db, engines?: EngineConfig, captureEnabled = true) {
   const memory = createMemorySliceUseCases(db);
   const base = '/projects/:projectCode/memory';
 
@@ -130,6 +130,7 @@ export function registerMemoryRoutes(app: FastifyInstance, db: Db, engines?: Eng
     if (!input.success) throw new DomainError('invalid_request', '请选择议题与需求。');
     return memory.inspect({ ...actor, ...input.data });
   }));
+  if (!captureEnabled) return;
   app.post(base + '/capture-events', { bodyLimit: 32 * 1024 }, (request: Request, reply) => handle(request, reply, async actor => {
     const input = MemoryCaptureInput.safeParse(request.body);
     if (!input.success) throw new DomainError('invalid_request', '会话事件或可选绑定无效。');

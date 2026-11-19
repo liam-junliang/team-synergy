@@ -2,26 +2,28 @@
 
 ## 1. 确认账号、项目与授权
 
-### 确认当前项目
+### 优先使用 HTTP Connector
 
-接入后，遇到依赖项目现状或团队决定的问题，主动查询相关资料。先用 `get_connection_context` 核对当前账号和默认项目。默认项目不明确，或操作者指定了其他项目时，用 `list_projects` 找到与意图一致的项目。仍有歧义就询问操作者。选定后，向项目工具明确传入结果中的 `projectCode`，切换项目时重新核对。
+从平台「Agent 接入」复制 HTTP Connector 服务地址，在宿主的 MCP 或 Connector 设置中添加远程连接。宿主发起 OAuth 后，在浏览器登录 TeamSynergy。已有登录会话时会直接进入授权页。核对账号、客户端和回调地址，按需授权后返回宿主。账号授权允许同一个会话按项目权限操作多个项目，无需安装 `tsp` 或绑定本地目录。
 
-### 直接用 MCP
+默认按需查项目资料。要创建和推进任务，在授权页选择「可协作」。账号个人记忆读取单独授权，连接保持会话采集关闭。无法发起 OAuth 且支持自定义请求头的宿主，可在接入页的高级设置生成有期限的授权凭据。
 
-从宿主的 Team Synergy 工具列表直接发起调用。下面每一行代表一次调用，工具名后是参数。确认项目后，把 `PROJECT_CODE` 换成实际项目编码，把 `SOURCE_CITATION` 换成搜索结果给出的完整引用。
+### 在当前 Connector 确认账号、项目与工具
+
+用 `read_connector_skill {}` 查看内置操作流程，需要详细说明时传 `module`。用 `get_connection_context {}` 核对账号与连接权限，再用 `list_projects {}` 找到目标项目与角色。在同一连接上为每次项目操作传入目标 `projectCode`。切换项目时核对项目归属，分别保留文档、代码和任务来源。写入目标不明确时先确认。
+
+用 `search_tools {}` 看模块概况。按 `module` 和 `query` 查找工具，传目标 `projectCode` 可按当前项目权限筛选。调用时以当前连接返回的参数定义为准。
 
 ```text
+read_connector_skill  {"module":"tasks"}
 get_connection_context  {}
 list_projects  {}
-grep_project_materials  {"projectCode":"PROJECT_CODE","pattern":"KEYWORD"}
-read_project_material  {"projectCode":"PROJECT_CODE","sourceCitation":"SOURCE_CITATION"}
+search_tools  {"projectCode":"PROJECT_CODE","module":"tasks","query":"草稿"}
 ```
 
-用 MCP 查资料原文、项目或个人记忆、代码证据和技能版本。需要发布、分派、领取、提交、验收或关闭任务时，按对应章节使用 CLI 或平台页面。下文的记忆和技能章节还有可直接调用的 MCP 参数示例。
+### 本地 CLI / MCP 接入
 
-### 通过 CLI 使用同一批查询工具
-
-用 `tsp tools list` 查看共用的参数定义。`tsp tools call` 用 `--input` 接收 JSON，用 `--project` 指定该次调用的项目。
+需要本机工作树、设备绑定或显式启用采集时，在接入页选择本地 CLI / MCP。已安装并授权 `tsp` 后，可以在宿主启动 stdio MCP，也可以用 `tsp tools list` 查看查询工具的输入定义。`tsp tools call` 用 `--input` 接收 JSON，用 `--project` 指定该次调用的项目。使用本机连接时，从该连接发现项目，并在该连接内使用其返回的编码。
 
 ```bash
 tsp tools call get_connection_context
@@ -38,19 +40,11 @@ tsp tools call list_projects
 
 用目录查询按标题、摘要或路径定位资料，用 Glob 缩小虚拟路径范围，用 Grep 查正文。目录关键词和 Grep 默认按字面匹配。需要多模式匹配时显式选择 `regex`。按返回的引用或虚拟路径读取必要段落，核对修订版本和当前状态。回答时提供标题、修订和相关行号。一轮检索无命中时，可缩短关键词或调整范围。
 
-### CLI 与 MCP 查询示例
+### 在 Connector 中查目录、搜索和原文
 
-以下示例中的大写占位符须替换为当前项目的实际值。`VIRTUAL_PATH` 与 `SOURCE_CITATION` 取自检索结果。
+以下示例中的大写占位符须替换为当前项目的实际值。`SOURCE_CITATION` 使用检索结果中的完整引用。
 
-```bash
-tsp project home PROJECT_CODE
-tsp docs index --project PROJECT_CODE --limit 10
-tsp docs glob 'requirement/*.md' --project PROJECT_CODE
-tsp docs grep "KEYWORD" --project PROJECT_CODE
-tsp docs read "VIRTUAL_PATH" --project PROJECT_CODE
-```
-
-MCP 中逐行分别调用工具，空格后是该工具的 JSON 参数。
+在当前 Connector 中逐行调用工具，空格后是该工具的 JSON 参数。需要定位方式、行范围和引用参数时，用 `read_connector_skill {"module":"materials"}`。
 
 ```text
 list_project_materials  {"projectCode":"PROJECT_CODE","limit":10}
@@ -58,6 +52,8 @@ glob_project_materials  {"projectCode":"PROJECT_CODE","pattern":"requirement/*.m
 grep_project_materials  {"projectCode":"PROJECT_CODE","pattern":"KEYWORD"}
 read_project_material  {"projectCode":"PROJECT_CODE","sourceCitation":"SOURCE_CITATION"}
 ```
+
+本机 CLI 对应 `tsp docs index`、`tsp docs glob`、`tsp docs grep` 和 `tsp docs read`，指定目标项目后执行。
 
 ### 归档长期资料，关联单次证据
 
@@ -69,6 +65,8 @@ read_project_material  {"projectCode":"PROJECT_CODE","sourceCitation":"SOURCE_CI
 
 先看项目首页、功能模块和 Feature，理解业务边界。计划页面的阶段和里程碑提供时间与依赖背景。在需求页面查需求状态、当前修订和相关交付任务。设计页面的原型和配套说明描述预期交互，架构资料描述系统边界。若任务关联冻结基线，按基线查当次实施范围，发现新版差异时向负责人确认。到规格页面或代码工具核对实现版本。
 
+先用 `list_project_features`、`list_project_materials` 和代码工具查 Connector 能读取的事实。需要查看独立的需求、原型和计划状态时，可前往平台对应页面，或在本机使用以下 CLI。
+
 ```bash
 tsp feature list --project PROJECT_CODE
 tsp requirement show REQUIREMENT_CODE
@@ -79,7 +77,9 @@ tsp architecture list --project PROJECT_CODE
 
 ### 按用例、执行与缺陷定位测试事实
 
-用例给出检查步骤与预期。执行记录给出实际结果、固定版本和证据。缺陷记录说明实际操作、预期、实际结果和原始证据。根据这些输入确认失败是否能复现及影响范围。用 `tsp test execution record --project PROJECT_CODE --file EXECUTION_FILE` 保存实际执行结果时，填真实用例修订与资料引用。任务交付状态通过任务记录和验收确认。
+用例给出检查步骤与预期。执行记录给出实际结果、固定版本和证据。缺陷记录说明实际操作、预期、实际结果和原始证据。根据这些输入确认失败是否能复现及影响范围。Connector 可用 `list_test_cases` 查用例，按 `read_connector_skill {"module":"testing"}` 的说明用 `record_test_execution` 登记真实结果。任务交付状态通过任务记录和验收确认。
+
+本机 CLI 可用 `tsp test execution record --project PROJECT_CODE --file EXECUTION_FILE` 登记结果。具体测试执行和缺陷也可从平台页面核对。
 
 ```bash
 tsp test case list --project PROJECT_CODE
@@ -110,9 +110,9 @@ tsp defect report --feature FEATURE_CODE --title "DEFECT_TITLE" --severity mediu
 
 ### 找到适用的记忆并确认来源
 
-近期项目背景用 `read_memory_brief`，明确的主题用 `search_memory`。用 `read_memory_source` 核对必要的原始记录。分别标明讨论中的设想、已确认结论和有事实支撑的落实情况。落实情况要查对应实现或执行证据。已有充分来源时复用本会话的结果。需要核对更新时，使用同一上下文返回的最新 `context_receipt`。
+近期项目背景用 `read_memory_brief`，明确的主题用 `search_memory`。在 Connector 中用 `read_memory_sources` 回读来源，按来源类型读取资料或记忆文档。区分讨论、决定与实现或测试确认的事实。可复用本会话仍适用的来源。使用本机 MCP 时，`read_memory_source` 可回读单个来源，`context_receipt` 可帮助核对同一上下文的更新。
 
-账号通用偏好可用 `list_personal_memories` 查看。需要特定项目内的个人偏好时显式传入项目，或用 `search_memory` 将 `scope` 设为 `personal`。个人信息仅用于当前账号授权的工作。
+Connector 的个人记忆需单独授权。确认授权后，在当前项目调用 `search_memory` 并将 `scope` 设为 `personal`。本机连接可用 `list_personal_memories` 查看账号通用偏好。个人信息仅用于当前账号授权的工作。
 
 ### 用固定版本的代码图取证
 
@@ -121,15 +121,18 @@ tsp defect report --feature FEATURE_CODE --title "DEFECT_TITLE" --severity mediu
 ```text
 read_memory_brief  {"projectCode":"PROJECT_CODE","scope":"project"}
 search_memory  {"projectCode":"PROJECT_CODE","scope":"project","query":"KEYWORD"}
-read_memory_source  {"projectCode":"PROJECT_CODE","source":"MEMORY_SOURCE"}
-list_personal_memories  {}
+read_memory_sources  {"projectCode":"PROJECT_CODE","scope":"project","sources":["MEMORY_SOURCE"]}
 read_code_catalog  {"projectCode":"PROJECT_CODE"}
 query_code_graph  {"projectCode":"PROJECT_CODE","run_code":"ANALYSIS_RUN_CODE","query":"SYMBOL"}
 ```
 
 ## 5. 使用技能与会话采集
 
-### 按平台、项目和运行版本选择技能
+### 读取 Connector 内置操作说明
+
+用 `read_connector_skill {}` 查协作流程，用 `module` 查六个模块中的一个。工具说明可在当前 HTTP 连接中直接读取，各项目的可用操作由账号权限决定。
+
+### 在本机按平台、项目和运行版本选择技能
 
 从平台技能目录查看已发布的内置技能，从项目目录查看已采用的技能。已有任务 Run 时用其 `run_code` 读取当次固定技能版本。先确认技能的适用范围和修订，再读取所需的 `SKILL.md` 或参考文件。把示例中的 `revision` 换成目录返回的版本。
 
@@ -142,7 +145,7 @@ read_project_skill  {"projectCode":"PROJECT_CODE","run":"RUN_CODE","skill":"SKIL
 
 ### 核对检索与宿主采集状态
 
-CLI 与 MCP 提供主动取证。会话采集另由原生 Hook 或插件接收符合当前工作区注册范围的新操作者输入。只有明确需要启用采集时，才在已登录且明确绑定项目的工作区注册实际宿主。将 `HARNESS` 替换为 `codex`、`dsh` 或 `opencode`。Codex 安装后由操作者在 `/hooks` 审阅信任，并用新会话验证。
+HTTP Connector 提供按需检索和任务工具。需要会话采集时，进入本地 CLI / MCP 接入，在已登录且明确绑定项目的工作区注册原生 Hook 或插件。将 `HARNESS` 替换为 `codex`、`dsh` 或 `opencode`。Codex 安装后由操作者在 `/hooks` 审阅信任，并用新会话验证。
 
 ```bash
 tsp memory native install --harness HARNESS
@@ -153,9 +156,11 @@ tsp memory native doctor --harness HARNESS
 
 ## 6. 建立任务草稿并分派
 
-### 写成可领取的任务
+### 通过 Connector 建草稿和分派
 
-任务流转用 CLI 或平台页面。MCP 可以查背景资料，任务领取和本机工作树创建使用 CLI。
+用 `list_project_features` 找目标 Feature，`create_task_draft` 写入背景和可观察的验收项。同一次创建重试沿用 `idempotency_key`。用 `get_task` 检查 `draft` 与当前 `base_snapshot`。需要分派时，负责人或管理员先通过 `list_project_members` 核对执行者，再使用 `assign_task` 并回读 `assigned`。具体输入用 `read_connector_skill {"module":"tasks"}`。
+
+### 用本机 CLI 建立任务草稿
 
 找到目标项目的 Feature。把背景、上下游、允许改动范围、依赖和可观察验收写入执行简报 `brief.md`。有写权限的项目成员可以建立 `ad-hoc` 草稿。项目负责人或管理员按来源创建其他任务，需求用 `--source requirement --requirement REQUIREMENT_CODE`，缺陷修复用 `--source defect-fix --defect DEFECT_CODE`。以下是临时任务示例。用 `--depends-on` 指定已知依赖任务编码，多个编码用逗号分隔。
 
@@ -172,7 +177,7 @@ $scope = '{"writable_paths":["WRITABLE_PATH"]}'.Replace('"', '\"')
 tsp.cmd task create --feature FEATURE_CODE --title 'TASK_TITLE' --profile builder --source ad-hoc --acceptance $acceptance --scope $scope --brief-file brief.md
 ```
 
-### 核对草稿并指派执行者
+### 用本机 CLI 核对草稿并分派
 
 回读真实任务编码与 `draft` 状态。项目负责人或管理员核对草稿后，将其分派给有权限的项目成员。分派会校验验收标准，回读状态确认 `assigned`。
 
@@ -181,9 +186,13 @@ tsp task assign TASK_CODE --assignee USER_CODE
 tsp task status TASK_CODE
 ```
 
-## 7. 领取任务并在独立工作树执行
+## 7. 领取任务并执行
 
-### 检查任务与仓库基线
+### 通过 Connector 领取到已有执行环境
+
+用 `list_tasks` 与 `get_task` 核对本人的 `assigned` 任务和最新快照。准备真实可访问的 HTTPS `workspace_url` 与对应的 Git 基线 `git_base`，再调用 `claim_task`。保留实际返回的 `run_code` 和任务链接。执行工作区由宿主或操作者准备。受设备租约约束的任务走本机入口。
+
+### 在本机检查任务与仓库基线
 
 执行者从可能跨项目的指派列表里找到任务，核对项目、执行简报、验收标准、分派身份以及依赖是否已经关闭。确认来源仓库与 `HEAD` 的提交符合任务基线。领取时从仓库 `HEAD` 创建工作树，未提交文件不会随基线带入。
 
@@ -203,7 +212,11 @@ tsp task claim TASK_CODE --profile builder --repo "REPO_PATH"
 
 ## 8. 自测并提交交付证据
 
-### 提交真实的自测与产物引用
+### 通过 Connector 提交产物与证据
+
+逐项自测后用 `get_task` 回读当前运行和 `base_snapshot`。调用 `submit_task_evidence` 时，`artifact.uri` 存放可核验的 HTTPS 产物链接，`artifact.content_hash` 单独存放该产物的内容哈希，`evidence.acceptance_refs` 关联实际通过的验收项。提交后回读 `submitted` 并交给独立验收。登记现有测试用例结果使用 `record_test_execution`，无需因此改变任务状态。
+
+### 用本机 CLI 提交真实的自测与产物引用
 
 逐项自测，记下实际命令、通过的验收编号、结果及未覆盖范围。需要 PR 时按项目流程和本次授权操作，核对实际 PR 链接与提交 SHA。仅在自测通过后提交。`COMMIT_SHA` 是实际交付提交，`AC-1` 替换为证据覆盖的验收编号，多个编号用逗号分隔。
 
@@ -217,6 +230,8 @@ tsp task status TASK_CODE
 回读确认 `submitted`。自测失败或证据不足时，记录结果并解决问题后再提交。把实际产物、测试结果、PR 和待审 SHA 交给独立验收者。
 
 ## 9. 独立验收并关闭
+
+通过 Connector 提交后的任务可用 `get_task` 追踪状态与证据。独立验收和关闭在平台对应页面或按以下本机工作流完成。
 
 ### 在待审提交上单独复测
 

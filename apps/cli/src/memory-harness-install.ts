@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -35,12 +35,13 @@ export function sameHarnessWorkspace(first: unknown, second: string) {
   try { return realpathSync.native(first) === realpathSync.native(second); } catch { return false; }
 }
 function text(file: string) { return existsSync(file) ? readFileSync(file, 'utf8') : ''; }
-function atomic(file: string, content: string, before?: string) {
+export function writeHarnessConfig(file: string, content: string, before?: string) {
   mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   if (before !== undefined && text(file) !== before) fail('memory_harness_config_changed', '宿主配置已变化，请重新检查后安装。');
   const temporary = file + '.tsp-' + randomBytes(8).toString('hex');
   writeFileSync(temporary, content, { flag: 'wx', mode: 0o600 });
-  renameSync(temporary, file);
+  try { renameSync(temporary, file); }
+  catch (error) { try { unlinkSync(temporary); } catch { /* Preserve the rename failure. */ } throw error; }
 }
 function packageRoot(runtime: string, name: string) {
   let directory = path.dirname(realpathSync.native(runtime));
@@ -52,13 +53,16 @@ function packageRoot(runtime: string, name: string) {
     const parent = path.dirname(directory); if (parent === directory) return; directory = parent;
   }
 }
-function runtimePath(name: CaptureHarness, explicit?: string) {
+export function harnessRuntimePath(name: CaptureHarness | 'claudecode', explicit?: string) {
   if (explicit) { if (!absolute(explicit) || !existsSync(explicit)) fail('memory_harness_runtime_missing', '宿主运行文件必须为现有绝对路径。'); return realpathSync.native(explicit); }
-  const packages = { codex: ['@openai/codex', 'bin/codex.js'], dsh: ['@deepseek-ai/dsh', 'lib/bin.js'], opencode: ['opencode-ai', 'bin/opencode'] };
-  for (const directory of (process.env.PATH ?? '').split(path.delimiter).filter(Boolean)) {
+  const packages = { codex: ['@openai/codex', 'bin/codex.js'], dsh: ['@deepseek-ai/dsh', 'lib/bin.js'],
+    opencode: ['opencode-ai', 'bin/opencode'], claudecode: ['@anthropic-ai/claude-code', 'cli.js'] };
+  const executableName = name === 'claudecode' ? 'claude' : name;
+  const directories = [path.join(homedir(), '.local', 'bin'), ...(process.env.PATH ?? '').split(path.delimiter).filter(Boolean)];
+  for (const directory of directories) {
     const candidate = path.join(directory, 'node_modules', ...packages[name]);
     if (existsSync(candidate)) return realpathSync.native(candidate);
-    const executable = path.join(directory, name + (process.platform === 'win32' ? '.exe' : ''));
+    const executable = path.join(directory, executableName + (process.platform === 'win32' ? '.exe' : ''));
     if (existsSync(executable)) return realpathSync.native(executable);
   }
   return fail('memory_harness_runtime_missing', '未找到宿主运行文件；用 --runtime 指定已安装宿主的绝对入口。');
@@ -73,7 +77,7 @@ export function harnessRuntimeVersion(name: CaptureHarness, runtime: string) {
   if (!version || !supportedHarnessVersions[name].includes(version)) fail('memory_harness_version_unsupported', '当前宿主版本未经采集格式验证，未启用自动采集。');
   return version;
 }
-function configData(raw: string, name: CaptureHarness, runtime: string): HostConfig {
+export function readHarnessConfig(raw: string, name: CaptureHarness, runtime: string): HostConfig {
   if (!raw.trim()) return name === 'dsh' ? [] : {};
   let parsed: unknown;
   try { parsed = JSON.parse(raw); } catch {
@@ -161,7 +165,7 @@ export async function installHarness(input: InstallInput) {
   if (valueOf(await context.client.whoami()).user_code !== context.actor) fail('memory_actor_mismatch', '设备身份与当前账号不一致。');
   valueOf(await context.client.request('GET', context.route + '/binding'));
   if (memoryContext().owner !== context.owner) fail('memory_binding_changed', '接入期间账号或项目已变化。');
-  const runtime = runtimePath(name, input.runtime), hostVersion = harnessRuntimeVersion(name, runtime);
+  const runtime = harnessRuntimePath(name, input.runtime), hostVersion = harnessRuntimeVersion(name, runtime);
   const hostHome = path.resolve(input.hostHome ?? (name === 'codex' ? process.env.CODEX_HOME ?? path.join(homedir(), '.codex') :
     name === 'dsh' ? process.env.DSH_HOME ?? path.join(homedir(), '.dsh') : path.join(process.env.XDG_CONFIG_HOME ?? path.join(homedir(), '.config'), 'opencode')));
   const configFile = input.config ?? path.join(hostHome, name === 'codex' ? 'hooks.json' : name === 'dsh' ? 'cordis.patch.yml' : 'opencode.json');
@@ -173,7 +177,7 @@ export async function installHarness(input: InstallInput) {
     const existing = JSON.parse(text(installationFile)) as HarnessInstallation;
     if (existing.enabled) fail('memory_harness_already_installed', '已存在接入记录，请先运行 doctor 或安全卸载。');
   }
-  const before = text(configFile), data = configData(before, name, runtime);
+  const before = text(configFile), data = readHarnessConfig(before, name, runtime);
   const installation: HarnessInstallation = { schema: 1, id, enabled: true, harness: name, hostVersion, runtime,
     workspace: context.root, projectCode: context.projectCode, actor: context.actor, owner: context.owner,
     memberHome: path.resolve(authDirectory()), cliPath: fileURLToPath(new URL('./index.js', import.meta.url)), nodePath: process.execPath,
@@ -186,11 +190,11 @@ export async function installHarness(input: InstallInput) {
     installation.backupFile = path.join(directory, 'config-before-' + randomBytes(8).toString('hex') + '.bak');
     writeFileSync(installation.backupFile, before, { flag: 'wx', mode: 0o600 });
   }
-  if (name === 'opencode') atomic(installation.pluginFile,
+  if (name === 'opencode') writeHarnessConfig(installation.pluginFile,
     `import { persistentOpencodePlugin } from ${JSON.stringify(new URL('./memory-opencode-capture.js', import.meta.url).href)};\nexport default persistentOpencodePlugin(${JSON.stringify(installationFile)});\n`);
   // A config reference without a completed registry fails closed in every adapter.
-  atomic(configFile, JSON.stringify(updated, null, 2) + '\n', before);
-  atomic(installationFile, JSON.stringify(installation, null, 2) + '\n');
+  writeHarnessConfig(configFile, JSON.stringify(updated, null, 2) + '\n', before);
+  writeHarnessConfig(installationFile, JSON.stringify(installation, null, 2) + '\n');
   return { installationFile, harness: name, hostVersion, workspace: context.root, projectCode: context.projectCode,
     actor: context.actor, configFile, backupFile: installation.backupFile, restartRequired: true,
     hookTrust: name === 'codex' ? 'review_current_definition_in_codex_hooks' : 'not_applicable', collectionObserved: false };
@@ -202,7 +206,7 @@ export async function doctorHarness(input: InstallInput) {
     const { directory } = installationLocation(name, context.owner, context.root);
     const installation = readHarnessInstallation(path.join(directory, 'installation.json'), name);
     const hostVersion = harnessRuntimeVersion(name, installation.runtime);
-    const data = configData(text(installation.configFile), name, installation.runtime);
+    const data = readHarnessConfig(text(installation.configFile), name, installation.runtime);
     changeEntries(data, installation, true); // Confirms that the exact owned definitions remain present.
     if (valueOf(await context.client.whoami()).user_code !== context.actor) fail('memory_actor_mismatch', '设备身份与当前账号不一致。');
     valueOf(await context.client.request('GET', context.route + '/binding'));
@@ -225,11 +229,11 @@ export async function uninstallHarness(input: InstallInput) {
   const name = harness(input.harness), context = memoryContext();
   const { directory } = installationLocation(name, context.owner, context.root);
   const installation = readHarnessInstallation(path.join(directory, 'installation.json'), name);
-  const before = text(installation.configFile), data = configData(before, name, installation.runtime);
+  const before = text(installation.configFile), data = readHarnessConfig(before, name, installation.runtime);
   const updated = changeEntries(data, installation, true);
   const backup = path.join(directory, 'config-before-uninstall-' + randomBytes(8).toString('hex') + '.bak');
   writeFileSync(backup, before, { flag: 'wx', mode: 0o600 });
-  atomic(installation.configFile, JSON.stringify(updated, null, 2) + '\n', before);
-  atomic(installation.installationFile, JSON.stringify({ ...installation, enabled: false }, null, 2) + '\n');
+  writeHarnessConfig(installation.configFile, JSON.stringify(updated, null, 2) + '\n', before);
+  writeHarnessConfig(installation.installationFile, JSON.stringify({ ...installation, enabled: false }, null, 2) + '\n');
   return { harness: name, removedOwnEntries: true, backupFile: backup, retainedLocalQueue: true, restartRequired: true };
 }

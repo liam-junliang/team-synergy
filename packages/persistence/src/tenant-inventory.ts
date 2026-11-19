@@ -129,6 +129,7 @@ export async function planTenantMapping(db: Pick<Db, '$client'>) {
     // Deliberately never read/parse payload, result_json or historical manifest contents.
     const audit = (await client.query<{ family: string; rows: string }>(`SELECT CASE
       WHEN action='skill.installation_updated' THEN 'skill_installation_bridge_review'
+      WHEN entity_type='remote_mcp_connection' THEN 'connector_authorization_review'
       WHEN entity_type IN ('user','device','system_settings') THEN 'identity_or_platform_review'
       WHEN entity_type IN ('team','project','feature','task','run','agent_session','defect','requirement','requirement_revision','project_module','project_phase','project_milestone','project_document','project_document_folder','project_repository','requirement_document','requirement_idea','requirement_topic','requirement_topic_entry','requirement_document_review','requirement_baseline','architecture_document','design_prototype','test_case','test_asset','test_execution','skill','system_agent_job','intake_batch') THEN 'resource_or_delivery_review'
       ELSE 'unknown_entity_review' END AS family,count(*)::text AS rows FROM public.audit_events GROUP BY 1 ORDER BY 1`)).rows.map(row => ({ family: row.family, rows: count(row.rows), customer_mapping: 'pending' }));
