@@ -71,13 +71,12 @@ test('Connector consent authorizes the account with optional permissions and no 
   const request = 'a'.repeat(64);
   const route = { view: 'agent', agentTab: 'mcp-consent', mcpConsentRequest: request };
   const html = render(agent.AgentWorkspace, { route, user }, [
-    [['mcp-authorization-request', 'U', request], { clientName: 'Personal Assistant', redirectOrigin: 'https://agent.example', requestedTaskWrite: true, requestedPersonalMemory: true }],
+    [['mcp-authorization-request', 'U', request], { clientName: 'Personal Assistant', redirectOrigin: 'https://agent.example', requestedTaskWrite: true, requestedWorkspaceWrite: true, requestedPersonalMemory: true }],
   ]);
-  for (const label of ['Personal Assistant', 'liam', 'https://agent.example', 'Agent 在每次调用时指定项目', '客户端申请了任务协作和个人记忆读取', '记忆仅供读取']) assert.ok(html.includes(label), label);
+  for (const label of ['Personal Assistant', 'liam', 'https://agent.example', 'Agent 在每次调用时指定项目', '客户端申请了任务协作和个人记忆读取', '客户端申请了团队和项目管理', '管理团队和项目', '记忆仅供读取']) assert.ok(html.includes(label), label);
   assert.doesNotMatch(html, /<select|正在加载项目|--capture|Bearer/);
-  assert.match(html, /<input type="checkbox"(?![^>]*checked=)/);
-  assert.equal([...html.matchAll(/<input type="radio"[^>]*checked=""/g)].length, 1);
-  assert.match(html, /checked=""[^>]*><span><strong[^>]*>仅查看/);
+  assert.equal([...html.matchAll(/<input type="checkbox"(?![^>]*checked=)/g)].length, 3);
+  assert.doesNotMatch(html, /<input type="(?:checkbox|radio)"[^>]*checked=/);
   assert.match(html, /<button type="submit"(?![^>]*disabled=)[^>]*>确认授权/);
 });
 
@@ -292,6 +291,7 @@ test('Agent connection defaults to HTTP Connector and offers local setup when th
   const entries = [[['platform-client-config'], { ...base, remote_mcp_url: endpoint }], [['remote-mcp-connections', 'U'], [
     { code: 'G', name: 'Personal office', projectCode: null, allowPersonalMemory: false, allowTaskWrite: false, expiresAt: '2099-01-01T00:00:00Z', revokedAt: null },
     { code: 'K', name: 'Old personal', projectCode: 'P', allowPersonalMemory: true, allowTaskWrite: true, expiresAt: '2099-01-01T00:00:00Z', revokedAt: '2026-01-01T00:00:00Z' },
+    { code: 'M', name: 'Project workspace', projectCode: null, allowPersonalMemory: false, allowTaskWrite: false, allowWorkspaceWrite: true, expiresAt: '2099-01-01T00:00:00Z', revokedAt: null },
   ]]];
   i18n.setLocale('en-US', false);
   const remote = render(agent.AgentConnectionWorkspace, { user, project, projects: [project] }, entries);
@@ -309,6 +309,7 @@ test('Agent connection defaults to HTTP Connector and offers local setup when th
   assert.match(remote, /View only/);
   assert.match(remote, /Projects accessible to this account · View only/);
   assert.match(remote, /Project Product only · Allow collaboration/);
+  assert.match(remote, /Projects accessible to this account · Manage teams and projects/);
   assert.match(remote, /Session capture stays off after setup/);
   for (const text of ['Old personal', 'Revoked', 'Allow collaboration', 'Includes account preferences']) assert.ok(remote.includes(text));
   assert.match(remote, /Revoke connection Personal office/);
@@ -336,7 +337,7 @@ test('Connector consent loads and submits decisions to the private request route
   const request = 'b'.repeat(64);
   await mcpConnections.getMcpAuthorizationRequest(request);
   const denial = { decision: 'deny' };
-  const approval = { decision: 'allow', allowTaskWrite: true, allowPersonalMemory: false };
+  const approval = { decision: 'allow', allowTaskWrite: true, allowWorkspaceWrite: true, allowPersonalMemory: false };
   await mcpConnections.decideMcpAuthorization(request, denial);
   await mcpConnections.decideMcpAuthorization(request, approval);
   const [read, deny, allow] = fetch.mock.calls.map(call => call.arguments);
@@ -346,16 +347,16 @@ test('Connector consent loads and submits decisions to the private request route
 });
 
 test('remote MCP connection calls send the exact API contract without caching credentials', async (context) => {
-  const data = { connection: { code: 'G', name: 'Browser agent', projectCode: null, allowPersonalMemory: false, allowTaskWrite: true, expiresAt: '2099-01-01T00:00:00Z', revokedAt: null }, token: 'fixture-one-time-only' };
+  const data = { connection: { code: 'G', name: 'Browser agent', projectCode: null, allowPersonalMemory: false, allowTaskWrite: true, allowWorkspaceWrite: true, expiresAt: '2099-01-01T00:00:00Z', revokedAt: null }, token: 'fixture-one-time-only' };
   const fetch = context.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({ ok: true, data }), { headers: { 'Content-Type': 'application/json' } }));
   await mcpConnections.listMcpConnections();
-  assert.deepEqual(await mcpConnections.createMcpConnection({ name: 'Browser agent', allowPersonalMemory: false, allowTaskWrite: true }), data);
+  assert.deepEqual(await mcpConnections.createMcpConnection({ name: 'Browser agent', allowPersonalMemory: false, allowTaskWrite: true, allowWorkspaceWrite: true }), data);
   await mcpConnections.revokeMcpConnection('G/1');
   const [list, create, revoke] = fetch.mock.calls.map(call => call.arguments);
   assert.equal(list[0], '/api/account/mcp-connections');
   assert.equal(create[0], '/api/account/mcp-connections');
   assert.equal(create[1].method, 'POST');
-  assert.deepEqual(JSON.parse(create[1].body), { name: 'Browser agent', allowPersonalMemory: false, allowTaskWrite: true });
+  assert.deepEqual(JSON.parse(create[1].body), { name: 'Browser agent', allowPersonalMemory: false, allowTaskWrite: true, allowWorkspaceWrite: true });
   assert.equal(revoke[0], '/api/account/mcp-connections/G%2F1');
   assert.equal(revoke[1].method, 'DELETE');
   assert.ok([list, create, revoke].every(([, init]) => init.cache === 'no-store' && init.credentials === 'same-origin'));

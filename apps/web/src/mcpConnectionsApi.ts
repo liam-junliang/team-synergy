@@ -6,6 +6,7 @@ export interface McpConnection {
   projectCode: string | null;
   allowPersonalMemory: boolean;
   allowTaskWrite: boolean;
+  allowWorkspaceWrite?: boolean;
   expiresAt: string;
   revokedAt: string | null;
 }
@@ -14,6 +15,7 @@ export interface CreateMcpConnectionInput {
   name: string;
   allowPersonalMemory: boolean;
   allowTaskWrite: boolean;
+  allowWorkspaceWrite?: boolean;
 }
 
 export interface NewMcpConnection {
@@ -25,6 +27,7 @@ export interface McpAuthorizationRequest {
   clientName: string;
   redirectOrigin: string;
   requestedTaskWrite: boolean;
+  requestedWorkspaceWrite?: boolean;
   requestedPersonalMemory: boolean;
 }
 

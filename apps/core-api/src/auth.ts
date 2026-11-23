@@ -1,10 +1,24 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { createAuthUseCases } from '@team-synergy/application';
 import type { Db } from '@team-synergy/persistence';
+import { Readable } from 'node:stream';
 import { isSafeMethod, readWebCookies, trustedWebOrigin, verifyWebCsrf, webCookieSecure } from './web-session.js';
 /** In-process only. An HTTP caller cannot set a property on the request prototype. */
 export const connectorReadPrincipal = Symbol('connector-read-principal');
 type ConnectorReadIdentity = { principalCode: string; projectCode: string };
+const workspaceActionIdentity = Symbol('workspace-action-identity');
+type WorkspaceActionRequest = { method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; url: string; payload?: object };
+type WorkspaceActionIdentity = { principalCode: string; method: string; url: string };
+
+/** Only the verified, named action dispatcher calls this with its resolved route. */
+export async function injectWorkspaceAction(app: FastifyInstance, principalCode: string, options: WorkspaceActionRequest): Promise<unknown> {
+  class WorkspaceActionIncomingMessage extends Readable {}
+  Object.defineProperty(WorkspaceActionIncomingMessage.prototype, workspaceActionIdentity, {
+    value: { principalCode, method: options.method, url: options.url },
+  });
+  const response = await app.inject({ ...options, Request: WorkspaceActionIncomingMessage });
+  try { return response.json(); } catch { return { ok: false, error: { code: 'agent_action_unavailable', message: '平台动作暂时不可用' } }; }
+}
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -49,6 +63,12 @@ export function registerAuthMiddleware(app: FastifyInstance, db: Db, connectorRo
   app.addHook('onRequest', async (request, reply) => {
     const path = request.url.split('?', 1)[0] ?? request.url;
     if (connectorRoute(request.method, path)) return;
+    const workspace = (request.raw as { [workspaceActionIdentity]?: WorkspaceActionIdentity })[workspaceActionIdentity];
+    if (workspace && request.method === workspace.method && request.url === workspace.url) {
+      request.principal = workspace.principalCode;
+      request.authKind = 'connector';
+      return;
+    }
     const grant = (request.raw as { [connectorReadPrincipal]?: ConnectorReadIdentity })[connectorReadPrincipal];
     if (grant && request.method === 'POST' && [
       `/projects/${grant.projectCode}/memory/search`,

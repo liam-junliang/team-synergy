@@ -15,6 +15,7 @@ const connectionFields = {
   name: grants.name,
   allowPersonalMemory: grants.allow_personal_memory,
   allowTaskWrite: grants.allow_task_write,
+  allowWorkspaceWrite: grants.allow_workspace_write,
   expiresAt: grants.expires_at,
   revokedAt: grants.revoked_at,
 };
@@ -24,6 +25,7 @@ function describeConnection(connection: {
   name: string;
   allowPersonalMemory: boolean;
   allowTaskWrite: boolean;
+  allowWorkspaceWrite: boolean;
   expiresAt: Date;
   revokedAt: Date | null;
 }, projectCode: string | null) {
@@ -33,6 +35,7 @@ function describeConnection(connection: {
     projectCode,
     allowPersonalMemory: connection.allowPersonalMemory,
     allowTaskWrite: connection.allowTaskWrite,
+    allowWorkspaceWrite: connection.allowWorkspaceWrite,
     expiresAt: connection.expiresAt.toISOString(),
     revokedAt: connection.revokedAt?.toISOString() ?? null,
   };
@@ -45,14 +48,18 @@ function webPrincipal(request: FastifyRequest): string | null {
 
 function parseNewGrant(body: unknown) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
-  if (Object.keys(body).some(key => !['name', 'projectCode', 'allowPersonalMemory', 'allowTaskWrite'].includes(key))) return null;
+  if (Object.keys(body).some(key => !['name', 'projectCode', 'allowPersonalMemory', 'allowTaskWrite', 'allowWorkspaceWrite'].includes(key))) return null;
   const input = body as Record<string, unknown>;
   const name = typeof input.name === 'string' ? input.name.trim() : '';
   const project = PublicCodeSchema.nullish().safeParse(input.projectCode);
   if (!name || name.length > 100 || /[\p{Cc}]/u.test(name) || !project.success ||
       (input.allowPersonalMemory !== undefined && typeof input.allowPersonalMemory !== 'boolean') ||
-      (input.allowTaskWrite !== undefined && typeof input.allowTaskWrite !== 'boolean')) return null;
-  return { name, projectCode: project.data ?? null, allowPersonalMemory: input.allowPersonalMemory === true, allowTaskWrite: input.allowTaskWrite === true };
+      (input.allowTaskWrite !== undefined && typeof input.allowTaskWrite !== 'boolean') ||
+      (input.allowWorkspaceWrite !== undefined && typeof input.allowWorkspaceWrite !== 'boolean')) return null;
+  return {
+    name, projectCode: project.data ?? null, allowPersonalMemory: input.allowPersonalMemory === true,
+    allowTaskWrite: input.allowTaskWrite === true, allowWorkspaceWrite: input.allowWorkspaceWrite === true,
+  };
 }
 
 export interface RemoteMcpGrant {
@@ -61,6 +68,7 @@ export interface RemoteMcpGrant {
   projectCode: string | null;
   allowPersonalMemory: boolean;
   allowTaskWrite: boolean;
+  allowWorkspaceWrite?: boolean;
 }
 
 /** Validate the account credential and any legacy project binding on every MCP request. */
@@ -74,6 +82,7 @@ export async function resolveRemoteMcpGrant(db: Db, token: string, resourceUrl?:
     projectCode: schema.projects.code,
     allowPersonalMemory: grants.allow_personal_memory,
     allowTaskWrite: grants.allow_task_write,
+    allowWorkspaceWrite: grants.allow_workspace_write,
   }).from(grants)
     .innerJoin(schema.users, eq(schema.users.id, grants.principal_id))
     .leftJoin(schema.projects, eq(schema.projects.id, grants.project_id))
@@ -90,10 +99,11 @@ export async function resolveRemoteMcpGrant(db: Db, token: string, resourceUrl?:
     connectionCode: grant.connectionCode, principalCode: grant.principalCode, projectCode: grant.projectCode,
     allowPersonalMemory: grant.allowPersonalMemory,
     allowTaskWrite: grant.allowTaskWrite && role !== 'viewer',
+    allowWorkspaceWrite: grant.allowWorkspaceWrite && role !== 'viewer',
   };
 }
 
-export async function authorizeRemoteMcpGrantSubject(tx: Tx, principalCode: string, projectCode: string | null, allowTaskWrite: boolean) {
+export async function authorizeRemoteMcpGrantSubject(tx: Tx, principalCode: string, projectCode: string | null, allowProjectWrite: boolean) {
   // Preserve project→account lock order for previously project-bound connections.
   const project = projectCode === null ? undefined : (await tx.select({ id: schema.projects.id }).from(schema.projects)
     .where(and(eq(schema.projects.code, projectCode), eq(schema.projects.status, 'active'))).limit(1).for('share'))[0];
@@ -105,13 +115,13 @@ export async function authorizeRemoteMcpGrantSubject(tx: Tx, principalCode: stri
   if (!actor) return null;
   if (project) {
     const access = await resolveProjectAccess(tx, project.id, actor.id);
-    if (!access || (allowTaskWrite && access.role === 'viewer')) return null;
+    if (!access || (allowProjectWrite && access.role === 'viewer')) return null;
   }
   return { principalId: actor.id, projectId: project?.id ?? null };
 }
 
 export async function createRemoteMcpGrant(tx: Tx, input: {
-  principalId: bigint; projectId: bigint | null; projectCode: string | null; name: string; allowTaskWrite: boolean; allowPersonalMemory: boolean;
+  principalId: bigint; projectId: bigint | null; projectCode: string | null; name: string; allowTaskWrite: boolean; allowPersonalMemory: boolean; allowWorkspaceWrite: boolean;
   oauth?: { clientId: string; resourceUrl: string; accessLifetimeMs: number };
 }) {
   const token = 'tsp_mcp_' + generateToken();
@@ -123,6 +133,7 @@ export async function createRemoteMcpGrant(tx: Tx, input: {
     token_hash: hashToken(token),
     allow_personal_memory: input.allowPersonalMemory,
     allow_task_write: input.allowTaskWrite,
+    allow_workspace_write: input.allowWorkspaceWrite,
     created_at: createdAt,
     expires_at: new Date(createdAt.getTime() + grantLifetimeMs),
     ...(input.oauth ? { oauth_client_id: input.oauth.clientId, resource_uri: input.oauth.resourceUrl,
@@ -135,6 +146,7 @@ export async function createRemoteMcpGrant(tx: Tx, input: {
     payload: {
       connection_code: connection.code, project_code: input.projectCode,
       allow_personal_memory: input.allowPersonalMemory, allow_task_write: input.allowTaskWrite,
+      allow_workspace_write: input.allowWorkspaceWrite,
     },
   }, createPublicCode(), createdAt.toISOString()));
   return { grantId: connection.id, connection: describeConnection(connection, input.projectCode), token };
@@ -165,7 +177,7 @@ export function registerRemoteMcpGrantRoutes(app: FastifyInstance, db: Db): void
     });
 
     const result = await db.transaction(async tx => {
-      const subject = await authorizeRemoteMcpGrantSubject(tx, principal, input.projectCode, input.allowTaskWrite);
+      const subject = await authorizeRemoteMcpGrantSubject(tx, principal, input.projectCode, input.allowTaskWrite || input.allowWorkspaceWrite);
       if (!subject) return null;
       const { connection, token } = await createRemoteMcpGrant(tx, { ...subject, ...input });
       return { connection, token };

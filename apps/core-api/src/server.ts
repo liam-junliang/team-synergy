@@ -32,6 +32,7 @@ import { httpStatusForError } from './error-status.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerDeviceRoutes } from './routes/devices.js';
 import { registerTeamRoutes } from './routes/teams.js';
+import { registerAgentWorkspaceActions } from './agent-workspace-actions.js';
 import { registerHandoverRoutes } from './routes/handovers.js';
 import { registerExecutionRoutes } from './routes/execution.js';
 import { registerRequirementBaselineRoutes } from './routes/baselines.js';
@@ -280,6 +281,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   registerUserRoutes(app, db);
   // 团队 → 项目层级
   registerTeamRoutes(app, db);
+  registerAgentWorkspaceActions(app, db);
   // 项目（TASK-226）
   app.register(async (scope) => (await import('./routes/projects.js')).registerProjectRoutes(scope, db));
   // 设备管理（TASK-222）

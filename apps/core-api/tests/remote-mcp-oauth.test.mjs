@@ -81,8 +81,8 @@ async function fixture(t) {
     }, payload: payload.toString() });
   }
 
-  async function consentPath(client) {
-    const authorization = await authorize(client);
+  async function consentPath(client, params) {
+    const authorization = await authorize(client, params);
     assert.equal(authorization.statusCode, 303);
     const url = new URL(authorization.headers.location);
     assert.equal(url.origin, issuer);
@@ -124,6 +124,7 @@ test('discovery advertises the public resource, issuer and S256 code flow', asyn
   assert.equal(discovery.token_endpoint, issuer + '/api' + base + '/token');
   assert.equal(discovery.registration_endpoint, issuer + '/api' + base + '/register');
   assert.deepEqual(discovery.code_challenge_methods_supported, ['S256']);
+  assert.ok(discovery.scopes_supported.includes('workspace:write'));
   assert.equal(discovery.authorization_response_iss_parameter_supported, true);
 });
 
@@ -162,7 +163,7 @@ test('registration rejects unsafe and duplicate callbacks; authorize errors cann
 test('consent requires a current browser session, matching CSRF and the approver project role', async t => {
   const f = await fixture(t);
   const client = (await f.register()).json();
-  const path = await f.consentPath(client);
+  const path = await f.consentPath(client, { scope: 'project:read tasks:write workspace:write' });
   const actor = await f.login(f.actor);
   const viewer = await f.login(f.viewer);
   const denial = { decision: 'deny' };
@@ -171,11 +172,13 @@ test('consent requires a current browser session, matching CSRF and the approver
   assert.equal((await f.app.inject({ method: 'POST', url: path, headers: viewer, payload: approval })).statusCode, 404);
   const pending = await f.app.inject({ url: path, headers: viewer });
   assert.deepEqual(pending.json(), { ok: true, data: { clientName: 'Personal Agent', redirectOrigin: 'https://agent.example',
-    requestedTaskWrite: true, requestedPersonalMemory: false } });
+    requestedTaskWrite: true, requestedWorkspaceWrite: true, requestedPersonalMemory: false } });
   assert.equal((await f.app.inject({ url: path, headers: actor })).statusCode, 404);
   assert.equal((await f.app.inject({ method: 'POST', url: path, headers: actor, payload: denial })).statusCode, 404);
   assert.equal((await f.app.inject({ method: 'POST', url: path, headers: { ...viewer, 'x-csrf-token': 'forged' }, payload: denial })).statusCode, 403);
   assert.equal((await f.app.inject({ method: 'POST', url: path, headers: viewer, payload: approval })).statusCode, 403);
+  assert.equal((await f.app.inject({ method: 'POST', url: path, headers: viewer,
+    payload: { ...approval, allowTaskWrite: false, allowWorkspaceWrite: true } })).statusCode, 403);
   const denied = await f.app.inject({ method: 'POST', url: path, headers: viewer, payload: denial });
   assert.equal(denied.statusCode, 200);
   const callback = new URL(denied.json().data.redirectUrl);
@@ -191,7 +194,7 @@ test('OAuth binds one-time codes to PKCE, the registered client, callback and MC
   const client = (await f.register()).json();
   const otherClient = (await f.register()).json();
   const headers = await f.login(f.actor);
-  const form = await approvedCode(f, client, headers, { allowTaskWrite: true, allowPersonalMemory: true });
+  const form = await approvedCode(f, client, headers, { allowTaskWrite: true, allowPersonalMemory: true, allowWorkspaceWrite: true });
   for (const additions of [
     { code_verifier: 'B'.repeat(43) }, { client_id: otherClient.client_id },
     { redirect_uri: redirect + '2' }, { resource: 'https://elsewhere.example/mcp' },
@@ -210,11 +213,11 @@ test('OAuth binds one-time codes to PKCE, the registered client, callback and MC
   assert.match(data.access_token, /^tsp_mcp_[a-f0-9]{64}$/);
   assert.match(data.refresh_token, /^tsp_mcp_refresh_[a-f0-9]{64}$/);
   assert.equal(data.expires_in, 3600);
-  assert.equal(data.scope, 'project:read tasks:write memory:personal:read');
+  assert.equal(data.scope, 'project:read tasks:write memory:personal:read workspace:write');
   assert.equal(await resolveRemoteMcpGrant(f.db, data.access_token), null);
   assert.equal(await resolveRemoteMcpGrant(f.db, data.access_token, 'https://another.example/api/mcp'), null);
   const grant = await resolveRemoteMcpGrant(f.db, data.access_token, resource);
-  assert.deepEqual(grant, { connectionCode: grant.connectionCode, principalCode: f.actor.code, projectCode: f.project.code, allowTaskWrite: true, allowPersonalMemory: true });
+  assert.deepEqual(grant, { connectionCode: grant.connectionCode, principalCode: f.actor.code, projectCode: f.project.code, allowTaskWrite: true, allowPersonalMemory: true, allowWorkspaceWrite: true });
   assert.equal((await f.app.inject({ url: '/auth/whoami', headers: { authorization: 'Bearer ' + data.access_token } })).statusCode, 401);
   const [persisted] = await f.db.select().from(schema.remoteMcpGrants);
   assert.equal(persisted.token_hash, hashToken(data.access_token));
@@ -231,9 +234,11 @@ test('refresh replaces access and refresh tokens, revoking the entire connection
   const headers = await f.login(f.actor);
   const issued = (await f.token(await approvedCode(f, client, headers))).json();
   const refresh = { grant_type: 'refresh_token', client_id: client.client_id, refresh_token: issued.refresh_token, resource };
+  assert.equal((await f.token({ ...refresh, scope: 'project:read workspace:write' })).statusCode, 400);
   const rotated = await f.token(refresh);
   assert.equal(rotated.statusCode, 200, rotated.body);
   const next = rotated.json();
+  assert.equal(next.scope, 'project:read');
   assert.notEqual(next.access_token, issued.access_token);
   assert.notEqual(next.refresh_token, issued.refresh_token);
   assert.equal(await resolveRemoteMcpGrant(f.db, issued.access_token, resource), null);
@@ -250,21 +255,22 @@ test('account OAuth consent without a project remains valid for exchange and ref
   const f = await fixture(t);
   const client = (await f.register()).json();
   const headers = await f.login(f.actor);
-  const accountCode = await approvedCode(f, client, headers, { projectCode: undefined, allowTaskWrite: true });
+  const accountCode = await approvedCode(f, client, headers, { projectCode: undefined, allowTaskWrite: true, allowWorkspaceWrite: true });
   const pinnedCode = await approvedCode(f, client, headers, { allowTaskWrite: true });
 
   await f.db.update(schema.projects).set({ status: 'archived' }).where(eq(schema.projects.id, f.project.id));
   const accountResponse = await f.token(accountCode);
   assert.equal(accountResponse.statusCode, 200, accountResponse.body);
   const account = accountResponse.json();
-  assert.equal(account.scope, 'project:read tasks:write');
+  assert.equal(account.scope, 'project:read tasks:write workspace:write');
   assert.equal((await f.token(pinnedCode)).json().error, 'invalid_grant');
   const grant = await resolveRemoteMcpGrant(f.db, account.access_token, resource);
-  assert.deepEqual(grant, { connectionCode: grant.connectionCode, principalCode: f.actor.code, projectCode: null, allowTaskWrite: true, allowPersonalMemory: false });
+  assert.deepEqual(grant, { connectionCode: grant.connectionCode, principalCode: f.actor.code, projectCode: null, allowTaskWrite: true, allowPersonalMemory: false, allowWorkspaceWrite: true });
 
   const refresh = { client_id: client.client_id, grant_type: 'refresh_token', refresh_token: account.refresh_token, resource };
   const rotated = await f.token(refresh);
   assert.equal(rotated.statusCode, 200, rotated.body);
+  assert.equal(rotated.json().scope, account.scope);
   assert.deepEqual(await resolveRemoteMcpGrant(f.db, rotated.json().access_token, resource), grant);
 });
 

@@ -55,6 +55,11 @@ export function createAgentConnection(options: { projectCode?: string; lockProje
   return {
     assertAccount() { authenticated(); },
 
+    async runWorkspaceAction(name: string, input: unknown) {
+      const { client } = authenticated();
+      return valueOf(await client.request('POST', '/agent/workspace-actions/' + encodeURIComponent(name), input));
+    },
+
     projectContext(explicitProjectCode?: string) {
       authenticated();
       if (options.lockProject && options.projectCode && explicitProjectCode && explicitProjectCode !== options.projectCode) {

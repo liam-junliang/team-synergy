@@ -463,6 +463,13 @@
       "when": 1795046460000,
       "tag": "0066_remote_mcp_account_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1795046520000,
+      "tag": "0067_remote_mcp_workspace_write",
+      "breakpoints": true
     }
   ]
 }

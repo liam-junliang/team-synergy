@@ -6,6 +6,7 @@ import { DomainError } from '@team-synergy/domain';
 import type { Db } from '@team-synergy/persistence';
 import type { FastifyInstance } from 'fastify';
 import { connectorReadPrincipal } from './auth.js';
+import { workspaceActionExecutor } from './agent-workspace-actions.js';
 import { resolveRemoteMcpGrant, type RemoteMcpGrant } from './remote-mcp-authorization.js';
 import { remoteMcpResourceMetadataUrl } from './remote-mcp-oauth.js';
 import { remoteMcpTools, type RemoteMcpRequest } from './remote-mcp-tools.js';
@@ -61,6 +62,7 @@ const instructions = 'For first use or workflow guidance, call read_connector_sk
 export function registerRemoteMcp(app: FastifyInstance, db: Db, resourceUrl: string): void {
   const resource = new URL(resourceUrl);
   const metadata = remoteMcpResourceMetadataUrl(resourceUrl);
+  const executeWorkspace = workspaceActionExecutor(app, db);
   app.route({ method: [...methods], url: path, logLevel: 'silent', bodyLimit: 128 * 1024,
     onRequest: hostHeaderValidation([resource.hostname]),
     handler: async (request, reply) => {
@@ -77,7 +79,7 @@ export function registerRemoteMcp(app: FastifyInstance, db: Db, resourceUrl: str
 
       const handler = createMcpHandler(() => {
         const server = new McpServer({ name: 'team-synergy', version: '0.1.0' }, { instructions });
-        for (const tool of remoteMcpTools(db, grant, memoryReader(app, grant), resource.origin)) {
+        for (const tool of remoteMcpTools(db, grant, memoryReader(app, grant), resource.origin, executeWorkspace)) {
           server.registerTool(tool.name, { description: tool.description, inputSchema: tool.schema, annotations: tool.annotations },
             async (args: unknown) => {
               try {

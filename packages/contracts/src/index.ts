@@ -15,3 +15,5 @@ export * from './intake-quality-catalog.js';
 export * from './system-agent.js';
 export * from './code-understanding.js';
 export * from './project-materials.js';
+export * from './agent-actions.js';
+export * from './agent-tool-catalog.js';

@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { agentWorkspaceActions } from '@team-synergy/contracts';
 
 const cli = fileURLToPath(new URL('../dist/index.js', import.meta.url));
 const project = 'A'.repeat(20), source = 'B'.repeat(20), run = 'C'.repeat(20);
@@ -67,11 +68,14 @@ function workspaceClient(t, api, projectCode) {
   return { cwd, command, mcp, tool };
 }
 
-test('CLI and MCP discover the same read capabilities and optional governance schemas', async t => {
+test('CLI retains the stdio schemas and adds the shared HTTP workspace tools', async t => {
   const f = await fixture(t);
   const cliTools = (await f.command(['tools', 'list'])).json().data;
   const frames = await f.mcp([{ id: 2, method: 'tools/list' }]);
-  assert.deepEqual(cliTools, frames[1].result.tools);
+  const workspaceNames = new Set(agentWorkspaceActions.map(action => action.name));
+  assert.deepEqual(cliTools.filter(tool => !workspaceNames.has(tool.name)), frames[1].result.tools);
+  assert.deepEqual(cliTools.filter(tool => workspaceNames.has(tool.name)).map(tool => tool.name),
+    agentWorkspaceActions.map(action => action.name));
   for (const name of ['search_memory', 'read_memory_source', 'list_project_materials', 'glob_project_materials', 'grep_project_materials', 'read_project_material', 'read_code_catalog', 'query_code_graph', 'query_local_code', 'request_code_analysis', 'get_code_analysis_status', 'list_project_skills', 'read_project_skill']) {
     assert.ok(cliTools.some(tool => tool.name === name), name);
   }
@@ -81,7 +85,8 @@ test('CLI and MCP discover the same read capabilities and optional governance sc
   const listSchema = cliTools.find(tool => tool.name === 'list_project_materials').inputSchema;
   assert.ok(!listSchema.required?.includes('limit'), 'input defaults must not become required model arguments');
   const managed = (await f.command(['tools', 'list', '--allow-personal-management'])).json().data;
-  assert.deepEqual(managed, (await f.mcp([{ id: 2, method: 'tools/list' }], ['--allow-personal-management']))[1].result.tools);
+  assert.deepEqual(managed.filter(tool => !workspaceNames.has(tool.name)),
+    (await f.mcp([{ id: 2, method: 'tools/list' }], ['--allow-personal-management']))[1].result.tools);
   assert.equal(managed.find(tool => tool.name === 'withdraw_personal_memory').annotations.readOnlyHint, false);
   const omitted = await f.mcp([{ id: 2, method: 'tools/call', params: { name: 'read_code_catalog' } },
     { id: 3, method: 'tools/call', params: { name: 'list_project_materials' } },

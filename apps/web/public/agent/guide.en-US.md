@@ -287,3 +287,9 @@ tsp task handover accept HANDOVER_CODE
 tsp task handover restore HANDOVER_CODE --repo "REPO_PATH" --dir "NEW_WORKTREE"
 tsp task handover activate HANDOVER_CODE
 ```
+
+## Manage teams, projects, and work items
+
+Use `search_tools {"module":"teams","query":"create team"}` or `tsp tools search "create team" --module teams` to find an action. Use `list_teams` to identify the team before calling `create_project`. The CLI equivalent is `tsp tools call create_project --input '{"team_code":"TEAM_CODE","name":"Example project"}'`. Specify the target project for each call about members, repositories, requirements, designs, defects, or tests.
+
+Enable **Manage teams and projects** when authorizing a Connector for team management and workspace changes. The server checks current roles, record state, and revision on each call. Inspect the module reference and tool schema before calling a tool. After a create request times out, look for the resulting record before retrying.

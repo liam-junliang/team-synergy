@@ -179,16 +179,21 @@ test('authenticated unbound discovery lists authorized projects without selectin
   f.assertUnbound();
 });
 
-test('CLI and MCP expose identical project-aware schemas, including optional governance tools', async t => {
+test('CLI preserves the stdio tool schemas and also lists the HTTP Connector workspace actions', async t => {
   const f = await fixture(t), client = await f.mcp();
   const listed = await f.command(['tools', 'list']); assert.equal(listed.code, 0, listed.err);
-  assert.deepEqual((await client.rpc('tools/list')).result.tools, listed.json().data);
+  const legacy = (await client.rpc('tools/list')).result.tools;
+  const legacyNames = new Set(legacy.map(tool => tool.name));
+  assert.deepEqual(legacy, listed.json().data.filter(tool => legacyNames.has(tool.name)));
+  assert.ok(listed.json().data.some(tool => tool.name === 'create_project' && tool.inputSchema.required.includes('team_code')));
   const projectTool = listed.json().data.find(tool => tool.name === 'read_code_catalog');
   assert.ok(projectTool.inputSchema.properties.projectCode);
   assert.equal(projectTool.inputSchema.required?.includes('projectCode') ?? false, false);
   const managed = await f.command(['tools', 'list', '--allow-personal-management']);
   const managedClient = await f.mcp(['--allow-personal-management']);
-  assert.deepEqual((await managedClient.rpc('tools/list')).result.tools, managed.json().data);
+  const managedLegacy = (await managedClient.rpc('tools/list')).result.tools;
+  const managedLegacyNames = new Set(managedLegacy.map(tool => tool.name));
+  assert.deepEqual(managedLegacy, managed.json().data.filter(tool => managedLegacyNames.has(tool.name)));
   f.assertUnbound();
 });
 

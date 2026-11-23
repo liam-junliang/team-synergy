@@ -15,8 +15,13 @@ export function safeMcpCallback(value: string): string | null {
   return null;
 }
 
-export function McpConsentWorkspace({ request, user }: { request?: string; user: AuthUser }) {
+export function McpConsentWorkspace(props: { request?: string; user: AuthUser }) {
+  return <McpConsentRequest key={props.user.code + ':' + (props.request ?? '')} {...props} />;
+}
+
+function McpConsentRequest({ request, user }: { request?: string; user: AuthUser }) {
   const [allowTaskWrite, setAllowTaskWrite] = useState(false);
+  const [allowWorkspaceWrite, setAllowWorkspaceWrite] = useState(false);
   const [allowPersonalMemory, setAllowPersonalMemory] = useState(false);
   const preview = useQuery({ queryKey: ['mcp-authorization-request', user.code, request], queryFn: ({ signal }) => getMcpAuthorizationRequest(request ?? '', signal), enabled: !!request, retry: false });
   const requestData = preview.data;
@@ -54,13 +59,17 @@ export function McpConsentWorkspace({ request, user }: { request?: string; user:
             ? '客户端申请了任务协作和个人记忆读取。请按需选择授权。'
             : requestData.requestedTaskWrite ? '客户端申请了任务协作。请按需选择授权。' : '客户端申请了个人记忆读取。请按需选择授权。')}
         </p>}
+        {requestData.requestedWorkspaceWrite && <p className="text-sm leading-6 text-slate-600">
+          {t('客户端申请了团队和项目管理。请按需选择授权。')}
+        </p>}
         <form className="space-y-4" onSubmit={event => {
           event.preventDefault();
           if (decision.isPending || decision.isSuccess) return;
-          decision.mutate({ decision: 'allow', allowTaskWrite, allowPersonalMemory });
+          decision.mutate({ decision: 'allow', allowTaskWrite, allowWorkspaceWrite, allowPersonalMemory });
         }}>
-          <McpPermissionFields allowTaskWrite={allowTaskWrite} allowPersonalMemory={allowPersonalMemory}
-            disabled={decision.isPending || decision.isSuccess} onTaskWriteChange={setAllowTaskWrite} onPersonalMemoryChange={setAllowPersonalMemory} />
+          <McpPermissionFields allowTaskWrite={allowTaskWrite} allowWorkspaceWrite={allowWorkspaceWrite} allowPersonalMemory={allowPersonalMemory}
+            disabled={decision.isPending || decision.isSuccess} onTaskWriteChange={setAllowTaskWrite}
+            onWorkspaceWriteChange={setAllowWorkspaceWrite} onPersonalMemoryChange={setAllowPersonalMemory} />
           <p className="text-sm leading-6 text-slate-600">{t('记忆仅供读取。此连接不会启用会话采集。你可在 Agent 接入页撤销连接。')}</p>
           {decision.isError && <p role="alert" className="text-sm text-rose-700">{t(errorCode === 'mcp_oauth_request_unavailable'
             ? unavailable : '未能完成连接授权，请从 Agent 重新发起连接。')}</p>}
