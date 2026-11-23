@@ -28,6 +28,17 @@ metadata:
 | `tasks` | [任务协作](references/tasks.md) | 查看契约、创建草稿、分派、领取或提交自测 |
 | `testing` | [测试执行](references/testing.md) | 核对用例修订，登记实际结果和关联证据 |
 
+| `teams` | [团队管理](references/teams.md) | 先用 list_teams 找团队和当前角色 |
+| `repositories` | [仓库管理](references/repositories.md) | 先用 list_project_repositories 核对仓库、主线和用途 |
+| `planning` | [项目计划](references/planning.md) | 先列模块、阶段和里程碑 |
+| `requirements` | [需求与议题](references/requirements.md) | 先查想法、议题、需求及当前修订 |
+| `design` | [设计与架构](references/design.md) | 先查看现有原型、架构图源和引用 |
+| `defects` | [缺陷管理](references/defects.md) | 先查重并核对同项目的 Feature |
+| `skills` | [技能库](references/skills.md) | 先查看项目采用的版本，再按修订号读取所选技能的入口或参考文件 |
+| `handovers` | [交接记录](references/handovers.md) | 按项目查交接记录，再从原任务和 Run 核对交接上下文 |
+
+业务写入需要「管理团队和项目」授权。账号范围可查所属团队并创建项目。任务协作和个人记忆使用各自的授权。
+
 ## 取证与交付
 
 - 按问题找资料。项目背景先看文档或记忆，引证时取原文或原始来源。区分讨论、确认和有实现或测试支撑的事实。确认来源是否仍是最新修订后，可以复用本会话已取到的证据。

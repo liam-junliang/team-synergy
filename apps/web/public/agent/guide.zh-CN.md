@@ -287,3 +287,9 @@ tsp task handover accept HANDOVER_CODE
 tsp task handover restore HANDOVER_CODE --repo "REPO_PATH" --dir "NEW_WORKTREE"
 tsp task handover activate HANDOVER_CODE
 ```
+
+## 管理团队、项目和业务记录
+
+使用 `search_tools {"module":"teams","query":"创建团队"}` 或 `tsp tools search 创建团队 --module teams` 找动作。先用 `list_teams` 查团队编码，再调用 `create_project`。CLI 可用 `tsp tools call create_project --input '{"team_code":"TEAM_CODE","name":"示例项目"}'`。项目内查成员、仓库、需求、设计、缺陷和测试时，每次明确传目标项目编码。
+
+Connector 在授权时勾选「管理团队和项目」才能管理团队或更改业务记录。角色、目标状态及修订仍由平台逐次校验。使用模块参考和工具 schema 查具体输入。新建操作超时后先回查，避免重复提交。

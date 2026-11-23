@@ -76,13 +76,14 @@ test('connection grants use web cookies and CSRF, show the token once, and canno
   assert.equal(connection.projectCode, project.code);
   assert.equal(connection.allowPersonalMemory, false);
   assert.equal(connection.allowTaskWrite, false);
+  assert.equal(connection.allowWorkspaceWrite, false);
   assert.equal(connection.revokedAt, null);
 
   const [saved] = await db.select().from(schema.remoteMcpGrants);
   assert.equal(saved.token_hash, hashToken(token));
   assert.equal(saved.expires_at.getTime() - saved.created_at.getTime(), 7 * 24 * 60 * 60 * 1000);
   assert.equal(saved.expires_at.toISOString(), connection.expiresAt);
-  assert.deepEqual(await resolveRemoteMcpGrant(db, token), { connectionCode: connection.code, principalCode: actor.code, projectCode: project.code, allowPersonalMemory: false, allowTaskWrite: false });
+  assert.deepEqual(await resolveRemoteMcpGrant(db, token), { connectionCode: connection.code, principalCode: actor.code, projectCode: project.code, allowPersonalMemory: false, allowTaskWrite: false, allowWorkspaceWrite: false });
 
   const list = await app.inject({ method: 'GET', url: endpoint, headers });
   assert.equal(list.headers['cache-control'], 'no-store');
@@ -103,7 +104,7 @@ test('grant issuance and revocation stay with the grant owner, even for a projec
   const issued = await app.inject({ method: 'POST', url: endpoint, headers, payload });
   assert.equal(issued.statusCode, 201);
   const { connection, token } = issued.json().data;
-  assert.deepEqual(await resolveRemoteMcpGrant(db, token), { connectionCode: connection.code, principalCode: actor.code, projectCode: project.code, allowPersonalMemory: true, allowTaskWrite: false });
+  assert.deepEqual(await resolveRemoteMcpGrant(db, token), { connectionCode: connection.code, principalCode: actor.code, projectCode: project.code, allowPersonalMemory: true, allowTaskWrite: false, allowWorkspaceWrite: false });
 
   const url = endpoint + '/' + connection.code;
   const list = await app.inject({ method: 'GET', url: endpoint, headers: outsiderHeaders });
@@ -183,12 +184,12 @@ test('task write permission is opt-in and reflects the current project role', as
   assert.equal(connection.allowTaskWrite, true);
   assert.equal(connection.allowPersonalMemory, false);
   assert.deepEqual(await resolveRemoteMcpGrant(db, token), {
-    connectionCode: connection.code, principalCode: actor.code, projectCode: project.code, allowPersonalMemory: false, allowTaskWrite: true,
+    connectionCode: connection.code, principalCode: actor.code, projectCode: project.code, allowPersonalMemory: false, allowTaskWrite: true, allowWorkspaceWrite: false,
   });
 
   await db.update(schema.members).set({ role: 'viewer' }).where(membership);
   assert.deepEqual(await resolveRemoteMcpGrant(db, token), {
-    connectionCode: connection.code, principalCode: actor.code, projectCode: project.code, allowPersonalMemory: false, allowTaskWrite: false,
+    connectionCode: connection.code, principalCode: actor.code, projectCode: project.code, allowPersonalMemory: false, allowTaskWrite: false, allowWorkspaceWrite: false,
   });
   const list = await app.inject({ method: 'GET', url: endpoint, headers });
   assert.equal(list.json().data[0].allowTaskWrite, true);
@@ -204,7 +205,7 @@ test('account-scoped manual credentials survive project changes and are still re
   assert.equal(issued.statusCode, 201, issued.body);
   const { connection, token } = issued.json().data;
   assert.equal(connection.projectCode, null);
-  const granted = { connectionCode: connection.code, principalCode: actor.code, projectCode: null, allowPersonalMemory: false, allowTaskWrite: true };
+  const granted = { connectionCode: connection.code, principalCode: actor.code, projectCode: null, allowPersonalMemory: false, allowTaskWrite: true, allowWorkspaceWrite: false };
   assert.deepEqual(await resolveRemoteMcpGrant(db, token), granted);
 
   await db.update(schema.projects).set({ status: 'archived' }).where(eq(schema.projects.id, project.id));
@@ -214,4 +215,39 @@ test('account-scoped manual credentials survive project changes and are still re
 
   assert.equal((await app.inject({ method: 'DELETE', url: `${endpoint}/${connection.code}`, headers })).statusCode, 200);
   assert.equal(await resolveRemoteMcpGrant(db, token), null);
+});
+
+test('workspace writes require their own grant and respect changes to a fixed project role', async t => {
+  const { app, db, actor, project, login } = await fixture(t);
+  const headers = await login(actor);
+  const payload = { name: 'Workspace management', projectCode: project.code, allowWorkspaceWrite: true };
+  const membership = and(eq(schema.members.principal_id, actor.id), eq(schema.members.project_id, project.id));
+  const issue = extra => app.inject({ method: 'POST', url: endpoint, headers, payload: { ...payload, ...extra } });
+
+  assert.equal((await issue({ allowWorkspaceWrite: 'true' })).statusCode, 400);
+  assert.equal((await issue({})).statusCode, 403);
+  await db.update(schema.members).set({ role: 'member' }).where(membership);
+  const historicalToken = 'tsp_mcp_' + 'e'.repeat(64);
+  await db.insert(schema.remoteMcpGrants).values({
+    name: 'Before workspace permission', principal_id: actor.id, project_id: project.id,
+    token_hash: hashToken(historicalToken), expires_at: new Date(Date.now() + 60_000), allow_task_write: true,
+  });
+  const historicalGrant = await resolveRemoteMcpGrant(db, historicalToken);
+  assert.equal(historicalGrant.allowTaskWrite, true);
+  assert.equal(historicalGrant.allowWorkspaceWrite, false);
+
+  const response = await issue({});
+  assert.equal(response.statusCode, 201, response.body);
+  const { connection, token } = response.json().data;
+  assert.equal(connection.allowWorkspaceWrite, true);
+  assert.equal(connection.allowTaskWrite, false);
+  assert.equal((await resolveRemoteMcpGrant(db, token)).allowWorkspaceWrite, true);
+
+  const [audit] = await db.select().from(schema.auditEvents).where(eq(schema.auditEvents.action, 'remote_mcp.connection_created'));
+  assert.equal(JSON.parse(audit.payload).allow_workspace_write, true);
+  assert.doesNotMatch(audit.payload, /tsp_mcp_/);
+  await db.update(schema.members).set({ role: 'viewer' }).where(membership);
+  assert.equal((await resolveRemoteMcpGrant(db, token)).allowWorkspaceWrite, false);
+  const list = (await app.inject({ url: endpoint, headers })).json().data;
+  assert.equal(list.find(item => item.code === connection.code).allowWorkspaceWrite, true);
 });

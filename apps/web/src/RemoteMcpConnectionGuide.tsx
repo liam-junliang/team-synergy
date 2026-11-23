@@ -35,7 +35,7 @@ export function RemoteMcpConnectionGuide({ accountCode, projects, onLocalSetup }
           <CopyCommand command={endpoint} copyLabel={t('复制服务地址')} />
           <ol className="list-decimal space-y-3 pl-5 text-sm leading-6 text-slate-700">
             <li><strong>{t('添加连接')}</strong><p>{t('在 Agent 的 MCP 或 Connector 设置中选择远程 HTTP，粘贴服务地址并发起连接。')}</p></li>
-            <li><strong>{t('在浏览器登录并授权')}</strong><p>{t('按 Agent 的提示打开 TeamSynergy 登录页。已有登录会话时会直接进入授权页。核对账号、客户端和返回地址，按需选择连接权限。要创建或推进任务，请选择可协作。')}</p></li>
+            <li><strong>{t('在浏览器登录并授权')}</strong><p>{t('按 Agent 的提示打开 TeamSynergy 登录页。已有登录会话时会直接进入授权页。核对账号、客户端和返回地址，按需允许任务协作或管理团队和项目。')}</p></li>
             <li><strong>{t('返回 Agent 验证')}</strong><p>{t('同意后，浏览器会将授权结果返回给 Agent。可以在新会话里问「我能访问哪些 TeamSynergy 项目？」来验证。')}</p></li>
           </ol>
           <p className="text-xs leading-5 text-slate-600">{t('个人记忆读取需单独授权。连接后的会话采集仍保持关闭。')}</p>
@@ -60,7 +60,10 @@ export function RemoteMcpConnectionGuide({ accountCode, projects, onLocalSetup }
             return <li key={connection.code} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
               <div className="min-w-0">
                 <h3 className="break-words text-sm font-semibold text-slate-900">{connection.name}</h3>
-                <p className="mt-1 break-words text-xs text-slate-600">{scope} · {t(connection.allowTaskWrite ? '可协作' : '仅查看')}
+                <p className="mt-1 break-words text-xs text-slate-600">{scope}
+                  {connection.allowTaskWrite && ' · ' + t('可协作')}
+                  {connection.allowWorkspaceWrite && ' · ' + t('管理团队和项目')}
+                  {!connection.allowTaskWrite && !connection.allowWorkspaceWrite && ' · ' + t('仅查看')}
                   {connection.allowPersonalMemory && <> · {t('含账号偏好')}</>}</p>
               </div>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-slate-600">
@@ -92,6 +95,7 @@ function CreateRemoteMcpDialog({ accountCode, endpoint, onClose }: {
   const [name, setName] = useState('');
   const [allowPersonalMemory, setAllowPersonalMemory] = useState(false);
   const [allowTaskWrite, setAllowTaskWrite] = useState(false);
+  const [allowWorkspaceWrite, setAllowWorkspaceWrite] = useState(false);
   const [created, setCreated] = useState<NewMcpConnection>();
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -109,7 +113,7 @@ function CreateRemoteMcpDialog({ accountCode, endpoint, onClose }: {
     setPending(true);
     setFailed(false);
     try {
-      const result = await createMcpConnection({ name: name.trim(), allowPersonalMemory, allowTaskWrite });
+      const result = await createMcpConnection({ name: name.trim(), allowPersonalMemory, allowTaskWrite, allowWorkspaceWrite });
       if (mounted.current) setCreated(result);
       void client.invalidateQueries({ queryKey: connectionsKey(accountCode) });
     } catch {
@@ -131,8 +135,9 @@ function CreateRemoteMcpDialog({ accountCode, endpoint, onClose }: {
       <label className="ui-field-label block">{t('连接名称')}
         <input autoFocus required maxLength={100} className="form-control mt-2" value={name} onChange={event => setName(event.target.value)} disabled={pending} />
       </label>
-      <McpPermissionFields allowTaskWrite={allowTaskWrite} allowPersonalMemory={allowPersonalMemory}
-        disabled={pending} onTaskWriteChange={setAllowTaskWrite} onPersonalMemoryChange={setAllowPersonalMemory} />
+      <McpPermissionFields allowTaskWrite={allowTaskWrite} allowWorkspaceWrite={allowWorkspaceWrite} allowPersonalMemory={allowPersonalMemory}
+        disabled={pending} onTaskWriteChange={setAllowTaskWrite} onWorkspaceWriteChange={setAllowWorkspaceWrite}
+        onPersonalMemoryChange={setAllowPersonalMemory} />
       {failed && <p role="alert" className="text-sm text-rose-700">{t('未能创建远程连接，请检查账号后重试。')}</p>}
       <div className="flex justify-end gap-2">
         <button type="button" className="ui-button ui-button-secondary" disabled={pending} onClick={onClose}>{t('取消')}</button>

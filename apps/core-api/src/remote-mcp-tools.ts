@@ -10,10 +10,12 @@ import {
   ArtifactKindSchema, CodeGraphQuerySchema, MemoryBriefInput, MemoryDocumentReadInput, MemorySearchQuery, MemorySourcesInput,
   ProfileSchema, ProjectMaterialGlobInput, ProjectMaterialGrepInput, ProjectMaterialListInput,
   ProjectMaterialReadInput, PublicCodeSchema, TaskSourceSchema, TaskStatusSchema,
+  agentWorkspaceActions, agentWorkspaceInputSchema, agentWorkspaceRoleAllows,
 } from '@team-synergy/contracts';
 import { DomainError } from '@team-synergy/domain';
 import { schema, type Db } from '@team-synergy/persistence';
 import type { RemoteMcpGrant } from './remote-mcp-authorization.js';
+import type { ExecuteWorkspaceAction } from './agent-workspace-actions.js';
 import { RemoteMcpToolModuleSchema, SearchRemoteMcpToolsInput, searchRemoteMcpTools, type RemoteMcpToolModule } from './remote-mcp-tool-catalog.js';
 
 export type RemoteMcpRequest = (options: { method: 'GET' | 'POST'; url: string; projectCode: string; payload?: object }) => Promise<unknown>;
@@ -89,13 +91,21 @@ function dataOf<T>(result: unknown): T {
   throw new DomainError('connector_service_unavailable', '项目服务暂时不可用');
 }
 
+function workspaceWriteReceipt(result: unknown) {
+  // A completed mutation must remain a success even when its response includes long revision history.
+  const identifiers = result && typeof result === 'object' ? Object.fromEntries(Object.entries(result).filter(([key, value]) =>
+    ((key === 'code' || /_code$/.test(key)) && PublicCodeSchema.safeParse(value).success) ||
+    (['revision', 'current_revision', 'base_snapshot'].includes(key) && Number.isSafeInteger(value)))) : {};
+  return { applied: true, resultOmitted: true, ...identifiers, nextStep: '已保存。请读取目标对象或查看最新修订，无需重复提交。' };
+}
+
 function capability<S extends z.ZodType>(
   module: RemoteMcpToolModule,
   name: string,
   description: string,
   schema: S,
   action: (args: z.output<S>) => Promise<unknown>,
-  write?: { idempotentHint: boolean },
+  write?: { idempotentHint: boolean; destructiveHint?: boolean },
 ) {
   return {
     module, name, description, schema,
@@ -105,8 +115,9 @@ function capability<S extends z.ZodType>(
       if (!parsed.success) throw new DomainError('validation_failed', parsed.error.issues.map(issue =>
         `${issue.path.join('.') || 'arguments'}: ${issue.message}`).join('; '));
       const result = await action(parsed.data);
-      // Keep complete observations and citations. An oversized result can be requested in a smaller page.
       if (Buffer.byteLength(JSON.stringify(result) ?? '', 'utf8') > 128_000) {
+        if (write) return workspaceWriteReceipt(result);
+        // A read can be requested again with a smaller page.
         throw new DomainError('agent_output_too_large', '结果超过 128 KB，请缩小查询范围或分页读取');
       }
       return result;
@@ -114,7 +125,8 @@ function capability<S extends z.ZodType>(
   };
 }
 
-export function remoteMcpTools(db: Db, grant: RemoteMcpGrant, request: RemoteMcpRequest, webOrigin: string) {
+export function remoteMcpTools(db: Db, grant: RemoteMcpGrant, request: RemoteMcpRequest, webOrigin: string,
+  executeWorkspace?: ExecuteWorkspaceAction) {
   const accountScoped = grant.projectCode === null;
   const projectSelector = PublicCodeSchema.describe('目标项目编码，使用 list_projects 返回的 projectCode。');
   const webUrl = (projectCode: string, path: string) => new URL('/projects/' + projectCode + path, webOrigin).href;
@@ -197,13 +209,27 @@ export function remoteMcpTools(db: Db, grant: RemoteMcpGrant, request: RemoteMcp
     return { ...value, projectCode, url: webUrl(projectCode, '/board' + (code ? '?task=' + encodeURIComponent(code) : '')) };
   }
 
+  const workspace = agentWorkspaceActions
+    .filter(action => (action.scope !== 'account' || accountScoped) &&
+      ((action.scope === 'project' && action.method === 'GET' && !action.requiresWorkspacePermission) || grant.allowWorkspaceWrite))
+    .map(action => ({ action, tool: capability(action.module, action.name, action.description,
+      agentWorkspaceInputSchema(action, grant.projectCode), async input => {
+        if (!executeWorkspace) throw new DomainError('agent_action_unavailable', '平台动作暂时不可用');
+        return dataOf(await executeWorkspace(action, input, grant));
+      }, action.method === 'GET' ? undefined : { idempotentHint: false, destructiveHint: action.destructive ?? false }) }));
+
   const read = [
     capability('projects', 'read_connector_skill', '读取内置 Connector 技能。空参数返回入门流程，传 module 查看该模块各工具的用法、参数、结果和示例。无需 projectCode。',
       z.strictObject({ module: RemoteMcpToolModuleSchema.optional() }), async ({ module }) => {
         const path = module ? `references/${module}.md` : 'SKILL.md';
         return {
           name: 'team-synergy-connector', path,
-          markdown: await readFile(new URL(`../dist/connector-skill/${path}`, import.meta.url), 'utf8'),
+          markdown: await readFile(new URL(`../dist/connector-skill/${path}`, import.meta.url), 'utf8') + (module ?
+            workspace.filter(({ action }) => action.module === module).map(({ action, tool }) => {
+              const input = z.toJSONSchema(tool.schema, { io: 'input' });
+              return `\n\n## \`${action.name}\`\n\n${action.description}\n\n` +
+                `必填参数：${input.required?.join('、') || '无'}。完整字段与约束见工具 schema。`;
+            }).join('') : ''),
         };
       }),
     capability('projects', 'get_connection_context', '查看当前账号和连接授权。用 list_projects 按名称定位项目，再用本连接的 search_tools 选择后续工作所需工具。传入 projectCode 可检查目标项目的角色和权限。',
@@ -213,13 +239,14 @@ export function remoteMcpTools(db: Db, grant: RemoteMcpGrant, request: RemoteMcp
         userCode: principal.code, account: principal.account, displayName: principal.display_name,
         connectionScope: accountScoped ? 'account' : 'project',
         allowPersonalMemory: grant.allowPersonalMemory, allowTaskWrite: grant.allowTaskWrite,
+        allowWorkspaceWrite: grant.allowWorkspaceWrite === true,
       };
       const target = projectCode ?? grant.projectCode;
       if (!target) return { ...identity, projectCode: null, projectSelection: 'required',
         nextStep: '在本连接调用 list_projects 定位项目，再调用 search_tools 查询后续工作所需工具。项目不明确时先确认。' };
       const { project, role } = await projectAccess(target, principal);
       return { ...identity, projectCode: project.code, projectName: project.name, projectSelection: accountScoped ? 'explicit' : 'connector',
-        role, allowTaskWrite: grant.allowTaskWrite && role !== 'viewer',
+        role, allowTaskWrite: grant.allowTaskWrite && role !== 'viewer', allowWorkspaceWrite: grant.allowWorkspaceWrite === true && role !== 'viewer',
         canAssign: grant.allowTaskWrite && isProjectManager(role), projectUrl: webUrl(project.code, '/overview') };
     }),
     capability('projects', 'list_projects', '查找此连接可访问的项目，返回各项目的 projectCode 和协作权限。选定项目后，调用本连接的 search_tools 查找后续工作所需工具。',
@@ -346,12 +373,14 @@ export function remoteMcpTools(db: Db, grant: RemoteMcpGrant, request: RemoteMcp
     '选用 TeamSynergy 工具时先调用这一入口。空参数看模块简介，可按 module 和中英文 query 查找工具；提供 projectCode 可按该项目当前角色筛选。返回工具名后直接调用相应工具。',
     SearchRemoteMcpToolsInput, async (input): Promise<ReturnType<typeof searchRemoteMcpTools>> => {
       let visibleWrites = write;
+      let visibleWorkspace = workspace;
       const target = input.projectCode ?? grant.projectCode;
       if (target) {
         const { role } = await projectAccess(target, await currentPrincipal());
         visibleWrites = role === 'viewer' ? [] : write.filter(tool => tool.name !== 'assign_task' || isProjectManager(role));
+        visibleWorkspace = workspace.filter(({ action }) => action.scope === 'account' || agentWorkspaceRoleAllows(action, role));
       }
-      return searchRemoteMcpTools([search, ...read, ...visibleWrites], input);
+      return searchRemoteMcpTools([search, ...read, ...visibleWrites, ...visibleWorkspace.map(({ tool }) => tool)], input);
     });
-  return [search, ...read, ...write];
+  return [search, ...read, ...write, ...workspace.map(({ tool }) => tool)];
 }

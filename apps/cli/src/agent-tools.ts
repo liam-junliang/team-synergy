@@ -1,10 +1,33 @@
 import type { Command } from 'commander';
 import { DomainError } from '@team-synergy/domain';
-import { PublicCodeSchema } from '@team-synergy/contracts';
+import {
+  agentWorkspaceActionByName, agentWorkspaceActions, agentWorkspaceInputSchema,
+  PublicCodeSchema, SearchAgentToolsInput, searchAgentTools, type AgentToolModule,
+} from '@team-synergy/contracts';
+import { z } from 'zod';
 import { AgentToolInputError } from './agent-capabilities.js';
+import { createAgentConnection } from './agent-connection.js';
 import { createAgentToolSession, listAgentTools, serveMemoryMcp } from './memory-mcp.js';
 
 type Print = (result: { ok: true; data: unknown }) => void;
+function localToolModule(name: string): AgentToolModule {
+  if (name.includes('memory') || name.includes('memories')) return 'memory';
+  if (name.includes('skill')) return 'skills';
+  if (name.includes('material')) return 'materials';
+  if (name.includes('code_')) return 'code';
+  return 'projects';
+}
+
+function cliTools(personalManagement = false) {
+  return [
+    ...listAgentTools({ personalManagement }).map(tool => ({ ...tool, module: localToolModule(tool.name) })),
+    ...agentWorkspaceActions.map(action => ({
+      name: action.name, module: action.module, description: action.description,
+      inputSchema: z.toJSONSchema(agentWorkspaceInputSchema(action), { io: 'input' }),
+      annotations: { readOnlyHint: action.method === 'GET', destructiveHint: action.destructive ?? false },
+    })),
+  ];
+}
 function inputJson(text: string): unknown {
   if (Buffer.byteLength(text, 'utf8') > 64000) throw new DomainError('agent_input_too_large', '工具输入超过64KB');
   try { return JSON.parse(text); } catch { throw new DomainError('agent_invalid_input', '请输入有效JSON'); }
@@ -16,6 +39,14 @@ async function call(name: string, input: unknown, print: Print, personalManageme
     if ('projectCode' in input && input.projectCode !== projectCode)
       throw new DomainError('agent_invalid_input', '--project 与输入的 projectCode 不一致');
     input = { ...input, projectCode };
+  }
+  const workspaceAction = agentWorkspaceActionByName(name);
+  if (workspaceAction) {
+    const parsed = agentWorkspaceInputSchema(workspaceAction).safeParse(input);
+    if (!parsed.success) throw new DomainError('agent_invalid_input', parsed.error.issues.map(issue =>
+      `${issue.path.join('.') || 'arguments'}: ${issue.message}`).join('; '));
+    print({ ok: true, data: await createAgentConnection().runWorkspaceAction(name, parsed.data) });
+    return;
   }
   try { print({ ok: true, data: await createAgentToolSession({ personalManagement }).call(name, input) }); }
   catch (error) {
@@ -35,9 +66,16 @@ export function registerAgentToolCommands(program: Command, print: Print) {
       print({ ok: true, data: await connectAgent(opts) });
     });
 
-  const tools = program.command('tools').description('与 MCP 共用的成员 Agent 能力目录与调用入口');
+  const tools = program.command('tools').description('与 HTTP Connector 共用的平台动作目录及本机工具入口');
   tools.command('list').option('--allow-personal-management', '额外列出本人记忆编辑/撤回工具').action(opts =>
-    print({ ok: true, data: listAgentTools({ personalManagement: !!opts.allowPersonalManagement }) }));
+    print({ ok: true, data: cliTools(!!opts.allowPersonalManagement).map(({ module: _module, ...tool }) => tool) }));
+  tools.command('search [query]').description('按模块和中英文关键词检索工具')
+    .option('--module <name>', '模块名称').option('--limit <count>', '最多 20 个结果', Number)
+    .action((query, opts) => {
+      const input = SearchAgentToolsInput.safeParse({ query, module: opts.module, limit: opts.limit });
+      if (!input.success) throw new DomainError('agent_invalid_input', '请检查工具模块、关键词和结果数量');
+      print({ ok: true, data: searchAgentTools(cliTools(), input.data) });
+    });
   tools.command('call <name>').option('--input <json>', '使用 tools list 中的同一输入schema', '{}')
     .option('--project <code>', '本次调用的项目编号，不要求本机工作区绑定')
     .option('--allow-personal-management', '显式开放本次本人记忆管理调用')

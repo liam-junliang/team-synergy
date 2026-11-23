@@ -14,8 +14,9 @@ const refreshTokens = schema.remoteMcpOAuthRefreshTokens;
 const basePath = '/mcp/oauth';
 const baseScope = 'project:read';
 const taskScope = 'tasks:write';
+const workspaceScope = 'workspace:write';
 const memoryScope = 'memory:personal:read';
-const supportedScopes = new Set([baseScope, taskScope, memoryScope]);
+const supportedScopes = new Set([baseScope, taskScope, memoryScope, workspaceScope]);
 const clientIdPattern = /^tsp_mcp_client_[a-f0-9]{64}$/;
 const opaqueIdPattern = /^[a-f0-9]{64}$/;
 const proofPattern = /^[A-Za-z0-9._~-]{43,128}$/;
@@ -126,8 +127,9 @@ function authenticatedClient(client: OAuthClient, form: TokenForm, authorization
   return !!supplied && !!client.secret_hash && sameDigest(hashToken(supplied), client.secret_hash);
 }
 
-function scopeFor(allowTaskWrite: boolean, allowPersonalMemory: boolean): string {
-  return [baseScope, ...(allowTaskWrite ? [taskScope] : []), ...(allowPersonalMemory ? [memoryScope] : [])].join(' ');
+function scopeFor(permissions: Pick<typeof grants.$inferSelect, 'allow_task_write' | 'allow_personal_memory' | 'allow_workspace_write'>): string {
+  return [baseScope, ...(permissions.allow_task_write ? [taskScope] : []),
+    ...(permissions.allow_personal_memory ? [memoryScope] : []), ...(permissions.allow_workspace_write ? [workspaceScope] : [])].join(' ');
 }
 
 async function createRefreshToken(tx: Tx, grantId: bigint) {
@@ -159,7 +161,8 @@ async function exchangeCode(db: Db, form: TokenForm, client: OAuthClient, resour
         eq(requests.resource_uri, resourceUrl), eq(requests.redirect_uri, redirect), gt(requests.expires_at, sqlNow)))
       .limit(1);
     if (!row || (row.projectCode === null && row.request.project_id !== null) || !sameDigest(row.request.challenge, challenge)) return null;
-    const subject = await authorizeRemoteMcpGrantSubject(tx, row.principalCode, row.projectCode, row.request.allow_task_write);
+    const subject = await authorizeRemoteMcpGrantSubject(tx, row.principalCode, row.projectCode,
+      row.request.allow_task_write || row.request.allow_workspace_write);
     if (!subject) return null;
 
     // Claim the approved code only after locking its project/account. A password reset
@@ -170,10 +173,11 @@ async function exchangeCode(db: Db, form: TokenForm, client: OAuthClient, resour
     const { grantId, token } = await createRemoteMcpGrant(tx, {
       ...subject, projectCode: row.projectCode, name: client.name,
       allowTaskWrite: row.request.allow_task_write, allowPersonalMemory: row.request.allow_personal_memory,
+      allowWorkspaceWrite: row.request.allow_workspace_write,
       oauth: { clientId: client.id, resourceUrl, accessLifetimeMs },
     });
     const refreshToken = client.allow_refresh ? await createRefreshToken(tx, grantId) : undefined;
-    return tokenResponse(token, accessLifetimeMs / 1_000, scopeFor(row.request.allow_task_write, row.request.allow_personal_memory), refreshToken);
+    return tokenResponse(token, accessLifetimeMs / 1_000, scopeFor(row.request), refreshToken);
   });
 }
 
@@ -207,7 +211,7 @@ async function exchangeRefreshToken(db: Db, form: TokenForm, client: OAuthClient
       await tx.update(grants).set({ revoked_at: now }).where(eq(grants.id, grant.id));
       return null;
     }
-    const scope = scopeFor(grant.allow_task_write, grant.allow_personal_memory);
+    const scope = scopeFor(grant);
     if (form.scope !== undefined && form.scope !== scope) return null;
     const expires = Math.min(now.getTime() + accessLifetimeMs, grant.expires_at.getTime());
     const accessToken = 'tsp_mcp_' + generateToken();
@@ -355,6 +359,7 @@ export function registerRemoteMcpOAuthRoutes(app: FastifyInstance, db: Db, optio
           id, client_id: client.id, resource_uri: resource.href, redirect_uri: redirect,
           state: query.state, challenge,
           requested_task_write: scopes.includes(taskScope), requested_personal_memory: scopes.includes(memoryScope),
+          requested_workspace_write: scopes.includes(workspaceScope),
           expires_at: new Date(currentTime.getTime() + requestLifetimeMs),
         });
       });
@@ -380,6 +385,7 @@ export function registerRemoteMcpOAuthRoutes(app: FastifyInstance, db: Db, optio
         clientName: client.name,
         redirectOrigin: new URL(entry.redirect_uri).origin,
         requestedTaskWrite: entry.requested_task_write,
+        requestedWorkspaceWrite: entry.requested_workspace_write,
         requestedPersonalMemory: entry.requested_personal_memory,
       } };
     });
@@ -392,8 +398,9 @@ export function registerRemoteMcpOAuthRoutes(app: FastifyInstance, db: Db, optio
       if (!opaqueIdPattern.test(request.params.id)) return requestUnavailable(reply);
       const body = objectOf(request.body);
       if (!body || !['allow', 'deny'].includes(body.decision as string)
-        || Object.keys(body).some(key => !['decision', 'projectCode', 'allowTaskWrite', 'allowPersonalMemory'].includes(key))
+        || Object.keys(body).some(key => !['decision', 'projectCode', 'allowTaskWrite', 'allowPersonalMemory', 'allowWorkspaceWrite'].includes(key))
         || (body.allowTaskWrite !== undefined && typeof body.allowTaskWrite !== 'boolean')
+        || (body.allowWorkspaceWrite !== undefined && typeof body.allowWorkspaceWrite !== 'boolean')
         || (body.allowPersonalMemory !== undefined && typeof body.allowPersonalMemory !== 'boolean')) {
         return consentError(reply, 'invalid_request', '请选择是否授权此连接。', 400);
       }
@@ -413,12 +420,14 @@ export function registerRemoteMcpOAuthRoutes(app: FastifyInstance, db: Db, optio
         const [candidate] = await tx.select({ id: requests.id }).from(requests).where(pending).limit(1);
         if (!candidate) return { kind: 'unavailable' as const };
         const allowTaskWrite = body.allowTaskWrite === true;
-        const subject = await authorizeRemoteMcpGrantSubject(tx, principal, project.data ?? null, allowTaskWrite);
+        const allowWorkspaceWrite = body.allowWorkspaceWrite === true;
+        const subject = await authorizeRemoteMcpGrantSubject(tx, principal, project.data ?? null, allowTaskWrite || allowWorkspaceWrite);
         if (!subject) return { kind: 'forbidden' as const };
         const code = generateToken();
         const [entry] = await tx.update(requests).set({
           principal_id: subject.principalId, project_id: subject.projectId,
           allow_task_write: allowTaskWrite, allow_personal_memory: body.allowPersonalMemory === true,
+          allow_workspace_write: allowWorkspaceWrite,
           code_hash: hashToken(code), expires_at: new Date(Date.now() + codeLifetimeMs),
         }).where(pending).returning(callback);
         if (!entry) return { kind: 'unavailable' as const };
