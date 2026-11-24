@@ -84,6 +84,8 @@ const parents = {
   system_settings: 'updated_by:users',
   task_dependencies: 'task_id:tasks depends_on_task_id:tasks',
   task_handovers: 'task_id:tasks source_run_id:runs target_principal_id:users source_device_id:devices context_snapshot_id:context_snapshots target_run_id:runs target_device_id:devices published_by:users supersedes_handover_id:task_handovers',
+  task_web_reviews: 'task_id:tasks artifact_id:artifacts submission_event_id:audit_events reviewer_principal_id:users evidence_id:evidences',
+  task_web_submissions: 'task_id:tasks artifact_id:artifacts evidence_id:evidences author_principal_id:users registrar_principal_id:users',
   tasks: 'feature_id:features requirement_id:requirements source_requirement_revision_id:requirement_revisions source_document_revision_id:requirement_document_revisions requirement_baseline_id:requirement_baselines defect_id:defects assignee_principal_id:users',
   team_members: 'team_id:teams principal_id:users',
   teams: 'created_by:users owner_principal_id:users',
@@ -145,6 +147,14 @@ const scopeRules = [
   sameScope('task_handovers','source_run_id','runs','task_id'), sameScope('task_handovers','target_run_id','runs','task_id'),
   sameScope('task_handovers','context_snapshot_id','context_snapshots','task_id'), sameScope('task_handovers','supersedes_handover_id','task_handovers','task_id'),
   sameScope('context_snapshots','source_run_id','runs','task_id'), sameScope('evidences','run_id','runs','task_id'),
+  ...['task_web_submissions', 'task_web_reviews'].flatMap(table => [
+    sameScope(table, 'artifact_id', 'artifacts', 'task_id'),
+    sameScope(table, 'evidence_id', 'evidences', 'task_id'),
+  ]),
+  rule('task_web_reviews.submission_event_id.same_task_submission', `SELECT count(*)::text AS count
+    FROM task_web_reviews s JOIN audit_events e ON e.id=s.submission_event_id
+    WHERE e.entity_type IS DISTINCT FROM 'task' OR e.action IS DISTINCT FROM 'task.submitted'
+      OR e.entity_id IS DISTINCT FROM s.task_id`, 'task_web_reviews.submission_event_id'),
   sameScope('context_edges','from_node_id','context_nodes','snapshot_id'), sameScope('context_edges','to_node_id','context_nodes','snapshot_id'),
   rule('runs.workspace_id.reciprocal', 'SELECT count(*)::text AS count FROM runs s JOIN workspaces p ON p.id=s.workspace_id WHERE p.run_id<>s.id', 'runs.workspace_id','workspaces.run_id'),
   rule('agent_sessions.device_id.same_principal', 'SELECT count(*)::text AS count FROM agent_sessions s JOIN runs r ON r.id=s.run_id JOIN devices d ON d.id=s.device_id WHERE d.principal_id<>r.principal_id', 'agent_sessions.device_id'),
@@ -192,6 +202,7 @@ for (const [table,column,target] of [
   ['defects','feature_id','features'],['requirement_revisions','requirement_id','requirements'],
   ['requirement_baseline_items','baseline_id','requirement_baselines'],['task_dependencies','task_id','tasks'],
   ['workspaces','run_id','runs'],['task_handovers','task_id','tasks'],['evidences','task_id','tasks'],['agent_sessions','run_id','runs'],
+  ['task_web_submissions','task_id','tasks'],['task_web_reviews','task_id','tasks'],
   ['context_graph_snapshots','graph_id','context_graphs'],['context_nodes','snapshot_id','context_graph_snapshots'],
   ['context_edges','snapshot_id','context_graph_snapshots'],['test_case_revisions','document_id','test_cases'],
   ['test_asset_revisions','document_id','test_assets'],['test_execution_results','execution_id','test_executions'],

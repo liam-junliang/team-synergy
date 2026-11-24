@@ -14,7 +14,47 @@ test('customer inventory catalog reviews every schema table exactly once', () =>
   const names = TENANT_INVENTORY_CATALOG.flatMap(group => group.tables.split(' '));
   assert.equal(new Set(names).size, names.length);
   assert.deepEqual(names.sort(), Object.values(schema).map(table => getTableConfig(table).name).sort());
-  assert.equal(names.length, 92);
+  assert.equal(names.length, 94);
+});
+
+test('Web task workflow inventory preserves counts and detects mismatched task relations', { skip: !baseUrl }, async () => {
+  await withIntegrityFixture(baseUrl, 'web-task', async db => {
+    const query = (sql, params = []) => db.$client.query(sql, params).then(result => result.rows[0]);
+    const user = await query('SELECT id FROM users LIMIT 1');
+    const task = await query('SELECT id, feature_id FROM tasks LIMIT 1');
+    const feature = await query('SELECT project_id FROM features WHERE id=$1', [task.feature_id]);
+    const other = await query("INSERT INTO tasks(feature_id,title,profile,acceptance,base_snapshot,created_at) VALUES ($1,'Other task','builder','[]',0,$2) RETURNING id", [task.feature_id,time]);
+    const artifacts = [];
+    const evidence = [];
+    const events = [];
+    for (const taskId of [task.id, other.id]) {
+      artifacts.push(await query("INSERT INTO artifacts(project_id,task_id,kind,uri,content_hash) VALUES ($1,$2,'commit',$3,$3) RETURNING id", [feature.project_id,taskId,secret]));
+      evidence.push(await query("INSERT INTO evidences(task_id,type,result,summary,recorded_at) VALUES ($1,'self_test','pass',$2,$3) RETURNING id", [taskId,secret,time]));
+      events.push(await query("INSERT INTO audit_events(timestamp,principal_id,action,entity_type,entity_id,base_snapshot) VALUES ($1,$2,'task.submitted','task',$3,0) RETURNING id", [time,user.id,taskId]));
+    }
+    await query('INSERT INTO task_web_submissions(task_id,artifact_id,evidence_id,author_principal_id,registrar_principal_id,submission_snapshot) VALUES ($1,$2,$3,$4,$4,1)', [task.id,artifacts[0].id,evidence[0].id,user.id]);
+    await query("INSERT INTO task_web_reviews(task_id,artifact_id,submission_event_id,evidence_id,reviewer_principal_id,status,reason) VALUES ($1,$2,$3,$4,$5,'assigned',$6)", [task.id,artifacts[0].id,events[0].id,evidence[0].id,user.id,secret]);
+
+    const report = await planTenantMapping(db);
+    assert.deepEqual(report.inventory.filter(row => row.table.startsWith('task_web_')), [
+      { table: 'task_web_reviews', category: 'project_descendants', route: 'all_structural_parents_must_agree_before_backfill', rows: 1 },
+      { table: 'task_web_submissions', category: 'project_descendants', route: 'all_structural_parents_must_agree_before_backfill', rows: 1 },
+    ]);
+    assert.ok(!JSON.stringify(report).includes(secret));
+    assert.equal((await checkDatabaseIntegrity(db)).total_orphans, 0);
+
+    await query('UPDATE task_web_submissions SET artifact_id=$1,evidence_id=$2', [artifacts[1].id,evidence[1].id]);
+    await query('UPDATE task_web_reviews SET artifact_id=$1,evidence_id=$2,submission_event_id=$3', [artifacts[1].id,evidence[1].id,events[1].id]);
+    const mismatched = await checkDatabaseIntegrity(db);
+    const counts = new Map(mismatched.relations.map(row => [row.name, row.count]));
+    for (const relation of ['task_web_submissions.artifact_id', 'task_web_submissions.evidence_id',
+      'task_web_reviews.artifact_id', 'task_web_reviews.evidence_id']) {
+      assert.equal(counts.get(relation), 0);
+      assert.equal(counts.get(relation + '.same_task_id'), 1);
+    }
+    assert.equal(counts.get('task_web_reviews.submission_event_id'), 0);
+    assert.equal(counts.get('task_web_reviews.submission_event_id.same_task_submission'), 1);
+  });
 });
 
 test('inventory is pending, complete as a metadata read and never exposes private bodies or invents customer acceptance', {skip:!baseUrl}, async () => {
@@ -42,7 +82,7 @@ test('inventory is pending, complete as a metadata read and never exposes privat
     const before = await q('select (select count(*) from audit_events)::int as audits,(select count(*) from command_receipts)::int as receipts');
     const report = await planTenantMapping(db);
     assert.equal(report.status,'pending'); assert.equal(report.read_complete,true); assert.equal(report.ready_for_backfill,false); assert.equal(report.ownership_complete,false); assert.equal(report.tenant_id,null);
-    assert.equal(report.inventory.length,92);
+    assert.equal(report.inventory.length,94);
     assert.equal(report.teams.length,3); // Historical migration also retains its empty default team.
     assert.equal(report.projects.length,2);
     assert.equal(report.projects.find(p=>p.project_code===original.code).external_members,1);
