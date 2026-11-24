@@ -54,6 +54,14 @@ function stringArrayOf(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
+function validTaskSnapshot(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+const invalidTaskSnapshot = () => ({
+  ok: false as const, error: { code: 'validation_failed', message: '任务操作需要有效的 base_snapshot' },
+});
+
 
 export function registerTaskRoutes(app: FastifyInstance, db: Db): void {
   const taskService = createTaskService(db);
@@ -179,12 +187,26 @@ export function registerTaskRoutes(app: FastifyInstance, db: Db): void {
     const body = request.body ?? {};
     const current = await taskService.getTaskStatus(request.params.task_code, request.principal ?? '');
     if (!current.ok) return current;
+    const snapshot = body.base_snapshot;
+    if ((snapshot !== undefined || current.data.status === 'assigned') && !validTaskSnapshot(snapshot)) {
+      return invalidTaskSnapshot();
+    }
     return await taskService.assignTask({
       taskCode: request.params.task_code,
       assigneePrincipalCode: codeOf(body, 'assignee_principal_code')
         || codeOf(body, 'user_code'),
       principalCode: (request.principal ?? ''),
-      baseSnapshot: typeof body.base_snapshot === 'number' ? body.base_snapshot : current.data.base_snapshot,
+      baseSnapshot: validTaskSnapshot(snapshot) ? snapshot : current.data.base_snapshot,
+    });
+  });
+
+  app.post<{ Params: { task_code: string }; Body: Record<string, unknown> }>('/tasks/:task_code/ready', async (request) => {
+    const snapshot = request.body?.base_snapshot;
+    if (!validTaskSnapshot(snapshot)) return invalidTaskSnapshot();
+    return await taskService.readyTask({
+      taskCode: request.params.task_code,
+      principalCode: request.principal ?? '',
+      baseSnapshot: snapshot,
     });
   });
 

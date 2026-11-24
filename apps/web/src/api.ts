@@ -1893,6 +1893,19 @@ export function cancelTask(taskCode: string, input: { base_snapshot: number; rea
   }).then((task) => normalizeTaskStatus(task));
 }
 
+export type TaskWorkflowCommand = { base_snapshot: number } & (
+  | { action: 'assign'; assignee_principal_code: string }
+  | { action: 'ready' | 'close' }
+);
+
+export function applyTaskWorkflowCommand(taskCode: string, { action, ...input }: TaskWorkflowCommand) {
+  return fetchEnvelope<{ task_code: string; status: string; base_snapshot: number }>(`/tasks/${encodeURIComponent(taskCode)}/${action}`, {
+    method: 'POST',
+    headers: { 'X-Principal-Code': currentPrincipalCode() },
+    body: JSON.stringify(input),
+  });
+}
+
 export function taskHistory(taskCode: string): Promise<AuditEvent[]> {
   return fetchEnvelope<RawAuditEvent[]>(`/tasks/${encodeURIComponent(taskCode)}/history`).then((events) => events.map((event) => ({
     timestamp: event.timestamp ?? '',

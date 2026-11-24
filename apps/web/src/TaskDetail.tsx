@@ -7,18 +7,22 @@ import { useProjectDisplayNames } from './ProjectDisplayNames';
 import type { ReactNode } from 'react';
 import { HandoverPanel } from './HandoverPanel';
 import { TaskBaselinePanel } from './TaskBaselinePanel';
+import { TaskWorkflowPanel } from './TaskWorkflowPanel';
 import { taskArtifactTestingPath } from './workspaceRouting';
 
 /** 审计动作中文映射 */
 const ACTION_LABEL: Record<string, string> = {
   'task.created': '创建',
   'task.assigned': '分派',
+  'task.reassigned': '改派',
+  'task.readied': '设为就绪',
   'task.claimed': '领取',
   'task.self_tested': '自测完成',
   'task.submitted': '提交',
   'task.verification_claimed': '验证领取',
   'task.verified': '验证通过',
   'task.closed': '关闭',
+  'task.cancelled': '取消',
   'member.added': '成员加入',
   'member.removed': '成员移除',
   'feature.created': 'Feature 创建',
@@ -212,11 +216,12 @@ function ArtifactCard({ artifact, projectCode }: { artifact: TaskArtifact; proje
   );
 }
 
-export function TaskDetail({ task, events, stale, staleHint }: {
+export function TaskDetail({ task, events, stale, staleHint, canManageWorkflow = false }: {
   task: TaskDetail;
   events: AuditEvent[];
   stale: boolean;
   staleHint?: string;
+  canManageWorkflow?: boolean;
 }) {
   useLocale();
   const meta = STATUS_META[task.status] ?? { label: task.status, color: 'bg-slate-200 text-slate-700' };
@@ -267,6 +272,7 @@ export function TaskDetail({ task, events, stale, staleHint }: {
             <OverviewItem label={t("快照")} value={`#${task.base_snapshot}`} mono />
           </div>
         </div>
+        {canManageWorkflow && <TaskWorkflowPanel task={task} />}
       </section>
 
       <TaskBaselinePanel key={`baseline-${task.code}`} task={task} />

@@ -20,6 +20,27 @@ after(async () => {
   await vite?.close();
 });
 
+test('任务卡片只提供当前状态允许的手动操作', async () => {
+  const { availableTaskWorkflowActions } = await vite.ssrLoadModule('/src/TaskWorkflowPanel.tsx');
+  const available = (status, runStatuses = []) => availableTaskWorkflowActions({
+    status,
+    runs: runStatuses.map((runStatus) => ({ status: runStatus })),
+  });
+  assert.deepEqual(available('draft'), ['assign', 'ready']);
+  assert.deepEqual(available('ready'), ['assign']);
+  assert.deepEqual(available('assigned'), ['assign']);
+  assert.deepEqual(available('failed', ['completed']), ['assign', 'ready']);
+  assert.deepEqual(available('blocked', ['failed']), ['ready']);
+  for (const liveRun of ['active', 'suspended', 'preparing']) {
+    assert.deepEqual(available('assigned', [liveRun]), []);
+    assert.deepEqual(available('blocked', [liveRun]), []);
+  }
+  assert.deepEqual(available('verified'), ['close']);
+  for (const status of ['running', 'self_tested', 'submitted', 'closed', 'cancelled']) {
+    assert.deepEqual(available(status), []);
+  }
+});
+
 test('任务卡片为长标题和状态标签保留独立布局空间', async () => {
   const { TaskCard } = await vite.ssrLoadModule('/src/App.tsx');
   const html = renderToStaticMarkup(createElement(TaskCard, {

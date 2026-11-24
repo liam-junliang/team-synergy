@@ -193,6 +193,8 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   invalid_transition: 409,
   transition_invalid: 409,
   task_contract_locked: 409,
+  task_run_active: 409,
+  task_assignee_unchanged: 409,
   claim_not_assigned: 409,
   evidence_not_passing: 409,
   requirement_tasks_incomplete: 409,
