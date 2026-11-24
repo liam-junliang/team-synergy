@@ -82,7 +82,9 @@ test('agentctl auth login/whoami/logout completes against a real core-api', asyn
     assert.equal(JSON.parse(login.out).data.user_code, cliUser.code);
     assert.equal(existsSync(authFile), true);
     const config = JSON.parse(readFileSync(authFile, 'utf8'));
-    assert.deepEqual(Object.keys(config).sort(), ['api_url', 'device_code', 'device_name', 'device_token', 'user_code']);
+    assert.deepEqual(Object.keys(config).sort(), ['access_expires_at', 'api_url', 'device_code', 'device_name', 'device_token', 'refresh_token', 'session_code', 'session_expires_at', 'user_code']);
+    assert.ok(Date.parse(config.access_expires_at) < Date.parse(config.session_expires_at));
+    assert.equal(login.out.includes(config.device_token) || login.out.includes(config.refresh_token), false);
     assert.equal(config.api_url, ctx.apiUrl);
     assert.equal(config.user_code, cliUser.code);
     assert.equal(config.device_name, 'cli-e2e');

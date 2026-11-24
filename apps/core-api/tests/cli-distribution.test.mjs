@@ -26,10 +26,14 @@ test('only the precise distribution routes are public', () => {
   for (const value of ['/cli', '/cli/config.json', '/cli/../.env', '/cli/releases/manifest.json', '/cli/releases/%2e%2e', '/cli/install.ps1/more', '/cli/manifest.json?x=1']) assert.equal(isCliDistributionPath(value), false, value);
 });
 test('public manifest projects approved fields and shell TSV uses the same artifacts', async (t) => {
-  const { app, artifact } = await fixture(t);
+  const { app, artifact, directory, manifest } = await fixture(t);
   const result = await app.inject('/cli/manifest.json'); assert.equal(result.statusCode, 200);
   assert.equal(result.headers['cache-control'], 'no-store'); assert.equal(result.body.includes('never public'), false);
   assert.equal(result.json().artifacts[0].filename, artifact.filename);
+  assert.equal(result.json().source_revision, undefined);
+  manifest.source_revision = '0'.repeat(40);
+  await writeFile(path.join(directory, 'manifest.json'), JSON.stringify(manifest));
+  assert.equal((await app.inject('/cli/manifest.json')).json().source_revision, manifest.source_revision);
   const text = await app.inject('/cli/manifest.json?format=tsv'); assert.equal(text.statusCode, 200);
   assert.equal(text.body, `win32\tx64\t${artifact.filename}\t${artifact.sha256}\t${artifact.size_bytes}\t${artifact.release}\n`);
 });

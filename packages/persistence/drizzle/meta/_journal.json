@@ -470,6 +470,20 @@
       "when": 1795046520000,
       "tag": "0067_remote_mcp_workspace_write",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1795046580000,
+      "tag": "0068_remote_mcp_renewal",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1795046640000,
+      "tag": "0069_cli_device_session_renewal",
+      "breakpoints": true
     }
   ]
 }

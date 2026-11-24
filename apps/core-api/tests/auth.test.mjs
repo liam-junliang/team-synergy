@@ -1,6 +1,6 @@
 import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { schema } from '@team-synergy/persistence';
 import { hashPassword } from '@team-synergy/application';
@@ -103,6 +103,70 @@ afterEach(async () => {
     await fixture.app.close();
     await closeTestDb(fixture.db);
   }
+});
+
+test('renewable CLI login rotates an expired access token and recovers an interrupted refresh across API restart', async () => {
+  const { app, db } = await createFixture();
+  const identity = { client_type: 'cli', platform: 'test', installation_id: randomUUID(), installation_secret: randomBytes(32).toString('base64url') };
+  const login = await app.inject({ method: 'POST', url: '/auth/login', payload: {
+    bind_token: 'bind-route-token', device_name: 'CLI rotation fixture', device_identity: identity, renewable_session: true,
+  } });
+  assert.equal(login.statusCode, 200);
+  const issued = login.json().data;
+  assert.ok(Date.parse(issued.access_expires_at) < Date.parse(issued.session_expires_at));
+  await db.update(schema.deviceSessions).set({ access_expires_at: new Date(Date.now() - 1000).toISOString() }).where(eq(schema.deviceSessions.code, issued.session_code));
+  const access = (api, token) => api.inject({ method: 'GET', url: '/auth/whoami', headers: { authorization: 'Bearer ' + token } });
+  assert.equal((await access(app, issued.device_token)).statusCode, 401);
+  const payload = { refresh_token: issued.refresh_token, request_id: randomBytes(32).toString('hex'), device_identity: identity };
+  const wrong = await app.inject({ method: 'POST', url: '/auth/device/refresh', payload: {
+    ...payload, device_identity: { ...identity, installation_secret: randomBytes(32).toString('base64url') },
+  } });
+  assert.equal(wrong.statusCode, 401);
+  const first = await app.inject({ method: 'POST', url: '/auth/device/refresh', payload });
+  assert.equal(first.statusCode, 200);
+  assert.equal(first.headers['cache-control'], 'no-store');
+  const refreshed = first.json().data;
+  assert.equal(refreshed.session_code, issued.session_code);
+  assert.equal(refreshed.session_expires_at, issued.session_expires_at);
+  assert.notEqual(refreshed.device_token, issued.device_token);
+  assert.notEqual(refreshed.refresh_token, issued.refresh_token);
+  const restarted = await buildServer({ db, logger: false });
+  try {
+    const retry = await restarted.inject({ method: 'POST', url: '/auth/device/refresh', payload });
+    assert.deepEqual(retry.json(), first.json(), 'An interrupted refresh with its original operation key recovers the identical credentials');
+    assert.equal((await access(restarted, refreshed.device_token)).statusCode, 200);
+    const revoked = await restarted.inject({ method: 'POST', url: '/sessions/' + refreshed.session_code + '/revoke',
+      headers: { authorization: 'Bearer ' + refreshed.device_token } });
+    assert.equal(revoked.statusCode, 200);
+    assert.equal((await access(restarted, refreshed.device_token)).statusCode, 401);
+    assert.equal((await restarted.inject({ method: 'POST', url: '/auth/device/refresh', payload: {
+      ...payload, refresh_token: refreshed.refresh_token, request_id: randomBytes(32).toString('hex'),
+    } })).statusCode, 401);
+  } finally { await restarted.close(); }
+});
+
+test('only an active CLI installation can upgrade its existing device session to renewable credentials', async () => {
+  const { app, db } = await createFixture();
+  const identity = { client_type: 'cli', platform: 'test', installation_id: randomUUID(), installation_secret: randomBytes(32).toString('base64url') };
+  const legacy = await app.inject({ method: 'POST', url: '/auth/login', payload: {
+    bind_token: 'bind-route-token', device_name: 'Old CLI', device_identity: identity,
+  } });
+  const issued = legacy.json().data;
+  assert.equal(issued.refresh_token, undefined);
+  const upgrade = (proof) => app.inject({ method: 'POST', url: '/auth/device/upgrade',
+    headers: { authorization: 'Bearer ' + issued.device_token }, payload: { device_identity: proof } });
+  assert.equal((await upgrade({ ...identity, installation_id: randomUUID() })).statusCode, 409);
+  const upgraded = await upgrade(identity);
+  assert.equal(upgraded.statusCode, 200);
+  assert.equal(upgraded.json().data.session_code, issued.session_code);
+  assert.equal(upgraded.json().data.device_token, issued.device_token);
+  assert.equal(upgraded.json().data.session_expires_at, issued.session_expires_at);
+  assert.deepEqual((await upgrade(identity)).json(), upgraded.json(), 'Legacy upgrade is safe to recover before the first refresh');
+  await db.update(schema.deviceSessions).set({ expires_at: new Date(Date.now() - 1000).toISOString() }).where(eq(schema.deviceSessions.code, issued.session_code));
+  assert.equal((await upgrade(identity)).statusCode, 401);
+  assert.equal((await app.inject({ method: 'POST', url: '/auth/device/refresh', payload: {
+    refresh_token: upgraded.json().data.refresh_token, request_id: randomBytes(32).toString('hex'), device_identity: identity,
+  } })).statusCode, 401);
 });
 
 test('auth routes complete login, whoami, logout, and revoke the bearer token', async () => {

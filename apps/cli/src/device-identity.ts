@@ -3,7 +3,7 @@ import { lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { platform } from 'node:os';
 import path from 'node:path';
 import { DomainError } from '@team-synergy/domain';
-import { authDirectory, readAuthConfig, writeAuthConfig } from './auth-store.js';
+import { authDirectory, readAuthConfig, saveAuthConfig } from './auth-store.js';
 import { createApiClient } from './api-client.js';
 
 export interface DeviceIdentity {
@@ -63,11 +63,11 @@ export function readOrCreateDeviceIdentity(apiUrl: string): DeviceIdentity {
 /** Attach a legacy device only when its existing authenticated session proves ownership. */
 export async function identifyExistingCliDevice(apiUrl: string, identity: DeviceIdentity): Promise<void> {
   const previous = readAuthConfig();
-  if (!previous || normalizeApiUrl(previous.api_url) !== apiUrl) return;
-  const api = createApiClient({ baseUrl: apiUrl, deviceToken: previous.device_token, requestTimeoutMs: 10_000 });
+  if (!previous || previous.device_code || normalizeApiUrl(previous.api_url) !== apiUrl) return;
+  const api = createApiClient({ baseUrl: apiUrl, deviceToken: previous.device_token, requestTimeoutMs: 10_000, redirect: 'error' });
   // Older servers and expired sessions must not prevent a fresh explicit authentication.
   const result = await api.request<{ device_code: string }>('POST', '/auth/device-identity', { device_identity: identity });
   if (result.ok && /^[0-9A-HJKMNP-TV-Z]{20}$/.test(result.data.device_code)) {
-    writeAuthConfig({ ...previous, device_code: result.data.device_code });
+    await saveAuthConfig({ ...previous, device_code: result.data.device_code }, previous);
   }
 }

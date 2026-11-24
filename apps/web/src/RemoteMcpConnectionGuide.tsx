@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { ProjectSummary } from './api';
 import { t } from './i18n';
-import { createMcpConnection, listMcpConnections, revokeMcpConnection, type McpConnection, type NewMcpConnection } from './mcpConnectionsApi';
+import { createMcpConnection, listMcpConnections, revokeMcpConnection, type McpConnection, type McpRefreshFailureReason, type NewMcpConnection } from './mcpConnectionsApi';
 import { getPlatformClientConfig, PLATFORM_CLIENT_CONFIG_QUERY_KEY, remoteMcpEndpoint } from './platformClientConfig';
 import { CopyCommand } from './SkillShared';
 import { useLocale } from './useLocale';
@@ -10,6 +10,48 @@ import { WorkspaceDialog } from './WorkspaceDialog';
 import { McpPermissionFields } from './McpPermissionFields';
 
 const connectionsKey = (accountCode: string) => ['remote-mcp-connections', accountCode] as const;
+const connectorCheckInterval = 60_000;
+const refreshFailureLabels: Record<McpRefreshFailureReason, string> = {
+  idle_expired: '连接已超过闲置期限，请在 Agent 中重新授权。',
+  authorization_expired: '连接授权已到期，请在 Agent 中重新授权。',
+  authorization_revoked: '连接授权已被撤销。',
+  access_lost: '账号或项目访问权限已变更，请核对当前权限。',
+  scope_changed: '宿主请求的权限与原授权不符，请在 Agent 中重新授权。',
+  refresh_token_reused: '检测到旧续期凭据被重复使用，连接已撤销。',
+};
+
+function ConnectionTime({ value, label, format }: { value?: string | null; label: string; format: Intl.DateTimeFormat }) {
+  if (!value || !Number.isFinite(Date.parse(value))) return null;
+  return <time dateTime={value}>{t(label, { time: format.format(new Date(value)) })}</time>;
+}
+
+function ConnectionToolset({ storageKey, revision }: { storageKey: string; revision: string }) {
+  const [acknowledged, setAcknowledged] = useState<string | null>(null);
+  useEffect(() => {
+    if (acknowledged !== null) return;
+    let previous: string | null = null;
+    try {
+      previous = localStorage.getItem(storageKey);
+      if (previous === null) localStorage.setItem(storageKey, revision);
+    } catch { /* The page still detects changes while it is open. */ }
+    setAcknowledged(previous ?? revision);
+  }, [acknowledged, revision, storageKey]);
+
+  function acknowledge() {
+    setAcknowledged(revision);
+    try {
+      localStorage.setItem(storageKey, revision);
+    } catch { /* Keep the acknowledgement in this page if storage is disabled. */ }
+  }
+
+  return <div className="mt-2 space-y-2 text-xs text-slate-600">
+    <p>{t('工具目录版本 {version}', { version: revision.slice(0, 12) })}</p>
+    {acknowledged !== null && acknowledged !== revision && <div className="flex flex-wrap items-center gap-2">
+      <p role="status" className="text-amber-800">{t('工具目录已更新。若 Agent 仍显示旧工具，请在宿主刷新此连接的工具列表。')}</p>
+      <button type="button" className="ui-button ui-button-secondary ui-button-compact" onClick={acknowledge}>{t('已刷新工具列表')}</button>
+    </div>}
+  </div>;
+}
 
 export function RemoteMcpConnectionGuide({ accountCode, projects, onLocalSetup }: {
   accountCode: string;
@@ -19,9 +61,15 @@ export function RemoteMcpConnectionGuide({ accountCode, projects, onLocalSetup }
   const locale = useLocale();
   const [creating, setCreating] = useState(false);
   const [revoking, setRevoking] = useState<McpConnection>();
-  const config = useQuery({ queryKey: PLATFORM_CLIENT_CONFIG_QUERY_KEY, queryFn: getPlatformClientConfig, retry: false });
+  const config = useQuery({
+    queryKey: PLATFORM_CLIENT_CONFIG_QUERY_KEY, queryFn: getPlatformClientConfig, retry: false, refetchInterval: connectorCheckInterval,
+  });
   const endpoint = remoteMcpEndpoint(config.data);
-  const list = useQuery({ queryKey: connectionsKey(accountCode), queryFn: ({ signal }) => listMcpConnections(signal), enabled: !!endpoint, retry: false });
+  const release = config.data?.remote_mcp_release;
+  const list = useQuery({
+    queryKey: connectionsKey(accountCode), queryFn: ({ signal }) => listMcpConnections(signal), enabled: !!endpoint, retry: false,
+    refetchInterval: connectorCheckInterval,
+  });
   const dateFormat = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' });
 
   return <div className="space-y-4">
@@ -33,6 +81,10 @@ export function RemoteMcpConnectionGuide({ accountCode, projects, onLocalSetup }
         : config.isError ? <div className="mt-4 flex flex-wrap items-center gap-3"><p role="alert" className="text-sm text-slate-700">{t('无法读取平台接入配置。')}</p><button type="button" className="ui-button ui-button-secondary" onClick={() => void config.refetch()}>{t('重试')}</button></div>
         : endpoint ? <div className="mt-4 max-w-3xl space-y-3">
           <CopyCommand command={endpoint} copyLabel={t('复制服务地址')} />
+          {release && <p className="flex flex-wrap gap-x-3 text-xs text-slate-600">
+            <span>{t('Connector 服务版本 {version}', { version: release.serviceVersion })}</span>
+            {release.sourceRevision && <span title={release.sourceRevision}>{t('部署提交 {revision}', { revision: release.sourceRevision.slice(0, 12) })}</span>}
+          </p>}
           <ol className="list-decimal space-y-3 pl-5 text-sm leading-6 text-slate-700">
             <li><strong>{t('添加连接')}</strong><p>{t('在 Agent 的 MCP 或 Connector 设置中选择远程 HTTP，粘贴服务地址并发起连接。')}</p></li>
             <li><strong>{t('在浏览器登录并授权')}</strong><p>{t('按 Agent 的提示打开 TeamSynergy 登录页。已有登录会话时会直接进入授权页。核对账号、客户端和返回地址，按需允许任务协作或管理团队和项目。')}</p></li>
@@ -46,7 +98,10 @@ export function RemoteMcpConnectionGuide({ accountCode, projects, onLocalSetup }
     </section>
 
     {endpoint && <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="remote-mcp-connections-title">
-      <h2 id="remote-mcp-connections-title" className="text-base font-bold">{t('我的远程连接')}</h2>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 id="remote-mcp-connections-title" className="text-base font-bold">{t('我的远程连接')}</h2>
+        <button type="button" className="ui-button ui-button-secondary ui-button-compact" disabled={list.isFetching} onClick={() => void list.refetch()}>{t('刷新连接状态')}</button>
+      </div>
       <p className="mt-1 text-sm leading-6 text-slate-600">{t('查看各连接的授权范围和权限，或随时撤销授权。')}</p>
       {list.isPending ? <p role="status" className="mt-4 text-sm text-slate-500">{t('正在读取远程连接…')}</p>
         : list.isError ? <div className="mt-4 flex flex-wrap items-center gap-3"><p role="alert" className="text-sm text-slate-700">{t('无法读取远程连接。')}</p><button type="button" className="ui-button ui-button-secondary" onClick={() => void list.refetch()}>{t('重试')}</button></div>
@@ -54,9 +109,17 @@ export function RemoteMcpConnectionGuide({ accountCode, projects, onLocalSetup }
           {list.data.map(connection => {
             const expires = new Date(connection.expiresAt);
             const validDate = Number.isFinite(expires.getTime());
-            const status = connection.revokedAt ? '已撤销' : !validDate || expires.getTime() <= Date.now() ? '已过期' : '已授权';
+            const now = Date.now();
+            const open = !connection.revokedAt && validDate && expires.getTime() > now;
+            const accessExpired = connection.accessExpiresAt && Date.parse(connection.accessExpiresAt) <= now;
+            const status = connection.revokedAt ? '已撤销' : !open ? '已过期'
+              : accessExpired ? connection.canRefresh ? '等待宿主续期' : '需要重新连接' : '已授权';
+            const failure = connection.lastRefreshFailureReason && connection.lastRefreshFailedAt
+              && (!connection.lastRefreshedAt || Date.parse(connection.lastRefreshFailedAt) >= Date.parse(connection.lastRefreshedAt))
+              ? refreshFailureLabels[connection.lastRefreshFailureReason] : undefined;
             const scope = connection.projectCode === null ? t('本账号可访问的项目')
               : t('仅限项目 {project}', { project: projects?.find(item => item.code === connection.projectCode)?.name ?? connection.projectCode });
+            const toolsetStorageKey = `tsp:mcp-toolset:${endpoint}:${accountCode}:${connection.code}`;
             return <li key={connection.code} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
               <div className="min-w-0">
                 <h3 className="break-words text-sm font-semibold text-slate-900">{connection.name}</h3>
@@ -65,11 +128,22 @@ export function RemoteMcpConnectionGuide({ accountCode, projects, onLocalSetup }
                   {connection.allowWorkspaceWrite && ' · ' + t('管理团队和项目')}
                   {!connection.allowTaskWrite && !connection.allowWorkspaceWrite && ' · ' + t('仅查看')}
                   {connection.allowPersonalMemory && <> · {t('含账号偏好')}</>}</p>
+                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600">
+                  {connection.credentialType === 'manual' && <span>{t('手动凭据')}</span>}
+                  {connection.canRefresh && <span>{t('支持自动续期')}</span>}
+                  <ConnectionTime value={connection.expiresAt} label={connection.absoluteExpiresAt && connection.expiresAt !== connection.absoluteExpiresAt ? '闲置到期 {time}' : '到期时间 {time}'} format={dateFormat} />
+                  {connection.absoluteExpiresAt !== connection.expiresAt && <ConnectionTime value={connection.absoluteExpiresAt} label="重新授权期限 {time}" format={dateFormat} />}
+                  <ConnectionTime value={connection.lastRefreshedAt} label="最近续期 {time}" format={dateFormat} />
+                </div>
+                {failure && <p className="mt-1 text-xs text-amber-800">
+                  <ConnectionTime value={connection.lastRefreshFailedAt} label="续期失败 {time}" format={dateFormat} />
+                  {' · '}{t(failure)}
+                </p>}
+                {open && connection.toolsetRevision && <ConnectionToolset key={toolsetStorageKey} storageKey={toolsetStorageKey} revision={connection.toolsetRevision} />}
               </div>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-slate-600">
                 <span className="font-medium text-slate-700">{t(status)}</span>
-                {validDate && <time dateTime={connection.expiresAt}>{t('到期时间 {time}', { time: dateFormat.format(expires) })}</time>}
-                {status === '已授权' && <button type="button" className="ui-button ui-button-secondary ui-button-compact" onClick={() => setRevoking(connection)}
+                {open && <button type="button" className="ui-button ui-button-secondary ui-button-compact" onClick={() => setRevoking(connection)}
                   aria-label={t('撤销连接 {name}', { name: connection.name })}>{t('撤销连接')}</button>}
               </div>
             </li>;

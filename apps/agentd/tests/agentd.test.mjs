@@ -1,12 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { createServer } from 'node:http';
+import { writeDeviceProfile } from '@team-synergy/contracts/device-session';
+import { apiRequest } from '../dist/api.js';
 import { buildServer } from '../../core-api/dist/server.js';
 import { eq } from 'drizzle-orm';
 import { Pool } from 'pg';
@@ -15,6 +18,7 @@ import { assertOwnedTestDatabase, requireTestContext } from '../../../scripts/te
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const cliEntry = path.resolve(here, '../dist/index.js');
+const tspEntry = path.resolve(here, '../../cli/dist/index.js');
 const migrationsFolder = path.resolve(here, '../../../packages/persistence/drizzle');
 const testDatabaseUrl = requireTestContext().databaseUrl;
 let databaseEnsured = false;
@@ -94,27 +98,34 @@ async function fixture() {
   });
   const deviceToken = 'agentd-test-device-token';
   await db.insert(schema.devices).values({ code: code(8), principal_id: IDS.user, credential_hash: createHash('sha256').update(deviceToken).digest('hex'), created_at: '2026-01-01T00:00:00.000Z' });
-  const app = await buildServer({ db, logger: false });
+  let app = await buildServer({ db, logger: false });
   const apiUrl = await app.listen({ host: '127.0.0.1', port: 0 });
   const env = { ...process.env, TSP_DATABASE_URL: 'postgres://invalid:invalid@127.0.0.1:1/must_not_connect', ACP_API_URL: apiUrl, ACP_DEVICE_TOKEN: deviceToken, AGENTCTL_HOME: path.join(root, 'auth'), AGENTD_HOME: path.join(root, 'journal'), AGENTD_WATCHDOG_INTERVAL_MS: '250' };
-  const run = (args, overrides = {}) => new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [cliEntry, ...args], {
-    cwd: repo,
-    env: { ...env, ...overrides },
-  });
+  const invoke = (entry, args, overrides = {}, workingDirectory = repo) => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [entry, ...args], {
+      cwd: workingDirectory,
+      env: { ...env, ...overrides },
+    });
     let stdout = ''; let stderr = '';
     child.stdout.on('data', chunk => { stdout += chunk.toString(); });
     child.stderr.on('data', chunk => { stderr += chunk.toString(); });
     child.once('error', reject);
     child.once('close', status => resolve({ status, stdout, stderr }));
   });
+  const run = (args, overrides, workingDirectory) => invoke(cliEntry, args, overrides, workingDirectory);
 
   return {
     root,
     run,
+    tsp: (args, overrides) => invoke(tspEntry, args, overrides),
     db,
     apiUrl,
     deviceToken,
+    async restart() {
+      await app.close();
+      app = await buildServer({ db, logger: false });
+      assert.equal(await app.listen({ host: '127.0.0.1', port: Number(new URL(apiUrl).port) }), apiUrl);
+    },
     command(name, source) {
       const file = path.join(repo, `${name}.mjs`);
       writeFileSync(file, source);
@@ -167,6 +178,210 @@ function processIsAlive(processId) {
     return false;
   }
 }
+
+test('a proxy restart is a transient transport failure while explicit auth revocation still fences', async () => {
+  const proxy = createServer((request, response) => {
+    if (request.url === '/gateway') { response.writeHead(502, { 'Content-Type': 'text/html' }).end('<h1>Bad Gateway</h1>'); return; }
+    response.writeHead(401, { 'Content-Type': 'application/json' }).end(JSON.stringify({ ok: false, error: { code: 'unauthorized', message: 'revoked' } }));
+  });
+  await new Promise(resolve => proxy.listen(0, '127.0.0.1', resolve));
+  try {
+    const config = { apiUrl: 'http://127.0.0.1:' + proxy.address().port, deviceToken: 'fixture' };
+    await assert.rejects(apiRequest(config, 'GET', '/gateway'), { code: 'api_unreachable' });
+    await assert.rejects(apiRequest(config, 'GET', '/revoked'), { code: 'unauthorized' });
+  } finally { await new Promise(resolve => proxy.close(resolve)); }
+});
+
+test('tsp commands and a detached agentd share one rotation, survive API restart, and stop on device revocation', { timeout: 25_000 }, async () => {
+  const f = await fixture();
+  const local = { ACP_DEVICE_TOKEN: '', ACP_TOKEN: '', ACP_DEVICE_SESSION_CODE: '' };
+  const directory = path.join(f.root, 'auth');
+  const readProfile = () => JSON.parse(readFileSync(path.join(directory, 'auth.json'), 'utf8'));
+  const bindToken = 'isolated-agentd-renewal-fixture';
+  const call = (route, token, method = 'GET') => fetch(f.apiUrl + route, { method, headers: { authorization: 'Bearer ' + token } });
+  try {
+    await f.db.update(schema.users).set({ bind_token_hash: createHash('sha256').update(bindToken).digest('hex'),
+      bind_token_expires_at: new Date(Date.now() + 60_000).toISOString() }).where(eq(schema.users.id, IDS.user));
+    await parseSuccess(f.tsp(['auth', 'login', '--api', f.apiUrl, '--token', bindToken], local));
+    const issued = readProfile();
+    assert.ok(issued.refresh_token);
+    const wrong = await f.tsp(['auth', 'status'], { ...local, ACP_API_URL: 'http://127.0.0.1:1' });
+    assert.equal(JSON.parse(wrong.stdout).error.code, 'auth_profile_mismatch');
+    assert.equal(wrong.stdout.includes(issued.device_token) || wrong.stdout.includes(issued.refresh_token), false);
+    const status = await parseSuccess(f.tsp(['auth', 'status'], local));
+    assert.equal(status.credential_source, 'device_profile');
+    assert.equal(status.renewable, true);
+    // Model an active session installed before renewable metadata was added.
+    await f.db.update(schema.deviceSessions).set({ refresh_token_hash: null, access_expires_at: null })
+      .where(eq(schema.deviceSessions.code, issued.session_code));
+    writeDeviceProfile(directory, { ...issued, refresh_token: undefined, access_expires_at: undefined, session_code: undefined });
+    const mockCommand = f.command('renewal-watchdog', 'setInterval(() => {}, 1000);\n');
+    const session = await parseSuccess(f.run(['start', '--run', CODES.run, '--agent-command', mockCommand], { ...local, AGENTCTL_HOME: 'auth' }, f.root));
+    const first = readProfile();
+    assert.ok(first.refresh_token);
+    assert.equal(first.session_code, issued.session_code);
+    const soon = new Date(Date.now() + 2 * 60_000).toISOString();
+    writeDeviceProfile(directory, { ...first, access_expires_at: soon });
+    const callers = await Promise.all([
+      parseSuccess(f.tsp(['auth', 'status'], local)),
+      parseSuccess(f.tsp(['auth', 'whoami'], local)),
+      parseSuccess(f.run(['sessions', '--run', CODES.run], local)),
+    ]);
+    const next = readProfile();
+    assert.notEqual(next.device_token, first.device_token);
+    assert.equal(next.session_code, first.session_code);
+    assert.equal(next.device_code, first.device_code);
+    assert.ok(next.last_refreshed_at);
+    assert.equal(callers[0].last_refreshed_at, next.last_refreshed_at);
+    const [persisted] = await f.db.select().from(schema.deviceSessions).where(eq(schema.deviceSessions.code, next.session_code));
+    assert.equal(persisted.previous_refresh_token_hash, createHash('sha256').update(first.refresh_token).digest('hex'));
+    assert.equal(processIsAlive(session.process_id), true);
+    await f.restart();
+    assert.equal((await call('/auth/whoami', next.device_token)).status, 200);
+    assert.equal((await parseSuccess(f.run(['sessions', '--run', CODES.run], local))).sessions[0].status, 'running');
+    assert.equal((await call('/devices/' + next.device_code + '/revoke', f.deviceToken, 'POST')).status, 200);
+    assert.equal((await call('/auth/whoami', next.device_token)).status, 401);
+    assert.equal((await call('/auth/whoami', first.device_token)).status, 401);
+    const deadline = Date.now() + 6_000;
+    while (processIsAlive(session.process_id) && Date.now() < deadline) await delay(100);
+    assert.equal(processIsAlive(session.process_id), false);
+  } finally {
+    await f.run(['stop', '--run', CODES.run], local);
+    await f.cleanup();
+  }
+});
+
+const upgradeDistributions = [
+  process.env.TSP_UPGRADE_LEGACY_DIST,
+  process.env.TSP_UPGRADE_BRIDGE_DIST,
+  process.env.TSP_UPGRADE_NEXT_DIST,
+];
+
+test('Windows packaged CLI upgrade and rollback preserve login, workspace binding and a live Run', {
+  skip: process.platform !== 'win32' || !upgradeDistributions.every(Boolean),
+  timeout: 180_000,
+}, async () => {
+  const distribution = mkdtempSync(path.join(os.tmpdir(), 'tsp-upgrade-feed-'));
+  const priorDistribution = process.env.ACP_CLI_DIST_DIR;
+  process.env.ACP_CLI_DIST_DIR = distribution;
+  function publish(source) {
+    const manifestFile = path.join(source, 'manifest.json');
+    const manifest = JSON.parse(readFileSync(manifestFile, 'utf8'));
+    const artifact = manifest.artifacts.find((entry) => entry.platform === 'win32' && entry.arch === process.arch);
+    assert.ok(artifact);
+    copyFileSync(path.join(source, artifact.filename), path.join(distribution, artifact.filename));
+    copyFileSync(manifestFile, path.join(distribution, 'manifest.json'));
+    return artifact.release;
+  }
+  let f;
+  let stopInstalled;
+  try {
+    f = await fixture();
+    const installDir = path.join(f.root, 'managed CLI');
+    const work = path.join(f.root, 'workspace', 'repo');
+    const authDir = path.join(f.root, 'auth');
+    const binding = path.join(work, '.agent', 'bound-project.yaml');
+    const env = {
+      ...process.env,
+      TSP_DATABASE_URL: 'postgres://invalid:invalid@127.0.0.1:1/must_not_connect',
+      ACP_API_URL: f.apiUrl, ACP_DEVICE_TOKEN: undefined, ACP_TOKEN: undefined, ACP_DEVICE_SESSION_CODE: undefined,
+      AGENTCTL_HOME: authDir, AGENTD_HOME: path.join(f.root, 'journal'),
+      AGENTD_WATCHDOG_INTERVAL_MS: '250',
+    };
+    function powershell(args, overrides = {}) {
+      return new Promise((resolve, reject) => {
+        const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', ...args], {
+          cwd: work, env: { ...env, ...overrides }, windowsHide: true,
+        });
+        let stdout = ''; let stderr = '';
+        child.stdout.on('data', (chunk) => { stdout += chunk; });
+        child.stderr.on('data', (chunk) => { stderr += chunk; });
+        child.once('error', reject);
+        // An old detached process can keep a cmd.exe pipe alive after the launcher exits.
+        child.once('exit', (status) => setImmediate(() => {
+          child.stdout.destroy(); child.stderr.destroy();
+          resolve({ status, stdout, stderr });
+        }));
+      });
+    }
+    function install(source) {
+      return powershell(['-File', path.join(source, 'install.ps1'), '-BaseUrl', f.apiUrl, '-InstallDir', installDir, '-NoModifyPath']);
+    }
+    function launch(binary, ...args) {
+      return powershell([
+        '-Command',
+        '$launcherArgs = @((ConvertFrom-Json $env:TSP_TEST_ARGUMENTS) | ForEach-Object { $_ }); & $env:TSP_TEST_LAUNCHER @launcherArgs; exit $LASTEXITCODE',
+      ], { TSP_TEST_LAUNCHER: path.join(installDir, 'bin', `${binary}.cmd`), TSP_TEST_ARGUMENTS: JSON.stringify(args) });
+    }
+    const tsp = (...args) => parseSuccess(launch('tsp', ...args));
+    stopInstalled = () => launch('agentd', 'stop', '--run', CODES.run);
+    const old = publish(upgradeDistributions[0]);
+    assert.ok(old.startsWith('0.1.0-'));
+    const legacyInstall = await install(upgradeDistributions[0]);
+    assert.equal(legacyInstall.status, 0, legacyInstall.stderr);
+    const bindToken = 'isolated-packaged-cli-upgrade-fixture';
+    await f.db.update(schema.users).set({ bind_token_hash: createHash('sha256').update(bindToken).digest('hex'),
+      bind_token_expires_at: new Date(Date.now() + 60_000).toISOString() }).where(eq(schema.users.id, IDS.user));
+    await tsp('auth', 'login', '--api', f.apiUrl, '--token', bindToken);
+    const account = await tsp('auth', 'whoami');
+    const profile = () => JSON.parse(readFileSync(path.join(authDir, 'auth.json'), 'utf8'));
+    const legacyProfile = profile();
+    assert.equal(legacyProfile.refresh_token, undefined);
+    await tsp('project', 'bind', CODES.project);
+    const bound = await tsp('project', 'current');
+    const initialBinding = readFileSync(binding, 'utf8');
+    const active = await parseSuccess(launch('agentd', 'start', '--run', CODES.run, '--agent-command',
+      f.command('packaged-upgrade-watchdog', 'setInterval(() => {}, 1000);\n')));
+    assert.equal(active.status, 'running');
+
+    const bridge = publish(upgradeDistributions[1]);
+    const bridgeInstall = await install(upgradeDistributions[1]);
+    assert.equal(bridgeInstall.status, 0, bridgeInstall.stderr);
+    assert.equal((await tsp('version')).release, bridge);
+    const next = publish(upgradeDistributions[2]);
+    assert.notEqual(bridge, next);
+    const check = await tsp('update', '--check');
+    assert.equal(check.available, next);
+    assert.equal(check.update_available, true);
+    const unconfirmed = await launch('tsp', 'update');
+    assert.equal(JSON.parse(unconfirmed.stdout).error.code, 'cli_update_confirmation_required');
+    assert.equal((await tsp('version')).release, bridge);
+    assert.equal((await tsp('update', '--yes')).updated, true);
+    assert.equal((await tsp('version')).release, next);
+    assert.equal((await tsp('update', '--check')).update_available, false);
+    assert.deepEqual(await tsp('auth', 'whoami'), account);
+    const [legacySession] = await f.db.select().from(schema.deviceSessions)
+      .where(eq(schema.deviceSessions.token_hash, createHash('sha256').update(legacyProfile.device_token).digest('hex')));
+    assert.equal(legacySession.refresh_token_hash, null);
+    assert.equal(legacySession.access_expires_at, null, 'the fixed token must keep its original lifetime during the Run');
+    assert.ok(profile().upgrade_retry_at > Date.now());
+    assert.deepEqual(await tsp('project', 'current'), bound);
+    assert.equal(readFileSync(binding, 'utf8'), initialBinding);
+    const stillRunning = await parseSuccess(launch('agentd', 'sessions', '--run', CODES.run));
+    assert.equal(stillRunning.sessions[0].session_code, active.session_code);
+    assert.equal(stillRunning.sessions[0].status, 'running');
+    assert.equal(processIsAlive(active.process_id), true);
+    assert.equal((await tsp('update', '--rollback', '--yes')).release, bridge);
+    assert.equal((await tsp('version')).release, bridge);
+    assert.deepEqual(await tsp('auth', 'whoami'), account);
+    assert.deepEqual(await tsp('project', 'current'), bound);
+    assert.equal(processIsAlive(active.process_id), true);
+    await parseSuccess(launch('agentd', 'stop', '--run', CODES.run));
+    await f.db.update(schema.runLeases).set({ expires_at: new Date(Date.now() - 1000).toISOString() });
+    writeDeviceProfile(authDir, { ...profile(), upgrade_retry_at: 0 });
+    assert.deepEqual(await tsp('auth', 'whoami'), account);
+    assert.equal(profile().session_code, legacySession.code);
+    assert.ok(profile().refresh_token, 'the same legacy authorization should renew after the original Run ends');
+  } finally {
+    if (priorDistribution === undefined) delete process.env.ACP_CLI_DIST_DIR;
+    else process.env.ACP_CLI_DIST_DIR = priorDistribution;
+    try {
+      if (stopInstalled) await stopInstalled();
+      if (f) await f.cleanup();
+    }
+    finally { rmSync(distribution, { recursive: true, force: true }); }
+  }
+});
 
 test('start 使用注入命令启动并落库 running Session 与审计状态', async () => {
   const f = await fixture();

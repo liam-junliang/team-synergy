@@ -2,7 +2,7 @@
 name: team-synergy-connector
 description: 通过 TeamSynergy HTTP Connector 按项目查资料、记忆和代码，创建和处理任务，以及提交可复核的交付证据。适用于已接入 Connector 的 Agent。
 metadata:
-  version: 1.1.0
+  version: 1.2.0
 ---
 
 # 使用 TeamSynergy Connector
@@ -10,6 +10,8 @@ metadata:
 ## 确认连接和项目
 
 用当前 HTTP Connector 的 `get_connection_context {}` 核对账号和授权。用同一连接的 `list_projects` 匹配用户所说的项目，保留项目名、`projectCode` 和角色。若有同名项目，按团队与项目编码请操作者确认。
+
+从 `connector` 读取实际服务版本、部署提交和工具目录版本。若宿主保留了同一连接上次返回的目录版本，调用 `get_connection_context` 时传入完整的 `knownToolsetRevision`。收到 `toolsetChanged: true` 时，请宿主重新执行 `tools/list`，再用新工具列表继续。宿主无法从当前会话刷新时，请操作者刷新该连接。已有授权有效时可继续沿用。
 
 同一对话可以处理多个项目。每次项目调用都传入该项目的 `projectCode`，并沿用返回这个编码的连接。证据、对象编码和修订也按项目核对。遇到 `project_not_found` 时先检查调用是否走了同一个工具命名空间，再从该连接重查项目和访问权限。
 

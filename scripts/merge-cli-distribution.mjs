@@ -10,7 +10,9 @@ for (const entry of await fs.readdir(input, { withFileTypes: true })) {
   const directory = path.join(input, entry.name);
   const next = JSON.parse(await fs.readFile(path.join(directory, 'manifest.json'), 'utf8'));
   if (next.schema_version !== 1 || !/^\d+\.\d+\.\d+$/.test(next.version) || !/^22\.\d+\.\d+$/.test(next.node_version)
-    || !Array.isArray(next.artifacts) || (manifest && (manifest.version !== next.version || manifest.node_version !== next.node_version))) throw new Error('Release version mismatch');
+    || (next.source_revision != null && !/^[a-f0-9]{40}$/.test(next.source_revision))
+    || !Array.isArray(next.artifacts) || (manifest && (manifest.version !== next.version || manifest.node_version !== next.node_version
+      || (manifest.source_revision ?? null) !== (next.source_revision ?? null)))) throw new Error('Release version mismatch');
   manifest ??= next;
   for (const artifact of next.artifacts) {
     const format = artifact.platform === 'win32' ? 'zip' : 'tar.gz';

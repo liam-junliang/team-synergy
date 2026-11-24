@@ -10,7 +10,10 @@ import { fail, insertAudit, now, type TaskResult } from './task-service.js';
 import { createDeviceLogin, parseDeviceIdentity, resolveSessionToken, revokeStableDevice } from './auth-device.js';
 export { MAX_DEVICES_PER_USER } from './auth-device.js';
 
-export interface BindDeviceResult { device_code: string; device_token: string; user_code: string; device_name: string; session_code?: string }
+export interface BindDeviceResult {
+  device_code: string; device_token: string; user_code: string; device_name: string; session_code?: string;
+  access_expires_at?: string; session_expires_at?: string; refresh_token?: string;
+}
 export interface ChangePasswordResult { user_code: string; revoked_devices: number }
 export interface ResolveTokenResult { principal_code: string; password_change_required: boolean; device_code: string; session_code: string }
 export interface RevokeDeviceResult { device_code: string; principal_code: string }
@@ -22,7 +25,7 @@ export function createAuthUseCases(db: Db) {
   };
   const failureLimit = positiveSetting('TSP_AUTH_FAILURE_LIMIT', 5);
   const lockSeconds = positiveSetting('TSP_AUTH_LOCK_SECONDS', 900);
-  async function bindDevice(bindToken: string, deviceName: string, principalCode?: string, identityInput?: unknown): Promise<TaskResult<BindDeviceResult>> {
+  async function bindDevice(bindToken: string, deviceName: string, principalCode?: string, identityInput?: unknown, renewable = false): Promise<TaskResult<BindDeviceResult>> {
     try {
       if (!bindToken) throw new DomainError('auth_bind_token_invalid', '绑定 token 无效');
       const identity = parseDeviceIdentity(identityInput);
@@ -33,7 +36,7 @@ export function createAuthUseCases(db: Db) {
         if (!user) throw new DomainError('auth_bind_token_invalid', '绑定 token 无效或已使用');
         const expiry = user.bind_token_expires_at ? Date.parse(user.bind_token_expires_at) : NaN;
         if (!Number.isFinite(expiry) || expiry <= Date.now()) throw new DomainError('auth_bind_token_expired', '绑定 token 已过期');
-        const login = await createDeviceLogin(tx, user, deviceName, identity);
+        const login = await createDeviceLogin(tx, user, deviceName, identity, renewable);
         await tx.update(schema.users).set({ bind_token_hash: null, bind_token_expires_at: null }).where(eq(schema.users.id, user.id));
         return login;
       });
@@ -41,7 +44,7 @@ export function createAuthUseCases(db: Db) {
     } catch (error) { return fail(error); }
   }
 
-  async function loginWithPassword(account: string, password: string, deviceName: string, identityInput?: unknown, context: LoginSecurityContext = {}): Promise<TaskResult<BindDeviceResult>> {
+  async function loginWithPassword(account: string, password: string, deviceName: string, identityInput?: unknown, context: LoginSecurityContext = {}, renewable = false): Promise<TaskResult<BindDeviceResult>> {
     try {
       const normalizedAccount = normalizeAccount(account);
       if (!normalizedAccount || !password || password.length > 128) {
@@ -80,7 +83,7 @@ export function createAuthUseCases(db: Db) {
           const expiry = user.password_expires_at ? Date.parse(user.password_expires_at) : NaN;
           if (!Number.isFinite(expiry) || expiry <= Date.now()) return fail<BindDeviceResult>(new DomainError('auth_initial_password_expired', '初始密码已过期'));
         }
-        const data = await createDeviceLogin(tx, user, deviceName, identity);
+        const data = await createDeviceLogin(tx, user, deviceName, identity, renewable);
         await tx.update(schema.users).set({ login_failure_count: 0, login_locked_until: null }).where(eq(schema.users.id, user.id));
         return { ok: true as const, data };
       });

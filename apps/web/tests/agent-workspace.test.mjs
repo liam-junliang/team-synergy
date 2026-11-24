@@ -66,6 +66,28 @@ test('Connector authorization accepts only absolute HTTPS or loopback HTTP callb
   for (const value of ['javascript:alert(1)', 'https://user:pass@agent.example/callback', 'http://notlocalhost.example/callback', 'https://agent.example/callback#fragment', '/callback', '//agent.example/callback']) assert.equal(mcpConsent.safeMcpCallback(value), null);
 });
 
+test('connector status distinguishes waiting for renewal, reconnect and revoked reuse', async () => {
+  const { RemoteMcpConnectionGuide } = await vite.ssrLoadModule('/src/RemoteMcpConnectionGuide.tsx');
+  const time = offset => new Date(Date.now() + offset).toISOString();
+  const connection = {
+    projectCode: null, allowPersonalMemory: false, allowTaskWrite: false, revokedAt: null,
+    credentialType: 'oauth', accessExpiresAt: time(-60_000), expiresAt: time(86_400_000),
+  };
+  const html = render(RemoteMcpConnectionGuide, { accountCode: 'U', onLocalSetup() {} }, [
+    [['platform-client-config'], { remote_mcp_url: 'https://app.example/api/mcp' }],
+    [['remote-mcp-connections', 'U'], [
+      { ...connection, code: 'A', name: 'Renewable client', canRefresh: true, lastRefreshedAt: time(-120_000), absoluteExpiresAt: time(172_800_000) },
+      { ...connection, code: 'B', name: 'Nonrenewable client', canRefresh: false },
+      { ...connection, code: 'C', name: 'Revoked client', canRefresh: true, lastRefreshFailureReason: 'refresh_token_reused',
+        revokedAt: time(-60_000), lastRefreshFailedAt: time(-60_000) },
+    ]],
+  ]);
+  for (const label of ['等待宿主续期', '需要重新连接', '已撤销', '最近续期', '续期失败', '旧续期凭据被重复使用', '刷新连接状态']) {
+    assert.ok(html.includes(label), label);
+  }
+  assert.equal((html.match(/aria-label="撤销连接 /g) ?? []).length, 2, 'The two active grants can still be revoked after their access token expires');
+});
+
 test('Connector consent authorizes the account with optional permissions and no project selection', () => {
   const user = { code: 'U', account: 'liam', display_name: 'Liam' };
   const request = 'a'.repeat(64);
@@ -288,8 +310,10 @@ test('Agent connection defaults to HTTP Connector and offers local setup when th
   for (const host of ['codex', 'dsh', 'opencode', 'claudecode']) assert.ok(local.includes(`value="${host}"`));
 
   const endpoint = 'https://workspace.example/agent/mcp';
-  const entries = [[['platform-client-config'], { ...base, remote_mcp_url: endpoint }], [['remote-mcp-connections', 'U'], [
-    { code: 'G', name: 'Personal office', projectCode: null, allowPersonalMemory: false, allowTaskWrite: false, expiresAt: '2099-01-01T00:00:00Z', revokedAt: null },
+  const sourceRevision = '12'.repeat(20);
+  const toolsetRevision = 'ab'.repeat(32);
+  const entries = [[['platform-client-config'], { ...base, remote_mcp_url: endpoint, remote_mcp_release: { serviceVersion: '0.2.0', sourceRevision } }], [['remote-mcp-connections', 'U'], [
+    { code: 'G', name: 'Personal office', projectCode: null, allowPersonalMemory: false, allowTaskWrite: false, toolsetRevision, expiresAt: '2099-01-01T00:00:00Z', revokedAt: null },
     { code: 'K', name: 'Old personal', projectCode: 'P', allowPersonalMemory: true, allowTaskWrite: true, expiresAt: '2099-01-01T00:00:00Z', revokedAt: '2026-01-01T00:00:00Z' },
     { code: 'M', name: 'Project workspace', projectCode: null, allowPersonalMemory: false, allowTaskWrite: false, allowWorkspaceWrite: true, expiresAt: '2099-01-01T00:00:00Z', revokedAt: null },
   ]]];
@@ -298,6 +322,9 @@ test('Agent connection defaults to HTTP Connector and offers local setup when th
   assert.match(remote, /aria-pressed="true"[^>]*>HTTP Connector \(recommended\)<\/button>/);
   assert.match(remote, /https:\/\/workspace\.example\/agent\/mcp/);
   assert.match(remote, /Add TeamSynergy Connector/);
+  assert.ok(remote.includes('Connector service version 0.2.0'));
+  assert.ok(remote.includes('Deployed commit 121212121212'));
+  assert.ok(remote.includes('Tool catalog revision abababababab'));
   assert.match(remote, /No Connector download or CLI installation is needed/);
   assert.match(remote, /supports remote HTTP MCP and OAuth/);
   assert.match(remote, /Authorization is tied to your account/);

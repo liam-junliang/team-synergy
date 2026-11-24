@@ -47,7 +47,7 @@ export function hasAuthenticatedSession(request: FastifyRequest): boolean {
 export function isPublicRoute(method: string, pathname: string): boolean {
   if (method === 'GET' && ((pathname === '/health' || pathname === '/ready') || ['/cli/manifest.json', '/cli/install.ps1', '/cli/install.sh'].includes(pathname))) return true;
   if (method === 'GET' && /^\/cli\/releases\/[A-Za-z0-9][A-Za-z0-9._-]*$/.test(pathname)) return true;
-  return method === 'POST' && ['/auth/login', '/auth/password-login', '/auth/web/login', '/auth/device/start', '/auth/device/token', '/security/csp-report'].includes(pathname);
+  return method === 'POST' && ['/auth/login', '/auth/password-login', '/auth/web/login', '/auth/device/start', '/auth/device/token', '/auth/device/refresh', '/security/csp-report'].includes(pathname);
 }
 
 /** Resolve Bearer credentials before routes, retaining x-principal-code for non-bearer transition flows. */

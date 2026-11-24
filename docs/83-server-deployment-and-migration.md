@@ -111,6 +111,10 @@ sudo /usr/local/sbin/tsp-deploy deploy-loaded FULL_COMMIT_SHA \
 
 ## HTTP Connector 发布核对
 
+Connector 服务版本来自 API 包，部署提交来自 API 镜像的 `SOURCE_REVISION`。上线后可用已有授权调用 `get_connection_context` 核对服务版本、部署提交和工具目录指纹。跨版本比对时传入 `knownToolsetRevision`，把目录变化与仅更换部署提交区分开。宿主缓存目录时，从宿主重新读取工具列表。
+
+同批升级 API 和 CLI 时，先等待可信 main CI 完成并部署 API/Web，检查两者健康且运行同一个完整提交，核验数据库迁移和已有 OAuth 授权；再从同一个 main 提交运行 `Platform CLI distribution`。核验制品来源、清单中的源码提交，以及六个安装包的大小与 SHA-256 后再切换公开清单。发布后用旧安装目录验收登录、项目绑定、运行中 Run 和回退。
+
 现有业务库的独立部署入口可能只允许迁移指纹相同的应用版本。首次启用 Connector 需要迁移 0065 和 0066。先在恢复的隔离库演练备份、迁移和新版本就绪检查，再安排业务库停写、备份、迁移和 API/Web 联动切换。旧版本的就绪检查绑定原迁移头，业务迁移与切换要在同一发布窗口完成。
 
 在私有 `api.env` 设置 `TSP_REMOTE_MCP_URL=https://<平台地址>/api/mcp`，与 `TSP_WEB_ORIGIN` 同源。部署如果挂载了宿主机 Web 模板，将仓库模板的两个 `/.well-known` OAuth 发现路由合入挂载文件，并复核原有 HTTPS 和 Markdown 路由。公网入口应按验证过的连接来源限流，OAuth 相关访问日志保留路径并省略查询参数。保留应用层限流，代理链未识别真实客户端时会共用配额。

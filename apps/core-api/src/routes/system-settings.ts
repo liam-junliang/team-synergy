@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { createSystemSettingsUseCases } from '@team-synergy/application';
 import type { Db } from '@team-synergy/persistence';
 import { hasAuthenticatedSession, unauthorized } from '../auth.js';
+import { remoteMcpRelease } from '../remote-mcp-release.js';
 
 export function registerSystemSettingsRoutes(app: FastifyInstance, db: Db, remoteMcpUrl?: string): void {
   const settings = createSystemSettingsUseCases(db);
@@ -14,8 +15,11 @@ export function registerSystemSettingsRoutes(app: FastifyInstance, db: Db, remot
     return settings.updateSettings(request.principal, request.body);
   });
   app.get('/platform/client-config', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
     if (!hasAuthenticatedSession(request) || !request.principal) return unauthorized(reply);
     const config = await settings.clientConfig(request.principal);
-    return config.ok && remoteMcpUrl ? { ...config, data: { ...config.data, remote_mcp_url: remoteMcpUrl } } : config;
+    return config.ok && remoteMcpUrl ? {
+      ...config, data: { ...config.data, remote_mcp_url: remoteMcpUrl, remote_mcp_release: remoteMcpRelease() },
+    } : config;
   });
 }

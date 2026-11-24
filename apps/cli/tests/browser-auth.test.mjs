@@ -11,6 +11,7 @@ import { verificationUrl } from '../dist/browser-auth.js';
 import { writeAuthConfig, localDeviceFingerprint, matchesLocalDeviceFingerprint, removeAuthConfig } from '../dist/auth-store.js';
 import { credentialFingerprint, matchesCredentialFingerprint, readApiConfig } from '../../agentd/dist/api.js';
 import { createHash } from 'node:crypto';
+import { localDeviceSession, readDeviceProfile, writeDeviceProfile } from '@team-synergy/contracts/device-session';
 
 test('CLI installation identity persists across logout, is platform-scoped and fails closed on corruption', () => {
   const home = mkdtempSync(path.join(tmpdir(), 'tsp-identity-'));
@@ -75,6 +76,57 @@ test('same-device reauthorization preserves local handover and agentd ownership,
   }
 });
 
+test('temporary renewal failure permits still-valid access and preserves the request key for the next attempt', async () => {
+  const home = mkdtempSync(path.join(tmpdir(), 'tsp-renew-retry-'));
+  const previous = process.env.AGENTCTL_HOME;
+  process.env.AGENTCTL_HOME = home;
+  const access = 'a'.repeat(64);
+  const successor = 'b'.repeat(64);
+  const refresh = 'c'.repeat(64);
+  const sessionCode = '0'.repeat(20);
+  const cutoff = new Date(Date.now() + 90 * 24 * 60 * 60_000).toISOString();
+  const keys = [];
+  const service = createServer(async (request, reply) => {
+    assert.equal(request.url, '/auth/device/refresh');
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    keys.push(payload.request_id);
+    assert.equal(payload.refresh_token, refresh);
+    if (keys.length === 1) { reply.writeHead(503).end(); return; }
+    reply.setHeader('content-type', 'application/json');
+    reply.end(JSON.stringify({ ok: true, data: {
+      device_token: successor, session_code: sessionCode, refresh_token: 'd'.repeat(64),
+      access_expires_at: new Date(Date.now() + 60 * 60_000).toISOString(), session_expires_at: cutoff,
+    } }));
+  });
+  await new Promise(resolve => service.listen(0, '127.0.0.1', resolve));
+  try {
+    const api = 'http://127.0.0.1:' + service.address().port;
+    readOrCreateDeviceIdentity(api);
+    const profile = { api_url: api, user_code: 'fixture', device_code: 'fixture-device', device_name: 'test',
+      device_token: access, session_code: sessionCode, refresh_token: refresh,
+      access_expires_at: new Date(Date.now() + 120_000).toISOString(), session_expires_at: cutoff };
+    writeDeviceProfile(home, profile);
+    const session = localDeviceSession(api, profile, home);
+    assert.equal(await session.token(), access);
+    assert.equal(readDeviceProfile(home).refresh_request_id, keys[0]);
+    assert.equal(await session.token(), successor);
+    assert.equal(readDeviceProfile(home).refresh_request_id, undefined);
+    assert.match(keys[0], /^[0-9a-f]{64}$/);
+    assert.equal(keys[0], keys[1]);
+    const finalProfile = { ...readDeviceProfile(home), session_expires_at: profile.access_expires_at,
+      access_expires_at: profile.access_expires_at };
+    writeDeviceProfile(home, finalProfile);
+    assert.equal(await session.token(), successor);
+    assert.equal(keys.length, 2, 'Access already capped by the absolute deadline needs no further refresh');
+  } finally {
+    await new Promise(resolve => service.close(resolve));
+    if (previous === undefined) delete process.env.AGENTCTL_HOME; else process.env.AGENTCTL_HOME = previous;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 async function runBrowserLogin(response, options = {}) {
   const home = mkdtempSync(path.join(tmpdir(), 'tsp-flow-'));
   let startBody;
@@ -90,7 +142,7 @@ async function runBrowserLogin(response, options = {}) {
       reply.end(JSON.stringify({ ok: true, data: { device_code: 'private-poll-secret', user_code: 'ABCD-EFGH', expires_in: options.expires ?? 30, interval: 1 } }));
     } else {
       assert.equal(request.url, '/auth/device/token');
-      assert.deepEqual(body, { device_code: 'private-poll-secret' });
+      assert.deepEqual(body, { device_code: 'private-poll-secret', renewable_session: true });
       polls++;
       reply.end(JSON.stringify(response(polls)));
     }

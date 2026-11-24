@@ -1,18 +1,12 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { deviceSessionDirectory, readDeviceProfile, sameDeviceProfile, withDeviceProfileLock, writeDeviceProfile, type DeviceProfile } from '@team-synergy/contracts/device-session';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
-export interface AuthConfig {
-  api_url: string;
-  device_token: string;
-  user_code: string;
-  device_name: string;
-  device_code?: string;
-}
+export type AuthConfig = DeviceProfile;
 
 export function authDirectory(): string {
-  return process.env.AGENTCTL_HOME ?? path.join(homedir(), '.agentctl');
+  return deviceSessionDirectory();
 }
 
 export function authFilePath(): string {
@@ -20,39 +14,21 @@ export function authFilePath(): string {
 }
 
 export function readAuthConfig(): AuthConfig | null {
-  try {
-    const value = JSON.parse(readFileSync(authFilePath(), 'utf8')) as Partial<AuthConfig> & { user_id?: unknown };
-    const userCode = typeof value.user_code === 'string'
-      ? value.user_code
-      : typeof value.user_id === 'string'
-        ? value.user_id
-        : null;
-    if (
-      typeof value.api_url !== 'string' ||
-      typeof value.device_token !== 'string' ||
-      userCode === null ||
-      typeof value.device_name !== 'string'
-    ) {
-      return null;
-    }
-    return {
-      api_url: value.api_url,
-      device_token: value.device_token,
-      user_code: userCode,
-      device_name: value.device_name,
-      ...(typeof value.device_code === 'string' ? { device_code: value.device_code } : {}),
-    };
-  } catch {
-    return null;
-  }
+  return readDeviceProfile(authDirectory());
 }
 
 export function writeAuthConfig(config: AuthConfig): void {
-  mkdirSync(authDirectory(), { recursive: true });
+  mkdirSync(authDirectory(), { recursive: true, mode: 0o700 });
   if (config.device_code) recordDeviceSession(config);
-  writeFileSync(authFilePath(), `${JSON.stringify(config, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  writeDeviceProfile(authDirectory(), config);
 }
 
+export function saveAuthConfig(config: AuthConfig, expected?: AuthConfig): Promise<void> {
+  return withDeviceProfileLock(authDirectory(), () => {
+    const current = readAuthConfig();
+    if (!expected || current && sameDeviceProfile(expected, current)) writeAuthConfig(config);
+  });
+}
 export function stableDeviceFingerprint(apiUrl: string, deviceCode: string): string {
   return createHash('sha256').update(`${apiUrl.replace(/\/+$/, '')}\ndevice:${deviceCode}`).digest('hex');
 }
@@ -98,4 +74,11 @@ export function matchesLocalDeviceFingerprint(apiUrl: string, token: string, fin
 
 export function removeAuthConfig(): void {
   rmSync(authFilePath(), { force: true });
+}
+
+export function clearCurrentAuthConfig(expected: AuthConfig): Promise<void> {
+  return withDeviceProfileLock(authDirectory(), () => {
+    const current = readAuthConfig();
+    if (current && sameDeviceProfile(expected, current)) removeAuthConfig();
+  });
 }

@@ -7,8 +7,9 @@ import type { Db } from '@team-synergy/persistence';
 import type { FastifyInstance } from 'fastify';
 import { connectorReadPrincipal } from './auth.js';
 import { workspaceActionExecutor } from './agent-workspace-actions.js';
-import { resolveRemoteMcpGrant, type RemoteMcpGrant } from './remote-mcp-authorization.js';
+import { registerRemoteMcpGrantRoutes, resolveRemoteMcpGrant, type RemoteMcpGrant } from './remote-mcp-authorization.js';
 import { remoteMcpResourceMetadataUrl } from './remote-mcp-oauth.js';
+import { fingerprintRemoteMcpTools, serviceVersion } from './remote-mcp-release.js';
 import { remoteMcpTools, type RemoteMcpRequest } from './remote-mcp-tools.js';
 
 const path = '/mcp';
@@ -57,12 +58,15 @@ function memoryReader(app: FastifyInstance, grant: RemoteMcpGrant): RemoteMcpReq
 const instructions = 'For first use or workflow guidance, call read_connector_skill with {} on this connection. Call it with module for detailed tool usage and examples in that module. ' +
   'To choose the operation, call search_tools with {} for module guides or use module/query to find specific tools. ' +
   'If the user names a project, resolve it with list_projects, then pass its projectCode to search_tools and the chosen tools on this same connection. Project codes are scoped to the platform connection that returned them. Ask when a write target is ambiguous. ' +
+  'On a new connection, use get_connection_context to check the current toolset revision. When checking a previously observed revision, send it as knownToolsetRevision. If it changed, refresh tools/list on this connection before using cached tool definitions. ' +
   'Reuse tool choices and evidence already retrieved. Cite sources and distinguish discussed, confirmed, and implemented. Check permissions and task state before changes.';
 
 export function registerRemoteMcp(app: FastifyInstance, db: Db, resourceUrl: string): void {
   const resource = new URL(resourceUrl);
   const metadata = remoteMcpResourceMetadataUrl(resourceUrl);
   const executeWorkspace = workspaceActionExecutor(app, db);
+  const toolsForGrant = (grant: RemoteMcpGrant) => remoteMcpTools(db, grant, memoryReader(app, grant), resource.origin, executeWorkspace);
+  registerRemoteMcpGrantRoutes(app, db, grant => fingerprintRemoteMcpTools(toolsForGrant(grant), grant.allowPersonalMemory));
   app.route({ method: [...methods], url: path, logLevel: 'silent', bodyLimit: 128 * 1024,
     onRequest: hostHeaderValidation([resource.hostname]),
     handler: async (request, reply) => {
@@ -78,8 +82,11 @@ export function registerRemoteMcp(app: FastifyInstance, db: Db, resourceUrl: str
       }
 
       const handler = createMcpHandler(() => {
-        const server = new McpServer({ name: 'team-synergy', version: '0.1.0' }, { instructions });
-        for (const tool of remoteMcpTools(db, grant, memoryReader(app, grant), resource.origin, executeWorkspace)) {
+        // The HTTP transport creates a server per request and has no durable notification stream.
+        const server = new McpServer({ name: 'team-synergy', version: serviceVersion }, {
+          instructions, capabilities: { tools: { listChanged: false } },
+        });
+        for (const tool of toolsForGrant(grant)) {
           server.registerTool(tool.name, { description: tool.description, inputSchema: tool.schema, annotations: tool.annotations },
             async (args: unknown) => {
               try {

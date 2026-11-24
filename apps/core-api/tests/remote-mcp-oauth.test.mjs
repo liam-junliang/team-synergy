@@ -9,6 +9,8 @@ import { registerAuthMiddleware } from '../dist/auth.js';
 import { registerAuthRoutes } from '../dist/routes/auth.js';
 import { registerUserRoutes } from '../dist/routes/users.js';
 import { registerRemoteMcpGrantRoutes, resolveRemoteMcpGrant } from '../dist/remote-mcp-authorization.js';
+import { isPublicConnectorRoute, registerRemoteMcp } from '../dist/remote-mcp.js';
+import { serviceVersion } from '../dist/remote-mcp-release.js';
 import { registerRemoteMcpOAuthRoutes, remoteMcpResourceMetadataUrl } from '../dist/remote-mcp-oauth.js';
 import { closeTestDb, insertProject, insertProjectMember, insertTeam, insertUser, openTestDb } from './test-db.mjs';
 
@@ -226,6 +228,9 @@ test('OAuth binds one-time codes to PKCE, the registered client, callback and MC
   const revoke = await f.app.inject({ method: 'DELETE', url: '/account/mcp-connections/' + grant.connectionCode, headers });
   assert.equal(revoke.statusCode, 200);
   assert.equal(await resolveRemoteMcpGrant(f.db, data.access_token, resource), null);
+  assert.equal((await f.token({ grant_type: 'refresh_token', client_id: client.client_id, refresh_token: data.refresh_token, resource })).json().error, 'invalid_grant');
+  const list = await f.app.inject({ url: '/account/mcp-connections', headers });
+  assert.equal(list.json().data[0].lastRefreshFailureReason, 'authorization_revoked');
 });
 
 test('refresh replaces access and refresh tokens, revoking the entire connection on reuse', async t => {
@@ -235,6 +240,8 @@ test('refresh replaces access and refresh tokens, revoking the entire connection
   const issued = (await f.token(await approvedCode(f, client, headers))).json();
   const refresh = { grant_type: 'refresh_token', client_id: client.client_id, refresh_token: issued.refresh_token, resource };
   assert.equal((await f.token({ ...refresh, scope: 'project:read workspace:write' })).statusCode, 400);
+  const connections = async () => (await f.app.inject({ url: '/account/mcp-connections', headers })).json().data;
+  assert.equal((await connections())[0].lastRefreshFailureReason, 'scope_changed');
   const rotated = await f.token(refresh);
   assert.equal(rotated.statusCode, 200, rotated.body);
   const next = rotated.json();
@@ -243,12 +250,59 @@ test('refresh replaces access and refresh tokens, revoking the entire connection
   assert.notEqual(next.refresh_token, issued.refresh_token);
   assert.equal(await resolveRemoteMcpGrant(f.db, issued.access_token, resource), null);
   assert.ok(await resolveRemoteMcpGrant(f.db, next.access_token, resource));
+  assert.ok((await connections())[0].lastRefreshedAt);
 
   const repeated = await f.token(refresh);
   assert.equal(repeated.statusCode, 400);
   assert.equal(repeated.json().error, 'invalid_grant');
   assert.equal(await resolveRemoteMcpGrant(f.db, next.access_token, resource), null);
   assert.equal((await f.token({ ...refresh, refresh_token: next.refresh_token })).statusCode, 400);
+  const [revoked] = await connections();
+  assert.equal(revoked.lastRefreshFailureReason, 'refresh_token_reused');
+  assert.equal(revoked.lastRefreshFailedAt, revoked.revokedAt);
+});
+
+test('refresh slides the idle deadline without extending the absolute authorization or reviving expiration', async t => {
+  const f = await fixture(t);
+  const client = (await f.register()).json();
+  const headers = await f.login(f.actor);
+  const issued = (await f.token(await approvedCode(f, client, headers))).json();
+  const grantTable = schema.remoteMcpGrants;
+  const [original] = await f.db.select().from(grantTable);
+  const day = 86_400_000;
+  assert.equal(original.expires_at - original.created_at, 30 * day);
+  assert.equal(original.absolute_expires_at - original.created_at, 90 * day);
+
+  const now = Date.now();
+  const changeDeadlines = async (created, idle, hard, access) => f.db.update(grantTable).set({
+    created_at: new Date(created), expires_at: new Date(idle), absolute_expires_at: new Date(hard), access_expires_at: new Date(access),
+  }).where(eq(grantTable.id, original.id));
+  const activeGrant = async () => (await f.db.select().from(grantTable).where(eq(grantTable.id, original.id)))[0];
+  const refresh = token => f.token({ grant_type: 'refresh_token', client_id: client.client_id, refresh_token: token, resource });
+
+  // The current access token has expired, while the renewable authorization still has time.
+  await changeDeadlines(now - 10 * day, now + 20 * day, now + 80 * day, now - 1_000);
+  assert.equal(await resolveRemoteMcpGrant(f.db, issued.access_token, resource), null);
+  const first = await refresh(issued.refresh_token);
+  assert.equal(first.statusCode, 200);
+  const sliding = await activeGrant();
+  assert.equal(sliding.expires_at - sliding.last_refreshed_at, 30 * day);
+  assert.equal(sliding.absolute_expires_at.getTime(), now + 80 * day);
+
+  const cap = now + 10 * 60_000;
+  await changeDeadlines(cap - 90 * day, cap, cap, now - 1_000);
+  const last = await refresh(first.json().refresh_token);
+  assert.equal(last.statusCode, 200);
+  assert.ok(last.json().expires_in <= 600);
+  assert.equal((await activeGrant()).expires_at.getTime(), cap);
+
+  await changeDeadlines(now - 40 * day, now - 1_000, now + 50 * day, now - 2_000);
+  assert.equal((await refresh(last.json().refresh_token)).json().error, 'invalid_grant');
+  assert.equal((await activeGrant()).last_refresh_failure_reason, 'idle_expired');
+
+  await changeDeadlines(now - 91 * day, now - day, now - day, now - day - 1_000);
+  assert.equal((await refresh(last.json().refresh_token)).json().error, 'invalid_grant');
+  assert.equal((await activeGrant()).last_refresh_failure_reason, 'authorization_expired');
 });
 
 test('account OAuth consent without a project remains valid for exchange and refresh across project changes', async t => {
@@ -315,6 +369,47 @@ test('expired unclaimed clients and expired consent requests cannot issue creden
 
 const passwordChange = '/auth/password-change';
 const connectionList = '/account/mcp-connections';
+
+test('an existing OAuth connection reports the new deployment after restart and preserves its unchanged tool revision', async t => {
+  const f = await fixture(t);
+  const client = (await f.register()).json();
+  const headers = await f.login(f.actor);
+  const issued = await f.token(await approvedCode(f, client, headers, { projectCode: null }));
+  assert.equal(issued.statusCode, 200, issued.body);
+  const { access_token: token } = issued.json();
+  const savedRevision = process.env.TSP_SOURCE_REVISION;
+  t.after(() => {
+    if (savedRevision === undefined) delete process.env.TSP_SOURCE_REVISION;
+    else process.env.TSP_SOURCE_REVISION = savedRevision;
+  });
+
+  async function connect(sourceRevision, args) {
+    process.env.TSP_SOURCE_REVISION = sourceRevision;
+    const app = Fastify({ logger: false });
+    registerAuthMiddleware(app, f.db, isPublicConnectorRoute);
+    registerRemoteMcp(app, f.db, resource);
+    try {
+      const response = await app.inject({ method: 'POST', url: '/mcp', headers: {
+        host: new URL(resource).hostname, authorization: `Bearer ${token}`,
+        'content-type': 'application/json', accept: 'application/json, text/event-stream',
+      }, payload: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get_connection_context', arguments: args } } });
+      assert.equal(response.statusCode, 200, response.body);
+      const stream = response.headers['content-type']?.startsWith('text/event-stream');
+      const body = stream ? JSON.parse(response.body.split(/\r?\n/).find(line => line.startsWith('data: ')).slice(6)) : response.json();
+      assert.equal(body.result.isError, false, JSON.stringify(body));
+      return body.result.structuredContent.connector;
+    } finally { await app.close(); }
+  }
+
+  const before = await connect('12'.repeat(20), {});
+  assert.equal(before.sourceRevision, '12'.repeat(20));
+  assert.equal(before.serviceVersion, serviceVersion);
+  const after = await connect('34'.repeat(20), { knownToolsetRevision: before.toolsetRevision });
+  assert.equal(after.sourceRevision, '34'.repeat(20));
+  assert.equal(after.toolsetRevision, before.toolsetRevision);
+  assert.equal(after.toolsetChanged, false);
+});
+
 const newPassword = 'RotatedConnectorPassword456!';
 const recoveryPassword = 'RecoveryConnectorPassword89!';
 

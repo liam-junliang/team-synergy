@@ -28,6 +28,10 @@ compose up -d --wait --wait-timeout 120 db
 compose run --rm --no-deps migrate > "$root/migration.log" 2>&1
 # Bootstrap passwords stay inside container logs; do not publish or dump those logs.
 compose up -d --wait --wait-timeout 120 api web
+compose exec -T api node --input-type=module -e '
+  import { remoteMcpRelease, serviceVersion } from "./dist/remote-mcp-release.js";
+  if (remoteMcpRelease().sourceRevision !== process.argv[1] || !/^\d+\.\d+\.\d+$/.test(serviceVersion)) process.exit(1);
+' "$revision"
 curl --silent --fail --max-time 10 http://127.0.0.1:18082/api/ready > "$root/ready.json"
 curl --silent --fail --max-time 10 http://127.0.0.1:18082/ | grep -q 'Team Synergy'
 status=$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:18082/api/projects)

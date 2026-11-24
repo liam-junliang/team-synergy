@@ -1,6 +1,6 @@
 # CLI 分发、浏览器授权与设备会话
 
-日期：2026-10-18。平台统一为 Team Synergy，成员入口为 Agent 工作台 → CLI 接入。
+成员入口为 Agent 集成 → Agent 接入 → 本地 CLI。
 
 ## 成员操作
 
@@ -13,6 +13,20 @@
 浏览器授权不会扩大用户的团队、项目或技能权限。申请十分钟有效，短码用于核对；轮询密钥仅在 CLI 内存中持有，成功兑换一次后失效。密码首次修改规则继续适用。`--no-browser` 支持远程终端；`--web` 可指定独立 Web 入口。
 
 系统管理员可在「系统配置」保存 Web/API 公开地址，CLI 接入页据此生成安装和登录命令，并在配置页检查六种目标安装包是否发布。未配置时使用当前站点；API 与 Web 地址不同时，登录指引会带 `--web`。详见 [系统管理台与平台接入配置](46-system-administration.md)。
+
+### 检查版本、升级与回退
+
+| 命令 | 用途 |
+| --- | --- |
+| `tsp --version` / `agentd --version` | 查看当前程序版本 |
+| `tsp version` | 查看 CLI 版本、对应系统和架构的安装包标识，以及正式发布记录的源码提交 |
+| `tsp update --check` | 立即从安装时的平台检查本机安装包，输出已安装和可用的发布标识 |
+| `tsp update` | 查看本次升级目标，确认后安装 |
+| `tsp update --rollback` | 确认后切换回上一份安装，离线也能使用 |
+
+交互终端通常每天最多检查一次，发现更新时在终端提示。脚本和 Agent 可以用 `--check` 获取 JSON。自动化执行升级或回退时需要显式传入 `--yes`。版本号相同而安装包摘要不同的重构建也能检测到，低版本只通过回退选择。
+
+升级先核验下载包，再统一切换以后启动的 `tsp` 和 `agentd`。已有运行继续使用启动时的程序，用户授权、工作区和项目绑定保留。早期没有 `tsp update` 的安装可在 Agent 接入页重新执行安装脚本。源码运行的 CLI 随仓库更新。
 
 ## 设备和会话
 
@@ -40,6 +54,8 @@ Run 租约和交接校验改为从当前会话找到稳定设备。用户权限�
 
 `AGENTCTL_HOME`、`~/.agentctl/auth.json`、项目绑定、工作空间、旧 `--token` 和密码登录保持兼容。更新安装包保留用户配置及旧安装版本，运行中的进程继续使用原版本；安装脚本不替换项目代码。
 
+如果旧版 `agentd` 正持有运行租约，服务端会保留该设备旧会话的原到期时间，并在租约结束后允许迁移。回退到 0.1 时，已启动的 0.2 工作进程继续使用原版本。新启动的 0.1 命令只能使用当前尚有效的访问令牌，自动续期需要 0.2 或更新版本。
+
 ## 构建和部署
 
 成员无需构建；以下由平台维护者或 CI 执行：
@@ -47,7 +63,7 @@ Run 租约和交接校验改为从当前会话找到稳定设备。用户权限�
 ```sh
 pnpm install --frozen-lockfile
 pnpm --filter @team-synergy/cli... --filter @team-synergy/agentd... build
-node scripts/build-cli-distribution.mjs --platform win32 --arch x64
+node scripts/build-cli-distribution.mjs --platform win32 --arch x64 --source-revision "$(git rev-parse HEAD)"
 ```
 
 支持 `win32`、`linux`、`darwin` 与 `x64`、`arm64`。构建器默认固定官方 Node.js `22.23.3`，从 nodejs.org 获取并核对官方 SHA-256；`--node-version` 可显式更新固定补丁版本。每次修改 CLI、agentd 或其共享依赖后必须重新打包；不能只重启 API。

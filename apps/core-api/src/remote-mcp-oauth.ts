@@ -5,7 +5,7 @@ import { createAuthRateLimiter, generateToken, hashToken } from '@team-synergy/a
 import { PublicCodeSchema } from '@team-synergy/contracts';
 import { schema, type Db } from '@team-synergy/persistence';
 import { unauthorized } from './auth.js';
-import { authorizeRemoteMcpGrantSubject, createRemoteMcpGrant } from './remote-mcp-authorization.js';
+import { authorizeRemoteMcpGrantSubject, createRemoteMcpGrant, remoteMcpIdleLifetimeMs } from './remote-mcp-authorization.js';
 
 const clients = schema.remoteMcpOAuthClients;
 const requests = schema.remoteMcpOAuthRequests;
@@ -26,6 +26,7 @@ const codeLifetimeMs = 5 * 60 * 1000;
 const publicClientUnclaimedLifetimeMs = 24 * 60 * 60 * 1000;
 const authMethods = ['none', 'client_secret_post', 'client_secret_basic'] as const;
 type OAuthClient = typeof clients.$inferSelect;
+type RefreshFailure = NonNullable<(typeof grants.$inferSelect)['last_refresh_failure_reason']>;
 type TokenForm = Record<string, string>;
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
@@ -174,7 +175,7 @@ async function exchangeCode(db: Db, form: TokenForm, client: OAuthClient, resour
       ...subject, projectCode: row.projectCode, name: client.name,
       allowTaskWrite: row.request.allow_task_write, allowPersonalMemory: row.request.allow_personal_memory,
       allowWorkspaceWrite: row.request.allow_workspace_write,
-      oauth: { clientId: client.id, resourceUrl, accessLifetimeMs },
+      oauth: { clientId: client.id, resourceUrl, accessLifetimeMs, canRefresh: client.allow_refresh },
     });
     const refreshToken = client.allow_refresh ? await createRefreshToken(tx, grantId) : undefined;
     return tokenResponse(token, accessLifetimeMs / 1_000, scopeFor(row.request), refreshToken);
@@ -191,32 +192,49 @@ async function exchangeRefreshToken(db: Db, form: TokenForm, client: OAuthClient
       .innerJoin(refreshTokens, eq(refreshTokens.grant_id, grants.id))
       .innerJoin(schema.users, eq(schema.users.id, grants.principal_id))
       .leftJoin(schema.projects, eq(schema.projects.id, grants.project_id))
-      .where(and(eq(refreshTokens.token_hash, hash), eq(grants.oauth_client_id, client.id), eq(grants.resource_uri, resourceUrl),
-        isNull(grants.revoked_at), gt(grants.expires_at, sqlNow)))
+      .where(and(eq(refreshTokens.token_hash, hash), eq(grants.oauth_client_id, client.id), eq(grants.resource_uri, resourceUrl)))
       .limit(1);
     if (!row || (row.projectCode === null && row.grantProjectId !== null)) return null;
     const subject = await authorizeRemoteMcpGrantSubject(tx, row.principalCode, row.projectCode, false);
-    if (!subject) return null;
     // Recheck the grant after the account lock. A password reset may have revoked it.
     // Read the rotation marker after this grant lock to serialize refresh attempts.
-    const [grant] = await tx.select().from(grants).where(and(eq(grants.id, row.grantId),
-      eq(grants.principal_id, subject.principalId), subject.projectId === null ? isNull(grants.project_id) : eq(grants.project_id, subject.projectId),
-      isNull(grants.revoked_at), gt(grants.expires_at, sqlNow))).limit(1).for('update');
+    const [grant] = await tx.select().from(grants).where(eq(grants.id, row.grantId)).limit(1).for('update');
     if (!grant) return null;
+    const grantId = grant.id;
+    const now = new Date();
+    async function failRefresh(reason: RefreshFailure) {
+      await tx.update(grants).set({
+        last_refresh_failed_at: now,
+        last_refresh_failure_reason: reason,
+        ...(reason === 'refresh_token_reused' ? { revoked_at: now } : {}),
+      }).where(eq(grants.id, grantId));
+      return null;
+    }
+    if (grant.revoked_at) {
+      return grant.last_refresh_failure_reason === 'refresh_token_reused' ? null : failRefresh('authorization_revoked');
+    }
+    if (grant.expires_at <= now) {
+      return failRefresh(grant.absolute_expires_at && grant.absolute_expires_at > now ? 'idle_expired' : 'authorization_expired');
+    }
+    if (!subject || subject.principalId !== grant.principal_id || subject.projectId !== grant.project_id) return failRefresh('access_lost');
     const [entry] = await tx.select({ usedAt: refreshTokens.used_at }).from(refreshTokens)
       .where(eq(refreshTokens.token_hash, hash)).limit(1);
     if (!entry) return null;
-    const now = new Date();
-    if (entry.usedAt) {
-      await tx.update(grants).set({ revoked_at: now }).where(eq(grants.id, grant.id));
-      return null;
-    }
+    if (entry.usedAt) return failRefresh('refresh_token_reused');
     const scope = scopeFor(grant);
-    if (form.scope !== undefined && form.scope !== scope) return null;
-    const expires = Math.min(now.getTime() + accessLifetimeMs, grant.expires_at.getTime());
+    if (form.scope !== undefined && form.scope !== scope) return failRefresh('scope_changed');
+    const grantExpiry = grant.absolute_expires_at
+      ? Math.min(now.getTime() + remoteMcpIdleLifetimeMs, grant.absolute_expires_at.getTime())
+      : grant.expires_at.getTime();
+    const expires = Math.min(now.getTime() + accessLifetimeMs, grantExpiry);
     const accessToken = 'tsp_mcp_' + generateToken();
     await tx.update(refreshTokens).set({ used_at: now }).where(eq(refreshTokens.token_hash, hash));
-    await tx.update(grants).set({ token_hash: hashToken(accessToken), access_expires_at: new Date(expires) }).where(eq(grants.id, grant.id));
+    await tx.update(grants).set({
+      token_hash: hashToken(accessToken),
+      access_expires_at: new Date(expires),
+      expires_at: new Date(grantExpiry),
+      last_refreshed_at: now,
+    }).where(eq(grants.id, grant.id));
     return tokenResponse(accessToken, Math.floor((expires - now.getTime()) / 1_000), scope, await createRefreshToken(tx, grant.id));
   });
 }

@@ -51,7 +51,7 @@ export function createDeviceAuthorizationUseCases(db: Db) {
       return { ok: true as const, data };
     } catch (error) { return fail(error); }
   }
-  async function token(deviceCode: string) {
+  async function token(deviceCode: string, renewable = false) {
     try {
       if (!deviceCode || deviceCode.length > 256) throw new DomainError('expired_token', '授权请求无效');
       return await db.transaction(async tx => {
@@ -67,7 +67,7 @@ export function createDeviceAuthorizationUseCases(db: Db) {
         if (row.status === 'pending' || !row.principal_id) return fail(new DomainError('authorization_pending', '等待浏览器授权'));
         const [user] = await tx.select().from(schema.users).where(eq(schema.users.id, row.principal_id)).for('update').limit(1);
         if (!user || user.status !== 'active' || user.must_change_password) return fail(new DomainError('access_denied', '账号不能授权，请重新登录'));
-        const data = await createDeviceLogin(tx, user, row.device_name, { installation_id: row.installation_id, installation_secret_hash: row.installation_secret_hash, client_type: row.client_type, platform: row.platform });
+        const data = await createDeviceLogin(tx, user, row.device_name, { installation_id: row.installation_id, installation_secret_hash: row.installation_secret_hash, client_type: row.client_type, platform: row.platform }, renewable);
         await tx.update(schema.deviceAuthorizationRequests).set({ status: 'consumed' }).where(eq(schema.deviceAuthorizationRequests.id, row.id));
         return { ok: true as const, data };
       });

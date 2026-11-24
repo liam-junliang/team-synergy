@@ -779,7 +779,22 @@ export const deviceSessions = pgTable('device_sessions', {
   token_hash: text('token_hash').notNull(),
   created_at: text('created_at').notNull(),
   expires_at: text('expires_at'), revoked_at: text('revoked_at'),
-}, (t) => [...codeConstraints('device_sessions', t), foreignKey({ name: 'fk_device_sessions_device', columns: [t.device_id], foreignColumns: [devices.id] }).onDelete('restrict').onUpdate('no action'), uniqueIndex('uq_device_sessions_token').on(t.token_hash), index('idx_device_sessions_device').on(t.device_id)]);
+  access_expires_at: text('access_expires_at'),
+  previous_access_token_hash: text('previous_access_token_hash'),
+  previous_access_expires_at: text('previous_access_expires_at'),
+  refresh_token_hash: text('refresh_token_hash'),
+  previous_refresh_token_hash: text('previous_refresh_token_hash'),
+  refresh_request_id_hash: text('refresh_request_id_hash'),
+  last_refreshed_at: text('last_refreshed_at'),
+}, (t) => [
+  ...codeConstraints('device_sessions', t),
+  foreignKey({ name: 'fk_device_sessions_device', columns: [t.device_id], foreignColumns: [devices.id] }).onDelete('restrict').onUpdate('no action'),
+  uniqueIndex('uq_device_sessions_token').on(t.token_hash),
+  index('idx_device_sessions_device').on(t.device_id),
+  uniqueIndex('uq_device_sessions_previous_access_token').on(t.previous_access_token_hash).where(sql`${t.previous_access_token_hash} IS NOT NULL`),
+  uniqueIndex('uq_device_sessions_refresh_token').on(t.refresh_token_hash).where(sql`${t.refresh_token_hash} IS NOT NULL`),
+  uniqueIndex('uq_device_sessions_previous_refresh_token').on(t.previous_refresh_token_hash).where(sql`${t.previous_refresh_token_hash} IS NOT NULL`),
+]);
 
 export const deviceAuthorizationRequests = pgTable('device_authorization_requests', {
   id: identityId(),
@@ -842,6 +857,12 @@ export const remoteMcpGrants = pgTable('remote_mcp_grants', {
   oauth_client_id: text('oauth_client_id').references(() => remoteMcpOAuthClients.id, { onDelete: 'restrict' }),
   resource_uri: text('resource_uri'),
   access_expires_at: timestamp('access_expires_at', { withTimezone: true }),
+  absolute_expires_at: timestamp('absolute_expires_at', { withTimezone: true }),
+  last_refreshed_at: timestamp('last_refreshed_at', { withTimezone: true }),
+  last_refresh_failed_at: timestamp('last_refresh_failed_at', { withTimezone: true }),
+  last_refresh_failure_reason: text('last_refresh_failure_reason').$type<
+    'idle_expired' | 'authorization_expired' | 'authorization_revoked' | 'access_lost' | 'scope_changed' | 'refresh_token_reused'
+  >(),
   allow_personal_memory: boolean('allow_personal_memory').notNull().default(false),
   allow_task_write: boolean('allow_task_write').notNull().default(false),
   allow_workspace_write: boolean('allow_workspace_write').notNull().default(false),
@@ -858,7 +879,17 @@ export const remoteMcpGrants = pgTable('remote_mcp_grants', {
   index('idx_remote_mcp_grants_oauth_client').on(t.oauth_client_id),
   check('ck_remote_mcp_grants_name', sql`char_length(btrim(${t.name})) BETWEEN 1 AND 100`),
   check('ck_remote_mcp_grants_token_hash', sql`${t.token_hash} ~ '^[0-9a-f]{64}$'`),
-  check('ck_remote_mcp_grants_expiry', sql`${t.expires_at} > ${t.created_at} AND ${t.expires_at} <= ${t.created_at} + interval '168 hours'`),
+  check('ck_remote_mcp_grants_expiry', sql`${t.expires_at} > ${t.created_at} AND (
+    (${t.absolute_expires_at} IS NULL AND ${t.expires_at} <= ${t.created_at} + interval '168 hours')
+    OR (${t.oauth_client_id} IS NOT NULL AND ${t.absolute_expires_at} = ${t.created_at} + interval '2160 hours'
+      AND ${t.expires_at} <= ${t.absolute_expires_at})
+  )`),
+  check('ck_remote_mcp_refresh_failure', sql`(
+    ${t.last_refresh_failure_reason} IS NULL AND ${t.last_refresh_failed_at} IS NULL
+  ) OR (
+    ${t.last_refresh_failed_at} IS NOT NULL AND ${t.last_refresh_failure_reason} IS NOT NULL
+    AND ${t.last_refresh_failure_reason} IN ('idle_expired', 'authorization_expired', 'authorization_revoked', 'access_lost', 'scope_changed', 'refresh_token_reused')
+  )`),
 ]);
 
 export const remoteMcpOAuthRefreshTokens = pgTable('remote_mcp_oauth_refresh_tokens', {

@@ -8,7 +8,11 @@ import { unauthorized } from './auth.js';
 
 const grants = schema.remoteMcpGrants;
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
-const grantLifetimeMs = 7 * 24 * 60 * 60 * 1000;
+const dayMs = 24 * 60 * 60 * 1000;
+const grantLifetimeMs = 7 * dayMs;
+export const remoteMcpIdleLifetimeMs = 30 * dayMs;
+const remoteMcpAbsoluteLifetimeMs = 90 * dayMs;
+type GrantRow = typeof grants.$inferSelect;
 
 const connectionFields = {
   code: grants.code,
@@ -16,7 +20,13 @@ const connectionFields = {
   allowPersonalMemory: grants.allow_personal_memory,
   allowTaskWrite: grants.allow_task_write,
   allowWorkspaceWrite: grants.allow_workspace_write,
+  oauthClientId: grants.oauth_client_id,
+  accessExpiresAt: grants.access_expires_at,
   expiresAt: grants.expires_at,
+  absoluteExpiresAt: grants.absolute_expires_at,
+  lastRefreshedAt: grants.last_refreshed_at,
+  lastRefreshFailedAt: grants.last_refresh_failed_at,
+  lastRefreshFailureReason: grants.last_refresh_failure_reason,
   revokedAt: grants.revoked_at,
 };
 
@@ -26,9 +36,15 @@ function describeConnection(connection: {
   allowPersonalMemory: boolean;
   allowTaskWrite: boolean;
   allowWorkspaceWrite: boolean;
+  oauthClientId: string | null;
+  accessExpiresAt: Date | null;
   expiresAt: Date;
+  absoluteExpiresAt: Date | null;
+  lastRefreshedAt: Date | null;
+  lastRefreshFailedAt: Date | null;
+  lastRefreshFailureReason: GrantRow['last_refresh_failure_reason'];
   revokedAt: Date | null;
-}, projectCode: string | null) {
+}, projectCode: string | null, canRefresh: boolean) {
   return {
     code: connection.code,
     name: connection.name,
@@ -36,7 +52,14 @@ function describeConnection(connection: {
     allowPersonalMemory: connection.allowPersonalMemory,
     allowTaskWrite: connection.allowTaskWrite,
     allowWorkspaceWrite: connection.allowWorkspaceWrite,
+    credentialType: connection.oauthClientId ? 'oauth' as const : 'manual' as const,
+    canRefresh,
+    accessExpiresAt: connection.accessExpiresAt?.toISOString() ?? null,
     expiresAt: connection.expiresAt.toISOString(),
+    absoluteExpiresAt: connection.absoluteExpiresAt?.toISOString() ?? null,
+    lastRefreshedAt: connection.lastRefreshedAt?.toISOString() ?? null,
+    lastRefreshFailedAt: connection.lastRefreshFailedAt?.toISOString() ?? null,
+    lastRefreshFailureReason: connection.lastRefreshFailureReason,
     revokedAt: connection.revokedAt?.toISOString() ?? null,
   };
 }
@@ -71,6 +94,17 @@ export interface RemoteMcpGrant {
   allowWorkspaceWrite?: boolean;
 }
 
+async function effectiveRemoteMcpGrant(db: Db, grant: RemoteMcpGrant & { principalId: bigint; projectId: bigint | null }): Promise<RemoteMcpGrant | null> {
+  const role = grant.projectId === null ? null : (await resolveProjectAccess(db, grant.projectId, grant.principalId))?.role;
+  if (grant.projectId !== null && !role) return null;
+  return {
+    connectionCode: grant.connectionCode, principalCode: grant.principalCode, projectCode: grant.projectCode,
+    allowPersonalMemory: grant.allowPersonalMemory,
+    allowTaskWrite: grant.allowTaskWrite && role !== 'viewer',
+    allowWorkspaceWrite: grant.allowWorkspaceWrite && role !== 'viewer',
+  };
+}
+
 /** Validate the account credential and any legacy project binding on every MCP request. */
 export async function resolveRemoteMcpGrant(db: Db, token: string, resourceUrl?: string): Promise<RemoteMcpGrant | null> {
   if (!/^tsp_mcp_[0-9a-f]{64}$/.test(token)) return null;
@@ -92,15 +126,7 @@ export async function resolveRemoteMcpGrant(db: Db, token: string, resourceUrl?:
       eq(schema.users.must_change_password, false), or(isNull(grants.project_id), eq(schema.projects.status, 'active'))))
     .limit(1);
 
-  if (!grant) return null;
-  const role = grant.projectId === null ? null : (await resolveProjectAccess(db, grant.projectId, grant.principalId))?.role;
-  if (grant.projectId !== null && !role) return null;
-  return {
-    connectionCode: grant.connectionCode, principalCode: grant.principalCode, projectCode: grant.projectCode,
-    allowPersonalMemory: grant.allowPersonalMemory,
-    allowTaskWrite: grant.allowTaskWrite && role !== 'viewer',
-    allowWorkspaceWrite: grant.allowWorkspaceWrite && role !== 'viewer',
-  };
+  return grant ? effectiveRemoteMcpGrant(db, grant) : null;
 }
 
 export async function authorizeRemoteMcpGrantSubject(tx: Tx, principalCode: string, projectCode: string | null, allowProjectWrite: boolean) {
@@ -122,10 +148,11 @@ export async function authorizeRemoteMcpGrantSubject(tx: Tx, principalCode: stri
 
 export async function createRemoteMcpGrant(tx: Tx, input: {
   principalId: bigint; projectId: bigint | null; projectCode: string | null; name: string; allowTaskWrite: boolean; allowPersonalMemory: boolean; allowWorkspaceWrite: boolean;
-  oauth?: { clientId: string; resourceUrl: string; accessLifetimeMs: number };
+  oauth?: { clientId: string; resourceUrl: string; accessLifetimeMs: number; canRefresh: boolean };
 }) {
   const token = 'tsp_mcp_' + generateToken();
   const createdAt = new Date();
+  const canRefresh = input.oauth?.canRefresh === true;
   const [connection] = await tx.insert(grants).values({
     principal_id: input.principalId,
     project_id: input.projectId,
@@ -135,7 +162,8 @@ export async function createRemoteMcpGrant(tx: Tx, input: {
     allow_task_write: input.allowTaskWrite,
     allow_workspace_write: input.allowWorkspaceWrite,
     created_at: createdAt,
-    expires_at: new Date(createdAt.getTime() + grantLifetimeMs),
+    expires_at: new Date(createdAt.getTime() + (canRefresh ? remoteMcpIdleLifetimeMs : grantLifetimeMs)),
+    absolute_expires_at: canRefresh ? new Date(createdAt.getTime() + remoteMcpAbsoluteLifetimeMs) : null,
     ...(input.oauth ? { oauth_client_id: input.oauth.clientId, resource_uri: input.oauth.resourceUrl,
       access_expires_at: new Date(createdAt.getTime() + input.oauth.accessLifetimeMs) } : {}),
   }).returning({ id: grants.id, ...connectionFields });
@@ -149,22 +177,37 @@ export async function createRemoteMcpGrant(tx: Tx, input: {
       allow_workspace_write: input.allowWorkspaceWrite,
     },
   }, createPublicCode(), createdAt.toISOString()));
-  return { grantId: connection.id, connection: describeConnection(connection, input.projectCode), token };
+  return { grantId: connection.id, connection: describeConnection(connection, input.projectCode, canRefresh), token };
 }
-export function registerRemoteMcpGrantRoutes(app: FastifyInstance, db: Db): void {
+export function registerRemoteMcpGrantRoutes(app: FastifyInstance, db: Db, toolsetRevisionForGrant?: (grant: RemoteMcpGrant) => string): void {
   const base = '/account/mcp-connections';
 
   app.get(base, { logLevel: 'silent' }, async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
     const principal = webPrincipal(request);
     if (!principal) return unauthorized(reply);
-    const rows = await db.select({ connection: connectionFields, projectCode: schema.projects.code })
+    const rows = await db.select({
+      connection: connectionFields, projectCode: schema.projects.code, projectId: grants.project_id,
+      projectStatus: schema.projects.status, principalId: grants.principal_id, canRefresh: schema.remoteMcpOAuthClients.allow_refresh,
+    })
       .from(grants)
       .innerJoin(schema.users, eq(schema.users.id, grants.principal_id))
       .leftJoin(schema.projects, eq(schema.projects.id, grants.project_id))
+      .leftJoin(schema.remoteMcpOAuthClients, eq(schema.remoteMcpOAuthClients.id, grants.oauth_client_id))
       .where(eq(schema.users.code, principal))
       .orderBy(desc(grants.created_at), desc(grants.id));
-    return { ok: true as const, data: rows.map(row => describeConnection(row.connection, row.projectCode)) };
+    const now = Date.now();
+    const data = await Promise.all(rows.map(async row => {
+      const connection = describeConnection(row.connection, row.projectCode, row.canRefresh === true);
+      if (!toolsetRevisionForGrant || row.connection.revokedAt || row.connection.expiresAt.getTime() <= now
+          || (row.projectId !== null && row.projectStatus !== 'active')) return connection;
+      const grant = await effectiveRemoteMcpGrant(db, {
+        ...connection, connectionCode: connection.code, principalCode: principal,
+        projectId: row.projectId, principalId: row.principalId,
+      });
+      return grant ? { ...connection, toolsetRevision: toolsetRevisionForGrant(grant) } : connection;
+    }));
+    return { ok: true as const, data };
   });
 
   app.post(base, { bodyLimit: 4096, logLevel: 'silent' }, async (request, reply) => {
