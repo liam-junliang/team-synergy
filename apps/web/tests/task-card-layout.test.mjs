@@ -20,7 +20,7 @@ after(async () => {
   await vite?.close();
 });
 
-test('任务卡片只提供当前状态允许的手动操作', async () => {
+test('任务详情只提供当前状态允许的手动操作', async () => {
   const { availableTaskWorkflowActions } = await vite.ssrLoadModule('/src/TaskWorkflowPanel.tsx');
   const available = (status, runStatuses = []) => availableTaskWorkflowActions({
     status,
@@ -94,6 +94,103 @@ test('任务卡 brief 清洗逻辑会移除 Markdown 标记并压缩空白', asy
   const summary = summarizeTaskBrief('# 标题\n\n- 第一项\n- 第二项\n\n`代码` [链接](https://example.com)\n\n   多余   空白  ');
 
   assert.equal(summary, '标题 第一项 第二项 代码 链接 多余 空白');
+});
+
+test('看板卡片整张打开详情并保留活动时间和验收人', async () => {
+  const { TaskCard } = await vite.ssrLoadModule('/src/App.tsx');
+  const task = { code: 'TASK-ALPHA', title: '集成任务', status: 'running', profile: 'builder', source: 'requirement' };
+  const expired = renderToStaticMarkup(createElement(TaskCard, {
+    task, onSelect() {},
+    workflow: { task_code: task.code, execution_health: 'expired', last_heartbeat_at: '2026-11-24T00:02:00Z' },
+  }));
+  assert.match(expired, /^<button[^>]+aria-label="查看任务：集成任务"/);
+  assert.match(expired, /执行租约已过期/);
+  assert.match(expired, /最近心跳/);
+  assert.equal((expired.match(/<button\b/g) ?? []).length, 1);
+  assert.doesNotMatch(expired, /<details|收回执行/);
+  const reviewing = renderToStaticMarkup(createElement(TaskCard, {
+    task: { ...task, status: 'submitted' }, onSelect() {},
+    workflow: { task_code: task.code, review_status: 'in_progress', reviewer_code: 'REVIEWER', submitted_at: '2026-11-24T00:03:00Z' },
+  }));
+  assert.match(reviewing, /验收中/);
+  assert.match(reviewing, /验收人 REVIEWER/);
+  assert.equal((reviewing.match(/<button\b/g) ?? []).length, 1);
+  assert.match(reviewing, /<time[^>]+dateTime="2026-11-24T00:03:00Z"[^>]*>提交/);
+  const assigned = renderToStaticMarkup(createElement(TaskCard, { task: { ...task, status: 'assigned' }, onSelect() {} }));
+  assert.equal((assigned.match(/<button\b/g) ?? []).length, 1);
+  assert.doesNotMatch(assigned, /<details|改派任务|收回分派/);
+});
+
+test('补录证据表单固定本轮成果，收回活动 Run 要求明确确认', async () => {
+  const { TaskWorkflowActionForm } = await vite.ssrLoadModule('/src/TaskWorkflowActionForm.tsx');
+  const task = { code: 'TASK-ALPHA', status: 'submitted', acceptance: [{ id: 'AC-1', text: '确认真实服务响应' }] };
+  const workflow = {
+    execution: { recovery_requires_confirmation: true },
+    delivery: { review_status: 'needs_evidence', submission_uri: 'https://example.com/pull/23', submission_content_hash: 'a'.repeat(40) },
+  };
+  const render = (action, label) => renderToStaticMarkup(createElement(TaskWorkflowActionForm, {
+    task, workflow, action, label, snapshot: 3, members: [], membersStatus: 'success',
+    pending: false, stale: false, viewerCode: 'OWNER', onBack() {}, onSubmit() {},
+  }));
+  const supplement = render('record_delivery', '补录自测证据');
+  assert.match(supplement, /补证沿用本轮交付链接和校验值/);
+  const linkInput = supplement.match(/<input[^>]+name="artifact_uri"[^>]*>/)?.[0] ?? '';
+  assert.match(linkInput, /readonly=""/i);
+  assert.match(linkInput, /value="https:\/\/example\.com\/pull\/23"/);
+  assert.doesNotMatch(supplement, /name="author"/);
+  const recover = render('recover_execution', '收回执行');
+  assert.match(recover, /由我接手/);
+  const confirmInput = recover.match(/<input[^>]+name="confirm_active"[^>]*>/)?.[0] ?? '';
+  assert.match(confirmInput, /required=""/i);
+  assert.match(recover, /ui-button-danger/);
+});
+
+test('任务版本与操作快照不一致时不会打开验收结论表单', async () => {
+  const { TaskWorkflowPanel } = await vite.ssrLoadModule('/src/TaskWorkflowPanel.tsx');
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const task = { code: 'TASK-ALPHA', project_code: 'PROJECT-ALPHA', status: 'submitted', base_snapshot: 4, runs: [], acceptance: [] };
+  client.setQueryData(['task-web-workflow', task.code], {
+    execution: { base_snapshot: 4, can_manage: true },
+    delivery: { base_snapshot: 3, can_finish_review: true, submission_code: 'ARTIFACT-OLD' },
+  });
+  const html = renderToStaticMarkup(createElement(QueryClientProvider, { client },
+    createElement(TaskWorkflowPanel, { task })));
+  assert.match(html, /任务已更新，请核对最新状态后重新操作。/);
+  assert.doesNotMatch(html, /填写验收结论|<form/);
+});
+
+test('待领取任务的登记交付、改派和收回分派直接显示在同一操作区', async () => {
+  const { TaskWorkflowPanel } = await vite.ssrLoadModule('/src/TaskWorkflowPanel.tsx');
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const task = { code: 'TASK-ALPHA', project_code: 'PROJECT-ALPHA', status: 'assigned', base_snapshot: 4, runs: [],
+    acceptance: [{ id: 'AC-1', text: '核对交付' }] };
+  client.setQueryData(['task-web-workflow', task.code], {
+    execution: { base_snapshot: 4, can_manage: true, can_release: true },
+    delivery: { base_snapshot: 4, can_record_delivery: true },
+  });
+
+  const html = renderToStaticMarkup(createElement(QueryClientProvider, { client },
+    createElement(TaskWorkflowPanel, { task })));
+  assert.match(html, /class="ui-button ui-button-primary">登记交付<\/button>/);
+  assert.match(html, /class="ui-button ui-button-secondary">改派任务<\/button>/);
+  assert.match(html, /class="ui-button ui-button-secondary">收回分派<\/button>/);
+  assert.doesNotMatch(html, /<details|更多操作/);
+});
+
+test('草稿的管理按钮和流程按钮在同一行，取消任务排在最后', async () => {
+  const { TaskWorkflowPanel } = await vite.ssrLoadModule('/src/TaskWorkflowPanel.tsx');
+  const client = new QueryClient();
+  const task = { code: 'TASK-DRAFT', project_code: 'PROJECT-ALPHA', status: 'draft', base_snapshot: 1, runs: [],
+    acceptance: [{ id: 'AC-1', text: '核对交付' }] };
+  const managementActions = [
+    createElement('button', { key: 'edit', className: 'ui-button ui-button-secondary' }, '编辑任务'),
+    createElement('button', { key: 'cancel', className: 'ui-button ui-button-danger' }, '取消任务'),
+  ];
+
+  const html = renderToStaticMarkup(createElement(QueryClientProvider, { client },
+    createElement(TaskWorkflowPanel, { task, canManageWorkflow: true, managementActions })));
+  const row = html.match(/<div class="flex flex-wrap items-center gap-2">(.*?)<\/div>/)?.[1] ?? '';
+  assert.match(row, /ui-button-primary">分派任务<\/button>.*加入待分派<\/button>.*编辑任务<\/button>.*ui-button-danger">取消任务<\/button>$/);
 });
 
 test('任务筛选栏常驻区保持紧凑，组合条件只在弹层中出现', async () => {

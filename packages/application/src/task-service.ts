@@ -23,6 +23,7 @@ import { assertExecutionWrite, assertNoPendingHandover, executionDeviceId } from
 import { designPrototypeContentMetadata, type DesignPrototypeContentMetadata } from './design-prototype-content.js';
 import { assertProjectAccess, effectiveProjectMember, isProjectManager, resolveProjectAccess, visibleProjectIds } from './project-access.js';
 import { captureRunSkills } from './skills-run.js';
+import { assertNativeReviewAvailable } from './task-web-review-guard.js';
 
 export type TaskResult<T> = { ok: true; data: T } | { ok: false; error: { code: string; message: string; details?: unknown } };
 
@@ -549,6 +550,7 @@ export function createTaskService(db: Db) {
               provided: cmd.baseSnapshot,
             });
           }
+          await assertNativeReviewAvailable(tx, currentTask.id, principal.id);
           const startedAt = now();
           const { workspace, run } = await createRunWorkspace(tx, cmd, {
             taskId: currentTask.id,

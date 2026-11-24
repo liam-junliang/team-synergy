@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lockAggregate } from './aggregate-lock.js';
+import { lockAggregate, lockTaskProject } from './aggregate-lock.js';
 import { canonicalContextJson } from './handover-use-cases.js';
 import { writeFeature } from './intake-entity-writers.js';
 import type { EvidenceType, Profile, TaskSource } from '@team-synergy/contracts';
@@ -29,6 +29,7 @@ import { assertExecutionWrite, assertNoPendingHandover, executionDeviceId } from
 import { assertFeatureScheduleWithinMilestone, normalizeScheduleDate } from './schedule.js';
 import { loadRequirementBaseline } from './baseline-use-cases.js';
 import { assertProjectAccess, effectiveProjectMember, isProjectManager, resolveProjectAccess, type AccessDb } from './project-access.js';
+import { assertNativeReviewAvailable } from './task-web-review-guard.js';
 
 async function usersByIds(db: Db, ids: bigint[]) {
   if (ids.length === 0) return new Map<bigint, typeof schema.users.$inferSelect>();
@@ -590,6 +591,7 @@ export function createVerificationUseCases(db: Db) {
       if (!principal) return fail(new DomainError('user_not_found', `用户不存在：${cmd.principalCode}`));
 
       const result = await db.transaction(async (tx) => {
+        await lockTaskProject(tx, task.code);
         const [currentTask, currentRun] = await Promise.all([
           tx.select().from(schema.tasks).where(eq(schema.tasks.id, task.id)).for('update').limit(1).then((rows) => rows[0]),
           tx.select().from(schema.runs).where(eq(schema.runs.id, run.id)).limit(1).then((rows) => rows[0]),
@@ -621,6 +623,7 @@ export function createVerificationUseCases(db: Db) {
             provided: cmd.baseSnapshot,
           });
         }
+        await assertNativeReviewAvailable(tx, currentTask.id, principal.id);
         if (cmd.evidence.type !== 'verifier_review') {
           throw new DomainError('verifier_evidence_required', '验证需要 verifier_review 类型证据（架构不变量 5）', {
             provided: cmd.evidence.type,

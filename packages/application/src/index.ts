@@ -36,6 +36,9 @@ export { captureRunSkills, resolveRunSkillManifest, copyRunSkills, projectSkillM
 
 export { resolveSessionToken, revokeStableDevice } from './auth-device.js';
 export { refreshCliDeviceSession, upgradeCliDeviceSession } from './auth-cli-session.js';
+export { listTaskWebBoard } from './task-web-board.js';
+export { createTaskWebExecution } from './task-web-execution.js';
+export { createTaskWebDelivery } from './task-web-delivery.js';
 export { createDeviceAuthorizationUseCases } from './device-authorization-use-cases.js';
 export { createSystemSettingsUseCases, type SystemSettingsView } from './system-settings-use-cases.js';
 export { createAdminGovernanceUseCases } from './admin-governance-use-cases.js';
