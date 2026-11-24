@@ -386,6 +386,8 @@ const messages: Record<string, string> = {
   "用户账号": "Username",
   "请输入用户账号": "Enter your username",
   "输入密码或初始密码": "Enter your password or initial password",
+  "显示密码": "Show password",
+  "隐藏密码": "Hide password",
   "正在登录…": "Signing in…",
   "登录": "Sign in",
   "没有账号或初始密码已过期？请联系系统管理员。": "Need an account or a new initial password? Contact your administrator.",

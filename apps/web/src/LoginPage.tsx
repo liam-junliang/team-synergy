@@ -1,7 +1,7 @@
 import LanguageSwitcher from './LanguageSwitcher';
 import { useLocale } from './useLocale';
 import { t } from './i18n.ts';
-import { useState, type FormEvent } from 'react';
+import { useId, useState, type FormEvent } from 'react';
 import { loginWebSession, type AuthUser } from './api';
 import { ApiError } from './apiError';
 import { browserClientInfo } from './clientIdentity';
@@ -10,6 +10,9 @@ export function LoginPage({ onLogin }: { onLogin: (user: AuthUser) => void }) {
   useLocale();
   const [account, setAccount] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const passwordId = useId();
+  const passwordVisibilityLabel = passwordVisible ? t('隐藏密码') : t('显示密码');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<'device-limit' | 'credentials' | null>(null);
 
@@ -48,10 +51,28 @@ export function LoginPage({ onLogin }: { onLogin: (user: AuthUser) => void }) {
         </header>
         <div className="flex justify-end px-6 pt-4"><LanguageSwitcher /></div>
         <form onSubmit={submit} className="space-y-4 p-6">
-          <label className="block text-sm font-semibold text-slate-700">{t("用户账号")}<input autoFocus required autoComplete="username" value={account} onChange={(event) => setAccount(event.target.value)} placeholder={t("请输入用户账号")} className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100" />
+          <label className="block text-sm font-semibold text-slate-700">{t("用户账号")}<input autoFocus required type="text" name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} value={account} onChange={(event) => setAccount(event.target.value)} placeholder={t("请输入用户账号")} className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100" />
           </label>
-          <label className="block text-sm font-semibold text-slate-700">{t("密码")}<input required maxLength={128} type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={t("输入密码或初始密码")} className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100" />
-          </label>
+          <div>
+            <label htmlFor={passwordId} className="block text-sm font-semibold text-slate-700">{t("密码")}</label>
+            <div className="relative mt-1.5">
+              <input id={passwordId} name="password" required maxLength={128} type={passwordVisible ? 'text' : 'password'} autoComplete="current-password" autoCapitalize="none" spellCheck={false} value={password} onChange={(event) => setPassword(event.target.value)} placeholder={t("输入密码或初始密码")} className="w-full rounded-lg border border-slate-300 py-2.5 pr-12 pl-3 text-sm outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100 [&::-ms-reveal]:hidden" />
+              <button
+                type="button"
+                aria-label={passwordVisibilityLabel}
+                aria-controls={passwordId}
+                title={passwordVisibilityLabel}
+                onClick={() => setPasswordVisible((visible) => !visible)}
+                className="ui-icon-button absolute top-1/2 right-1.5 -translate-y-1/2 !border-transparent !shadow-none"
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6Z" />
+                  <circle cx="12" cy="12" r="2.5" />
+                  {passwordVisible && <path d="m4 4 16 16" />}
+                </svg>
+              </button>
+            </div>
+          </div>
           {error === 'device-limit' && <div role="alert" className="rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700">
             <p className="font-semibold">{t('登录设备已满')}</p>
             <p className="mt-1">{t('请在已登录的浏览器中进入「个人设置」的「设备与登录会话」，吊销一个不再使用的设备后再试。')}</p>
