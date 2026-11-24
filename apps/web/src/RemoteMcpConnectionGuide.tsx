@@ -20,9 +20,9 @@ const refreshFailureLabels: Record<McpRefreshFailureReason, string> = {
   refresh_token_reused: '检测到旧续期凭据被重复使用，连接已撤销。',
 };
 
-function ConnectionTime({ value, label, format }: { value?: string | null; label: string; format: Intl.DateTimeFormat }) {
+function ConnectionTime({ value, label, format }: { value?: string | null; label: (time: string) => string; format: Intl.DateTimeFormat }) {
   if (!value || !Number.isFinite(Date.parse(value))) return null;
-  return <time dateTime={value}>{t(label, { time: format.format(new Date(value)) })}</time>;
+  return <time dateTime={value}>{label(format.format(new Date(value)))}</time>;
 }
 
 function ConnectionToolset({ storageKey, revision }: { storageKey: string; revision: string }) {
@@ -131,12 +131,13 @@ export function RemoteMcpConnectionGuide({ accountCode, projects, onLocalSetup }
                 <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600">
                   {connection.credentialType === 'manual' && <span>{t('手动凭据')}</span>}
                   {connection.canRefresh && <span>{t('支持自动续期')}</span>}
-                  <ConnectionTime value={connection.expiresAt} label={connection.absoluteExpiresAt && connection.expiresAt !== connection.absoluteExpiresAt ? '闲置到期 {time}' : '到期时间 {time}'} format={dateFormat} />
-                  {connection.absoluteExpiresAt !== connection.expiresAt && <ConnectionTime value={connection.absoluteExpiresAt} label="重新授权期限 {time}" format={dateFormat} />}
-                  <ConnectionTime value={connection.lastRefreshedAt} label="最近续期 {time}" format={dateFormat} />
+                  <ConnectionTime value={connection.expiresAt} label={(time) => connection.absoluteExpiresAt && connection.expiresAt !== connection.absoluteExpiresAt
+                    ? t('闲置到期 {time}', { time }) : t('到期时间 {time}', { time })} format={dateFormat} />
+                  {connection.absoluteExpiresAt !== connection.expiresAt && <ConnectionTime value={connection.absoluteExpiresAt} label={(time) => t('重新授权期限 {time}', { time })} format={dateFormat} />}
+                  <ConnectionTime value={connection.lastRefreshedAt} label={(time) => t('最近续期 {time}', { time })} format={dateFormat} />
                 </div>
                 {failure && <p className="mt-1 text-xs text-amber-800">
-                  <ConnectionTime value={connection.lastRefreshFailedAt} label="续期失败 {time}" format={dateFormat} />
+                  <ConnectionTime value={connection.lastRefreshFailedAt} label={(time) => t('续期失败 {time}', { time })} format={dateFormat} />
                   {' · '}{t(failure)}
                 </p>}
                 {open && connection.toolsetRevision && <ConnectionToolset key={toolsetStorageKey} storageKey={toolsetStorageKey} revision={connection.toolsetRevision} />}
