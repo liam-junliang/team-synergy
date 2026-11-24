@@ -118,7 +118,7 @@ export function TaskWorkflowPanel({ task }: { task: TaskDetail }) {
                 </select>
               </label>
             ) : review.action === 'close' ? (
-              <p className="text-sm text-slate-600">{t('该任务已通过验收。关闭后，下游任务可继续执行。')}</p>
+              <p className="text-sm text-slate-600">{t('该任务已通过验收。关闭会解除下游任务对这项任务的依赖阻塞。')}</p>
             ) : returning ? (
               <p className="text-sm text-slate-600">{t('任务将回到待处理，清除本轮分派并保留历史记录。')}</p>
             ) : null}

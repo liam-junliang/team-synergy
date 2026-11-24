@@ -48,7 +48,7 @@ const messages: Record<string, string> = {
   "此任务仍有未结束的执行，请先处理该 Run。": "Resolve this task's unfinished run first.",
   "当前账号没有执行此操作的权限。": "Your account does not have permission for this action.",
   "暂时无法确认操作结果，请核对任务状态后重试。": "The result could not be confirmed. Check the task status before retrying.",
-  "该任务已通过验收。关闭后，下游任务可继续执行。": "This task has passed verification. Closing it clears this dependency for downstream tasks.",
+  "该任务已通过验收。关闭会解除下游任务对这项任务的依赖阻塞。": "This task has passed verification. Closing it clears this dependency for downstream tasks.",
   "任务将回到待处理，清除本轮分派并保留历史记录。": "The task will return to the backlog, clear its current assignment, and retain its history.",
   "无法加载项目成员，请重新打开分派。": "Members could not be loaded. Reopen the assignment form to retry.",
   "当前没有可分派的项目成员。": "There are no eligible project members to assign.",
