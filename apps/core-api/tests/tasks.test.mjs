@@ -282,6 +282,110 @@ test('POST /tasks/:task_code/cancel cancels an unstarted task and keeps an audit
   assert.match(audit.payload, /排期调整/);
 });
 
+test('manual ready checks the version, project role and state before recording the change', async () => {
+  const { app, db, owner, builder, feature } = await createFixture();
+  const task = await seedTask(db, feature, builder, { status: 'failed' });
+  const ready = (principal, payload) => app.inject({
+    method: 'POST', url: `/tasks/${task.code}/ready`, headers: { 'x-principal-code': principal.code }, payload,
+  });
+
+  assert.equal((await ready(owner, {})).statusCode, 422);
+  assert.equal((await ready(owner, { base_snapshot: 7.5 })).statusCode, 422);
+  assert.equal((await ready(builder, { base_snapshot: 7 })).statusCode, 403);
+  const stale = await ready(owner, { base_snapshot: 6 });
+  assert.equal(stale.statusCode, 409);
+  assert.equal(stale.json().error.code, 'base_snapshot_mismatch');
+
+  const response = await ready(owner, { base_snapshot: 7 });
+  assert.equal(response.statusCode, 200, response.body);
+  assert.deepEqual(response.json().data, {
+    task_code: task.code, status: 'ready', assignee_principal_code: null, base_snapshot: 8,
+  });
+  const [saved] = await db.select().from(schema.tasks).where(eq(schema.tasks.id, task.id));
+  assert.equal(saved.status, 'ready');
+  assert.equal(saved.assignee_principal_id, null);
+  const [audit] = await db.select().from(schema.auditEvents).where(eq(schema.auditEvents.action, 'task.readied'));
+  assert.deepEqual([audit.entity_id, audit.principal_id, audit.from_state, audit.to_state, audit.base_snapshot],
+    [task.id, owner.id, 'failed', 'ready', 7]);
+  assert.equal((await ready(owner, { base_snapshot: 8 })).json().error.code, 'invalid_transition');
+
+  const [noAcceptance] = await db.update(schema.tasks).set({ status: 'draft', acceptance: '[]' })
+    .where(eq(schema.tasks.id, task.id)).returning();
+  assert.equal((await ready(owner, { base_snapshot: noAcceptance.base_snapshot })).json().error.code, 'acceptance_required');
+});
+
+test('pre-claim reassignment requires an explicit version and records the previous assignee', async () => {
+  const { app, db, owner, builder, other, feature } = await createFixture();
+  const task = await seedTask(db, feature, builder);
+  const assign = (assignee, fields) => app.inject({
+    method: 'POST', url: `/tasks/${task.code}/assign`, headers: { 'x-principal-code': owner.code },
+    payload: { assignee_principal_code: assignee.code, ...fields },
+  });
+
+  assert.equal((await assign(other, {})).statusCode, 422);
+  const unchanged = await assign(builder, { base_snapshot: 7 });
+  assert.equal(unchanged.statusCode, 409);
+  assert.equal(unchanged.json().error.code, 'task_assignee_unchanged');
+
+  const results = await Promise.all([assign(other, { base_snapshot: 7 }), assign(owner, { base_snapshot: 7 })]);
+  const winner = results.findIndex((response) => response.statusCode === 200);
+  assert.ok(winner >= 0, results.map((response) => response.body).join('\n'));
+  const loser = results[1 - winner];
+  assert.equal(loser.statusCode, 409);
+  assert.equal(loser.json().error.code, 'base_snapshot_mismatch');
+  const assignee = [other, owner][winner];
+  assert.deepEqual(results[winner].json().data, {
+    task_code: task.code, status: 'assigned', assignee_principal_code: assignee.code, base_snapshot: 8,
+  });
+  const audit = await db.select().from(schema.auditEvents).where(eq(schema.auditEvents.action, 'task.reassigned'));
+  assert.equal(audit.length, 1);
+  assert.deepEqual(JSON.parse(audit[0].payload), { assignee_code: assignee.code, previous_assignee_code: builder.code });
+  const fromFormerAssignee = await app.inject({
+    method: 'POST', url: `/tasks/${task.code}/claim`, headers: { 'x-principal-code': builder.code },
+    payload: claimPayload({ base_snapshot: 8 }),
+  });
+  assert.equal(fromFormerAssignee.json().error.code, 'claim_assignee_mismatch');
+});
+
+test('manual state and assignment changes preserve existing Runs and wait for unfinished work', async () => {
+  const { app, db, owner, builder, other, feature } = await createFixture();
+  const task = await seedTask(db, feature, builder);
+  const claim = await app.inject({
+    method: 'POST', url: `/tasks/${task.code}/claim`, headers: { 'x-principal-code': builder.code }, payload: claimPayload(),
+  });
+  assert.equal(claim.statusCode, 200, claim.body);
+
+  // Represent a persisted blocked task (including a previously paused Run).
+  await db.update(schema.tasks).set({ status: 'blocked' }).where(eq(schema.tasks.id, task.id));
+  const ready = () => app.inject({
+    method: 'POST', url: `/tasks/${task.code}/ready`, headers: { 'x-principal-code': owner.code }, payload: { base_snapshot: 8 },
+  });
+  for (const status of ['active', 'suspended', 'preparing']) {
+    await db.update(schema.runs).set({ status }).where(eq(schema.runs.task_id, task.id));
+    const response = await ready();
+    assert.equal(response.statusCode, 409, response.body);
+    assert.equal(response.json().error.code, 'task_run_active');
+  }
+
+  await db.update(schema.tasks).set({ status: 'assigned' }).where(eq(schema.tasks.id, task.id));
+  const assign = await app.inject({
+    method: 'POST', url: `/tasks/${task.code}/assign`, headers: { 'x-principal-code': owner.code },
+    payload: { assignee_principal_code: other.code, base_snapshot: 8 },
+  });
+  assert.equal(assign.statusCode, 409);
+  assert.equal(assign.json().error.code, 'task_run_active');
+
+  await db.update(schema.tasks).set({ status: 'blocked' }).where(eq(schema.tasks.id, task.id));
+  await db.update(schema.runs).set({ status: 'failed', finished_at: '2026-08-13T00:00:01.000Z' })
+    .where(eq(schema.runs.task_id, task.id));
+  const recovered = await ready();
+  assert.equal(recovered.statusCode, 200, recovered.body);
+  const runs = await db.select().from(schema.runs).where(eq(schema.runs.task_id, task.id));
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].status, 'failed');
+  assert.equal(runs[0].principal_id, builder.id);
+});
+
 test('claim reuses identity checks and returns claim_assignee_mismatch for another principal code', async () => {
   const { app, db, builder, other, feature } = await createFixture();
   const task = await seedTask(db, feature, builder);

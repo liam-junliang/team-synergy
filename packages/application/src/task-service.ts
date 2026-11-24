@@ -49,6 +49,12 @@ export interface AssignCommand {
   baseSnapshot: number;
 }
 
+interface ReadyTaskCommand {
+  taskCode: string;
+  principalCode: string;
+  baseSnapshot: number;
+}
+
 export interface ClaimCommand {
   taskCode: string;
   runCode: string;
@@ -144,6 +150,14 @@ async function lockTaskProject(tx: DbTx, projectId: bigint) {
   // invalidate a permission check while this operation waits for the task.
   await tx.select({ id: schema.teams.id }).from(schema.teams).where(eq(schema.teams.id, project.team_id)).for('share');
   await tx.select({ id: schema.projects.id }).from(schema.projects).where(eq(schema.projects.id, projectId)).for('share');
+}
+
+async function assertNoTaskRunInProgress(tx: DbTx, taskId: bigint) {
+  const [run] = await tx.select({ code: schema.runs.code }).from(schema.runs).where(and(
+    eq(schema.runs.task_id, taskId),
+    inArray(schema.runs.status, ['active', 'suspended', 'preparing']),
+  )).limit(1);
+  if (run) throw new DomainError('task_run_active', '任务仍有未结束的运行，请先结束运行', { run_code: run.code });
 }
 
 function parseStringArray(raw: string | null): string[] {
@@ -368,19 +382,33 @@ export function createTaskService(db: Db) {
         if (!currentTask) throw new DomainError('task_not_found', `任务不存在：${cmd.taskCode}`);
         await assertNoPendingHandover(tx, currentTask.id);
         const fromStatus = currentTask.status as TaskStatus;
-        const guardCtx = {
-          task: { acceptance: parseAcceptance(currentTask.acceptance) },
-          evidence: { selfTestEvidence: [], verifierEvidence: [], artifactCount: 0 },
-          profile: currentTask.profile as Profile,
-        };
-        // draft 与 failed 都需要先经过 ready（验收标准门槛/返工重入）。
-        if (fromStatus === 'draft' || fromStatus === 'failed') transitionOrThrow(fromStatus, 'ready', guardCtx);
-        transitionOrThrow(fromStatus === 'draft' || fromStatus === 'failed' ? 'ready' : fromStatus, 'assigned', guardCtx);
         if (currentTask.base_snapshot !== cmd.baseSnapshot) {
           throw new DomainError('base_snapshot_mismatch', '任务基线快照已变化，请刷新后重试（乐观并发）', {
             current: currentTask.base_snapshot,
             provided: cmd.baseSnapshot,
           });
+        }
+        const reassigning = fromStatus === 'assigned';
+        let previousAssignee: { code: string } | undefined;
+        if (reassigning) {
+          await assertNoTaskRunInProgress(tx, currentTask.id);
+          if (currentTask.assignee_principal_id === assignee.id) {
+            throw new DomainError('task_assignee_unchanged', '请选择不同的任务负责人');
+          }
+          if (currentTask.assignee_principal_id !== null) {
+            [previousAssignee] = await tx.select({ code: schema.users.code }).from(schema.users)
+              .where(eq(schema.users.id, currentTask.assignee_principal_id)).limit(1);
+          }
+        } else {
+          const guardCtx = {
+            task: { acceptance: parseAcceptance(currentTask.acceptance) },
+            evidence: { selfTestEvidence: [], verifierEvidence: [], artifactCount: 0 },
+            profile: currentTask.profile as Profile,
+          };
+          // draft 与 failed 都需要先经过 ready（验收标准门槛/返工重入）。
+          const entersReady = fromStatus === 'draft' || fromStatus === 'failed';
+          if (entersReady) transitionOrThrow(fromStatus, 'ready', guardCtx);
+          transitionOrThrow(entersReady ? 'ready' : fromStatus, 'assigned', guardCtx);
         }
 
         const updated = await tx.update(schema.tasks).set({
@@ -404,8 +432,8 @@ export function createTaskService(db: Db) {
           to: 'assigned',
           principal_id: actor.id,
           base_snapshot: cmd.baseSnapshot,
-          action: 'task.assigned',
-          payload: { assignee_code: assignee.code },
+          action: reassigning ? 'task.reassigned' : 'task.assigned',
+          payload: { assignee_code: assignee.code, ...(reassigning ? { previous_assignee_code: previousAssignee?.code ?? null } : {}) },
         };
         assertAuditedChange(audit);
         await insertAudit(tx, toAuditEvent(audit, createPublicCode(), now()));
@@ -419,6 +447,69 @@ export function createTaskService(db: Db) {
       return { ok: true as const, data: result };
     } catch (error) {
       return fail<TaskServiceAssignResult>(error);
+    }
+  }
+
+  async function readyTask(cmd: ReadyTaskCommand): Promise<TaskResult<TaskServiceReadyResult>> {
+    try {
+      const [task, actor] = await Promise.all([
+        findTaskByCode(db, cmd.taskCode),
+        findUserByCode(db, cmd.principalCode),
+      ]);
+      if (!task) throw new DomainError('task_not_found', `任务不存在：${cmd.taskCode}`);
+      if (!actor) throw new DomainError('user_not_found', `用户不存在：${cmd.principalCode}`);
+      const result = await db.transaction(async (tx) => {
+        await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, actor.id)).for('share');
+        const [feature] = await tx.select({ projectId: schema.features.project_id }).from(schema.features)
+          .where(eq(schema.features.id, task.feature_id)).limit(1);
+        if (!feature) throw new DomainError('feature_not_found', '任务项目不存在');
+        await lockTaskProject(tx, feature.projectId);
+        await assertProjectAccess(tx, feature.projectId, actor.id, 'manage');
+        const [currentTask] = await tx.select().from(schema.tasks).where(eq(schema.tasks.id, task.id)).for('update').limit(1);
+        if (!currentTask) throw new DomainError('task_not_found', `任务不存在：${cmd.taskCode}`);
+        if (currentTask.base_snapshot !== cmd.baseSnapshot) {
+          throw new DomainError('base_snapshot_mismatch', '任务基线快照已变化，请刷新后重试（乐观并发）', {
+            current: currentTask.base_snapshot,
+            provided: cmd.baseSnapshot,
+          });
+        }
+        const fromStatus = currentTask.status as TaskStatus;
+        transitionOrThrow(fromStatus, 'ready', {
+          task: { acceptance: parseAcceptance(currentTask.acceptance) },
+          evidence: { selfTestEvidence: [], verifierEvidence: [], artifactCount: 0 },
+          profile: currentTask.profile as Profile,
+        });
+        await assertNoPendingHandover(tx, currentTask.id);
+        await assertNoTaskRunInProgress(tx, currentTask.id);
+        const [updated] = await tx.update(schema.tasks).set({
+          status: 'ready',
+          assignee_principal_id: null,
+          base_snapshot: cmd.baseSnapshot + 1,
+        }).where(and(
+          eq(schema.tasks.id, currentTask.id),
+          eq(schema.tasks.status, fromStatus),
+          eq(schema.tasks.base_snapshot, cmd.baseSnapshot),
+        )).returning({ baseSnapshot: schema.tasks.base_snapshot });
+        if (!updated) {
+          throw new DomainError('concurrent_modification', '任务已被并发修改，请刷新后重试', { task_code: currentTask.code });
+        }
+        const audit = {
+          entity_type: 'task',
+          entity_id: currentTask.id,
+          legacy_entity_code: currentTask.legacy_code ?? undefined,
+          principal_id: actor.id,
+          base_snapshot: cmd.baseSnapshot,
+          from: fromStatus,
+          to: 'ready',
+          action: 'task.readied',
+        };
+        assertAuditedChange(audit);
+        await insertAudit(tx, toAuditEvent(audit, createPublicCode(), now()));
+        return { task_code: currentTask.code, status: 'ready' as const, assignee_principal_code: null, base_snapshot: updated.baseSnapshot };
+      });
+      return { ok: true, data: result };
+    } catch (error) {
+      return fail(error);
     }
   }
 
@@ -1146,7 +1237,14 @@ export function createTaskService(db: Db) {
     }
   }
 
-  return { listTasks, listTaskPage, taskGraph, assignTask, claimTask, getTaskStatus, submitTask, updateTaskContract, cancelTask };
+  return { listTasks, listTaskPage, taskGraph, assignTask, readyTask, claimTask, getTaskStatus, submitTask, updateTaskContract, cancelTask };
+}
+
+interface TaskServiceReadyResult {
+  task_code: string;
+  status: 'ready';
+  assignee_principal_code: null;
+  base_snapshot: number;
 }
 
 export interface TaskServiceAssignResult {

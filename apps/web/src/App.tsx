@@ -567,6 +567,7 @@ function TaskDetailModal({ taskId, projectCode, onClose }: { taskId: string; pro
                 task={task}
                 events={events}
                 stale={stale}
+                canManageWorkflow={canManageTask}
                 staleHint={stale && lastEvent ? t("最后活动 {p0}（超过 24h）", { p0: new Date(lastEvent).toLocaleString() }) : undefined}
               />
               </Suspense>
