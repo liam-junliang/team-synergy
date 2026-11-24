@@ -21,6 +21,7 @@ import { DEFAULT_TASK_BOARD_FILTERS, filterBoardTasks, sortBoardTasks, type Task
 import { PersonSearchSelect } from './PersonSearchSelect';
 import { TASK_BOARD_REFRESH_INTERVAL_MS } from './queryPolicy';
 import { SystemAgentPanel } from './SystemAgentPanel';
+import { EXECUTION_HEALTH_LABELS, getProjectTaskWorkflow, type TaskWebWorkflowSummary } from './taskWebWorkflow';
 
 const TaskDetail = lazy(() => import('./TaskDetail').then((module) => ({ default: module.TaskDetail })));
 const RequirementsWorkbench = lazy(() => import('./RequirementsWorkbench').then((module) => ({ default: module.RequirementsWorkbench })));
@@ -100,27 +101,37 @@ class CatchBoundary extends Component<{ onError: (e: Error) => void; children: R
   }
 }
 
-export function TaskCard({ task, onSelect }: { task: TaskSummary; onSelect: () => void }) {
+export function TaskCard({ task, onSelect, workflow }: {
+  task: TaskSummary;
+  onSelect: () => void;
+  workflow?: TaskWebWorkflowSummary;
+}) {
   const meta = STATUS_META[task.status] ?? { label: task.status, color: 'bg-slate-200' };
   const { memberName } = useProjectDisplayNames();
   const assignee = task.assignee_code ? memberName(task.assignee_code) : null;
+  const review = task.status === 'submitted';
+  const running = ['running', 'self_tested', 'blocked'].includes(task.status);
+  const reviewing = review && workflow?.review_status === 'in_progress';
+  const reviewer = review && workflow?.reviewer_code ? memberName(workflow.reviewer_code) : null;
+  const statusLabel = reviewing ? '验收中' : meta.label;
   const briefSummary = summarizeTaskBrief(task.brief);
   const taskTime = task.status === 'closed'
     ? task.completed_at ?? task.created_at
     : task.status === 'cancelled'
       ? task.cancelled_at ?? task.created_at
-      : task.created_at;
-  const taskTimeLabel = task.status === 'closed' ? t("完成") : task.status === 'cancelled' ? t("取消") : t("创建");
+      : (running ? workflow?.last_heartbeat_at : review ? workflow?.submitted_at : undefined) ?? task.created_at;
+  const taskTimeLabel = task.status === 'closed' ? t("完成") : task.status === 'cancelled' ? t("取消")
+    : running && workflow?.last_heartbeat_at ? t('最近心跳') : review && workflow?.submitted_at ? t('提交') : t("创建");
   return (
     <button
       type="button"
       onClick={onSelect}
       aria-label={t("查看任务：{p0}", { p0: task.title })}
-      className="group flex w-full min-w-0 flex-col gap-2.5 overflow-hidden rounded-xl border border-slate-200 bg-white p-3 text-left shadow-sm transition duration-150 hover:-translate-y-px hover:border-cyan-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2"
+      className="group flex w-full min-w-0 cursor-pointer flex-col gap-2.5 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-sm transition hover:border-cyan-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2"
     >
       <span className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
         <span className="min-w-0">
-          <span className="block text-sm font-semibold leading-5 text-slate-800 [overflow-wrap:anywhere]">
+          <span className="block max-w-full text-sm font-semibold leading-5 text-slate-800 [overflow-wrap:anywhere] group-hover:text-cyan-800">
             {task.title}
           </span>
           {briefSummary && (
@@ -130,10 +141,10 @@ export function TaskCard({ task, onSelect }: { task: TaskSummary; onSelect: () =
           )}
         </span>
         <span
-          title={t(meta.label)}
+          title={t(statusLabel)}
           className={`inline-flex max-w-[7rem] shrink-0 items-center self-start truncate whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold leading-4 ${meta.color}`}
         >
-          {t(meta.label)}
+          {t(statusLabel)}
         </span>
       </span>
 
@@ -145,8 +156,9 @@ export function TaskCard({ task, onSelect }: { task: TaskSummary; onSelect: () =
       </span>
 
       <span className="flex w-full min-w-0 items-center gap-2 border-t border-slate-100 pt-2">
-        <span className="min-w-0 flex-1 truncate text-xs text-slate-500" title={task.assignee_code ?? t("未分派")}>
-          {assignee ? <>{t("负责人 ")}<strong className="font-semibold text-slate-600">{assignee}</strong></> : t("未分派")}
+        <span className="min-w-0 flex-1 truncate text-xs text-slate-500" title={(review ? reviewer : assignee) ?? undefined}>
+          {review ? (reviewer ? t('验收人 {name}', { name: reviewer }) : t('未指定验收人'))
+            : assignee ? <>{t("负责人 ")}<strong className="font-semibold text-slate-600">{assignee}</strong></> : t("未分派")}
         </span>
         {taskTime && (
           <time dateTime={taskTime} title={formatDateTime(taskTime)} className="shrink-0 text-[10px] tabular-nums text-slate-400">
@@ -154,6 +166,12 @@ export function TaskCard({ task, onSelect }: { task: TaskSummary; onSelect: () =
           </time>
         )}
       </span>
+      {running && workflow && workflow.execution_health !== 'active' && (
+        <span className="text-xs text-amber-800">{t(EXECUTION_HEALTH_LABELS[workflow.execution_health])}</span>
+      )}
+      {review && workflow?.review_status === 'needs_evidence' && <span className="text-xs text-amber-800">{t('等待补证据')}</span>}
+      {review && workflow?.execution_health === 'expired' && <span className="text-xs text-amber-800">{t('验收执行租约已过期')}</span>}
+      {reviewing && isStale(workflow?.review_updated_at ?? undefined) && <span className="text-xs text-amber-800">{t('验收超过 24 小时无更新')}</span>}
     </button>
   );
 }
@@ -397,7 +415,7 @@ export function AuthenticatedWorkspace({ route, session, onLogout, onClosed }: {
         {view === 'teams' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载团队…")}</div>}><TeamsWorkspace /></Suspense>}
         {view === 'personal-memory' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t('正在读取记忆中心…')}</div>}><MemoryCenterWorkbench key={`${session.code}:${route.personalMemoryProject ?? ''}`} ownerCode={session.code} initialProject={route.personalMemoryProject} /></Suspense>}
         {projectCode && view === 'overview' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载项目…")}</div>}><ProjectWorkspace key={projectCode} projectCode={projectCode} tab={route.projectTab} documentCode={route.documentCode} /></Suspense>}
-        {projectCode && view === 'board' && <TeamBoard key={projectCode} projectCode={projectCode} selectedId={route.taskCode} />}
+        {projectCode && view === 'board' && <TeamBoard key={projectCode} projectCode={projectCode} selectedId={route.taskCode} viewerCode={session.code} />}
         {projectCode && view === 'understanding' && <Suspense fallback={<div className="p-8 text-sm text-slate-500">{t('正在加载代码理解…')}</div>}><CodeUnderstandingWorkbench key={projectCode} projectCode={projectCode} route={route} /></Suspense>}
         {projectCode && view === 'requirements' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载需求…")}</div>}><RequirementsWorkbench key={projectCode} projectCode={projectCode} documentCode={route.documentCode} initialTab={route.requirementsTab} /></Suspense>}
         {projectCode && view === 'design' && <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-slate-500">{t("正在加载设计原型…")}</div>}><DesignWorkbench key={projectCode} projectCode={projectCode} /></Suspense>}
@@ -471,12 +489,17 @@ function TaskContractEditor({ task, onCancel, onSave, saving, error }: {
         </div>
       </div>
       {error && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</p>}
-      <div className="flex justify-end gap-2 border-t border-slate-200 pt-4"><button type="button" onClick={onCancel} className="ui-button ui-button-secondary">{t("返回详情")}</button><button type="submit" disabled={!canSave || saving} className="ui-button ui-button-strong">{saving ? t("保存中…") : t("保存修改")}</button></div>
+      <div className="flex justify-end gap-2 border-t border-slate-200 pt-4"><button type="button" onClick={onCancel} className="ui-button ui-button-secondary">{t("返回详情")}</button><button type="submit" disabled={!canSave || saving} className="ui-button ui-button-primary">{saving ? t("保存中…") : t("保存修改")}</button></div>
     </form>
   );
 }
 
-function TaskDetailModal({ taskId, projectCode, onClose }: { taskId: string; projectCode: string; onClose: () => void }) {
+function TaskDetailModal({ taskId, projectCode, onClose, viewerCode }: {
+  taskId: string;
+  projectCode: string;
+  onClose: () => void;
+  viewerCode: string;
+}) {
   const detail = useQuery({ queryKey: ['task', taskId], queryFn: () => getTask(taskId), refetchInterval: TASK_BOARD_REFRESH_INTERVAL_MS });
   const history = useQuery({ queryKey: ['task-history', taskId], queryFn: () => taskHistory(taskId), refetchInterval: TASK_BOARD_REFRESH_INTERVAL_MS });
   const { canManage: canManageTask } = useProjectAccess(projectCode);
@@ -490,6 +513,8 @@ function TaskDetailModal({ taskId, projectCode, onClose }: { taskId: string; pro
       queryClient.setQueryData(['task', taskId], updated);
       void queryClient.invalidateQueries({ queryKey: ['tasks', projectCode] });
       void queryClient.invalidateQueries({ queryKey: ['task-history', taskId] });
+      void queryClient.invalidateQueries({ queryKey: ['task-web-workflow', taskId] });
+      void queryClient.invalidateQueries({ queryKey: ['project-task-workflow', projectCode] });
       setEditing(false);
     },
   });
@@ -497,6 +522,7 @@ function TaskDetailModal({ taskId, projectCode, onClose }: { taskId: string; pro
     mutationFn: () => cancelTask(taskId, { base_snapshot: detail.data?.base_snapshot ?? 0, reason: cancelReason.trim() || undefined }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['tasks', projectCode] });
+      void queryClient.invalidateQueries({ queryKey: ['project-task-workflow', projectCode] });
       onClose();
     },
   });
@@ -526,14 +552,6 @@ function TaskDetailModal({ taskId, projectCode, onClose }: { taskId: string; pro
               <p className="text-[10px] text-slate-400">{t("任务上下文与交付记录")}</p>
             </div>
           </div>
-          <div className="ml-auto flex items-center gap-1.5">
-          {canManageTask && detail.data && PRE_EXECUTION_STATUSES.includes(detail.data.status) && !editing && !confirmingCancel && <>
-            <button type="button" onClick={() => setEditing(true)} className="ui-button ui-button-secondary hover:!border-cyan-300 hover:!bg-cyan-50/60 hover:!text-cyan-700">
-              <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" className="h-3.5 w-3.5 shrink-0"><path d="M13.5 3.5 16.5 6.5M4 16l.7-3.2L13.8 3.7a1.2 1.2 0 0 1 1.7 0l.8.8a1.2 1.2 0 0 1 0 1.7l-9.1 9.1L4 16Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>{t("编辑任务")}</button>
-            <button type="button" onClick={() => setConfirmingCancel(true)} className="ui-button ui-button-danger">
-              <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" className="h-3.5 w-3.5 shrink-0"><path d="M6.5 6.5 13.5 13.5M13.5 6.5l-7 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>{t("取消任务")}</button>
-            <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-slate-200" />
-          </>}
           <button
             type="button"
             autoFocus
@@ -546,7 +564,6 @@ function TaskDetailModal({ taskId, projectCode, onClose }: { taskId: string; pro
               <path d="M5 5l10 10M15 5 5 15" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
             </svg>
           </button>
-          </div>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto">
           {detail.isLoading || history.isLoading ? <div className="grid min-h-64 place-items-center p-6 text-sm text-slate-400">{t("加载详情…")}</div> : detail.error || !detail.data ? (
@@ -561,6 +578,12 @@ function TaskDetailModal({ taskId, projectCode, onClose }: { taskId: string; pro
             const events = history.data ?? [];
             const lastEvent = events[0]?.timestamp;
             const stale = isStale(lastEvent);
+            const managementActions = canManageTask && PRE_EXECUTION_STATUSES.includes(task.status) ? (
+              <>
+                <button type="button" onClick={() => setEditing(true)} className="ui-button ui-button-secondary">{t("编辑任务")}</button>
+                <button type="button" onClick={() => setConfirmingCancel(true)} className="ui-button ui-button-danger">{t("取消任务")}</button>
+              </>
+            ) : undefined;
             return (
               <Suspense fallback={<div className="grid min-h-64 place-items-center p-6 text-sm text-slate-400">{t("加载详情…")}</div>}>
               <TaskDetail
@@ -568,6 +591,8 @@ function TaskDetailModal({ taskId, projectCode, onClose }: { taskId: string; pro
                 events={events}
                 stale={stale}
                 canManageWorkflow={canManageTask}
+                managementActions={managementActions}
+                viewerCode={viewerCode}
                 staleHint={stale && lastEvent ? t("最后活动 {p0}（超过 24h）", { p0: new Date(lastEvent).toLocaleString() }) : undefined}
               />
               </Suspense>
@@ -696,9 +721,10 @@ export function TaskBoardControls({
   );
 }
 
-function TeamBoard({ projectCode, selectedId }: { projectCode: string; selectedId?: string }) {
+function TeamBoard({ projectCode, selectedId, viewerCode }: { projectCode: string; selectedId?: string; viewerCode: string }) {
   const { projectName, featureName, memberName } = useProjectDisplayNames();
   const [filters, setFilters] = useState<TaskBoardFilters>(DEFAULT_TASK_BOARD_FILTERS);
+  const [overview, setOverview] = useState<'all' | 'execution' | 'review' | 'attention'>('all');
   const closeModal = useCallback(() => navigateWorkspace(projectWorkspacePath(projectCode, 'board'), { replace: true }), [projectCode]);
   const { data: tasks, error, isLoading, isFetching, dataUpdatedAt } = useQuery({
     queryKey: ['tasks', projectCode],
@@ -707,6 +733,13 @@ function TeamBoard({ projectCode, selectedId }: { projectCode: string; selectedI
   });
   const { data: projectFeatures } = useQuery({ queryKey: ['features', projectCode], queryFn: () => listFeatures(projectCode) });
   const { data: projectMembers } = useQuery({ queryKey: ['members', projectCode], queryFn: () => listMembers(projectCode) });
+  const workflow = useQuery({
+    queryKey: ['project-task-workflow', projectCode],
+    queryFn: () => getProjectTaskWorkflow(projectCode),
+    refetchInterval: TASK_BOARD_REFRESH_INTERVAL_MS,
+    retry: false,
+  });
+  const workflowByTask = new Map((workflow.data ?? []).map((item) => [item.task_code, item]));
 
   if (isLoading) return <div className="flex flex-1 items-center justify-center text-slate-500">{t("加载项目任务看板…")}</div>;
   if (error) {
@@ -720,7 +753,16 @@ function TeamBoard({ projectCode, selectedId }: { projectCode: string; selectedI
 
   const allTasks = tasks ?? [];
   const selectedTask = selectedId && allTasks.find(task => task.code === selectedId);
-  const filteredTasks = filterBoardTasks(allTasks, filters);
+  const filteredTasks = filterBoardTasks(allTasks, filters).filter((task) => {
+    const activity = workflowByTask.get(task.code);
+    if (overview === 'execution') return task.assignee_code === viewerCode && ['assigned', 'running', 'self_tested', 'blocked', 'failed'].includes(task.status);
+    if (overview === 'review') return task.status === 'submitted' && activity?.reviewer_code === viewerCode;
+    if (overview === 'attention') return ['blocked', 'failed', 'verified'].includes(task.status)
+      || task.status === 'submitted' && (!activity?.reviewer_code || activity.review_status === 'needs_evidence' || activity.execution_health === 'expired'
+        || isStale(activity.review_updated_at ?? activity.submitted_at ?? undefined))
+      || ['running', 'self_tested'].includes(task.status) && Boolean(activity && activity.execution_health !== 'active');
+    return true;
+  });
   const visibleColumns = BOARD_COLUMNS.filter((column) => column.id !== 'cancelled' || allTasks.some((task) => task.status === 'cancelled'));
   const board = visibleColumns.map((col) => ({
     ...col,
@@ -735,7 +777,7 @@ function TeamBoard({ projectCode, selectedId }: { projectCode: string; selectedI
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
-      <main className="flex-1 overflow-x-auto p-6">
+      <main className="flex-1 overflow-x-auto p-3 sm:p-6">
         {selectedId && !selectedTask && <div role="alert" className="mb-3 flex flex-wrap items-center gap-3 rounded-xl bg-slate-100 p-3 text-sm text-slate-700">
           {t('当前项目中找不到这条任务。')} <button type="button" className="ui-button ui-button-secondary ui-button-compact" onClick={closeModal}>{t('关闭提示')}</button>
         </div>}
@@ -750,6 +792,16 @@ function TeamBoard({ projectCode, selectedId }: { projectCode: string; selectedI
             <span title={t("core-api 已连接")} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-emerald-100 bg-emerald-50 px-2.5 text-xs font-medium text-emerald-700">
               <span className={`h-1.5 w-1.5 rounded-full bg-emerald-500 ${isFetching ? 'animate-pulse' : ''}`} />{t("已同步")}</span>
           </div>
+        </div>
+        <div className="mb-3 flex flex-wrap items-center gap-1.5" aria-label={t('任务待办筛选')} role="group">
+          {([
+            ['all', '全部任务'], ['execution', '我的执行'], ['review', '我的验收'], ['attention', '需处理'],
+          ] as const).map(([value, label]) => (
+            <button key={value} type="button" aria-pressed={overview === value}
+              disabled={value === 'review' && !workflow.isSuccess}
+              className={`ui-button ui-button-compact ${overview === value ? 'ui-button-primary' : 'ui-button-secondary'}`}
+              onClick={() => setOverview(value)}>{t(label)}</button>
+          ))}
         </div>
         <div className="flex items-start gap-4">
           <div className="grid shrink-0 grid-flow-col auto-cols-[300px] gap-4">
@@ -776,7 +828,8 @@ function TeamBoard({ projectCode, selectedId }: { projectCode: string; selectedI
                     </div>
                     <div className="space-y-2">
                       {featureTasks.map((t) => (
-                        <TaskCard key={t.code} task={t} onSelect={() => navigateWorkspace(taskWorkspacePath(projectCode, t.code), { replace: true })} />
+                        <TaskCard key={t.code} task={t} workflow={workflowByTask.get(t.code)}
+                          onSelect={() => navigateWorkspace(taskWorkspacePath(projectCode, t.code), { replace: true })} />
                       ))}
                     </div>
                   </div>
@@ -794,7 +847,7 @@ function TeamBoard({ projectCode, selectedId }: { projectCode: string; selectedI
           />
         </div>
       </main>
-      {selectedTask && <TaskDetailModal key={selectedTask.code} taskId={selectedTask.code} projectCode={projectCode} onClose={closeModal} />}
+      {selectedTask && <TaskDetailModal key={selectedTask.code} taskId={selectedTask.code} projectCode={projectCode} viewerCode={viewerCode} onClose={closeModal} />}
     </div>
   );
 }

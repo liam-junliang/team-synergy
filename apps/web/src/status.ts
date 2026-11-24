@@ -1,8 +1,8 @@
 /** 状态展示映射（docs/02 十态 + 派生） */
 export const STATUS_META: Record<string, { label: string; color: string; group: string }> = {
   draft: { label: '草稿', color: 'bg-slate-200 text-slate-700', group: 'backlog' },
-  ready: { label: '就绪', color: 'bg-sky-100 text-sky-700', group: 'backlog' },
-  assigned: { label: '已分派', color: 'bg-indigo-100 text-indigo-700', group: 'todo' },
+  ready: { label: '待分派', color: 'bg-sky-100 text-sky-700', group: 'backlog' },
+  assigned: { label: '待领取', color: 'bg-indigo-100 text-indigo-700', group: 'todo' },
   running: { label: '进行中', color: 'bg-blue-100 text-blue-700', group: 'doing' },
   self_tested: { label: '自测完成', color: 'bg-teal-100 text-teal-700', group: 'doing' },
   submitted: { label: '待验收', color: 'bg-amber-100 text-amber-700', group: 'review' },
@@ -15,7 +15,7 @@ export const STATUS_META: Record<string, { label: string; color: string; group: 
 
 export const BOARD_COLUMNS: Array<{ id: string; title: string; statuses: string[] }> = [
   { id: 'backlog', title: '待处理', statuses: ['draft', 'ready'] },
-  { id: 'todo', title: '已分派', statuses: ['assigned'] },
+  { id: 'todo', title: '待领取', statuses: ['assigned'] },
   { id: 'doing', title: '执行中', statuses: ['running', 'self_tested', 'blocked', 'failed'] },
   { id: 'review', title: '验收', statuses: ['submitted', 'verified'] },
   { id: 'done', title: '已完成', statuses: ['closed'] },

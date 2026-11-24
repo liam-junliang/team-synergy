@@ -1327,6 +1327,41 @@ export const evidences = pgTable(
   ],
 );
 
+export const taskWebSubmissions = pgTable(
+  'task_web_submissions',
+  {
+    id: identityId(),
+    task_id: bigint('task_id', { mode: 'bigint' }).notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+    artifact_id: bigint('artifact_id', { mode: 'bigint' }).notNull().references(() => artifacts.id, { onDelete: 'cascade' }),
+    evidence_id: bigint('evidence_id', { mode: 'bigint' }).notNull().references(() => evidences.id, { onDelete: 'cascade' }),
+    author_principal_id: bigint('author_principal_id', { mode: 'bigint' }).notNull().references(() => users.id),
+    registrar_principal_id: bigint('registrar_principal_id', { mode: 'bigint' }).notNull().references(() => users.id),
+    submission_snapshot: integer('submission_snapshot').notNull(),
+    recorded_at: isoTimestamp('recorded_at').notNull().default(sql`now()`),
+  },
+  (t) => [uniqueIndex('uq_task_web_submissions_snapshot').on(t.task_id, t.submission_snapshot)],
+);
+
+export const taskWebReviews = pgTable(
+  'task_web_reviews',
+  {
+    id: identityId(),
+    task_id: bigint('task_id', { mode: 'bigint' }).notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+    artifact_id: bigint('artifact_id', { mode: 'bigint' }).notNull().references(() => artifacts.id, { onDelete: 'cascade' }),
+    submission_event_id: bigint('submission_event_id', { mode: 'bigint' }).references(() => auditEvents.id, { onDelete: 'cascade' }),
+    reviewer_principal_id: bigint('reviewer_principal_id', { mode: 'bigint' }).notNull().references(() => users.id),
+    status: text('status', { enum: ['assigned', 'in_progress', 'needs_evidence', 'passed', 'returned', 'replaced'] }).notNull(),
+    reason: text('reason'),
+    evidence_id: bigint('evidence_id', { mode: 'bigint' }).references(() => evidences.id, { onDelete: 'set null' }),
+    started_at: isoTimestamp('started_at'),
+    updated_at: isoTimestamp('updated_at').notNull().default(sql`now()`),
+  },
+  (t) => [
+    index('idx_task_web_reviews_task_artifact').on(t.task_id, t.artifact_id, t.id.desc()),
+    check('ck_task_web_reviews_status', sql`${t.status} IN ('assigned', 'in_progress', 'needs_evidence', 'passed', 'returned', 'replaced')`),
+  ],
+);
+
 export const auditEvents = pgTable(
   'audit_events',
   {

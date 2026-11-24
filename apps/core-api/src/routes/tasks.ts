@@ -20,6 +20,7 @@ import {
 } from '@team-synergy/contracts';
 import { hasAuthenticatedSession, unauthorized } from '../auth.js';
 import { executionIdentity } from './handovers.js';
+import { registerTaskWebWorkflowRoutes } from './task-web-workflow.js';
 
 interface StringEnumSchema<T extends string> {
   options: readonly T[];
@@ -64,6 +65,7 @@ const invalidTaskSnapshot = () => ({
 
 
 export function registerTaskRoutes(app: FastifyInstance, db: Db): void {
+  registerTaskWebWorkflowRoutes(app, db);
   const taskService = createTaskService(db);
   const projectUc = createProjectUseCases(db);
   const verifyUc = createVerificationUseCases(db);

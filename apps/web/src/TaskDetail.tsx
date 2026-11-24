@@ -15,12 +15,19 @@ const ACTION_LABEL: Record<string, string> = {
   'task.created': '创建',
   'task.assigned': '分派',
   'task.reassigned': '改派',
-  'task.readied': '设为就绪',
+  'task.assignment_released': '任务分派已收回',
+  'task.execution_recovered': '任务执行已收回',
+  'task.readied': '加入待分派',
   'task.claimed': '领取',
   'task.self_tested': '自测完成',
   'task.submitted': '提交',
   'task.verification_claimed': '验证领取',
   'task.verified': '验证通过',
+  'task.verification_failed': '已退回修改',
+  'task.web_review_assigned': '已指派验收',
+  'task.web_review_started': '人工验收已开始',
+  'task.web_evidence_requested': '已请求补充证据',
+  'task.web_evidence_supplemented': '已补录自测证据',
   'task.closed': '关闭',
   'task.cancelled': '取消',
   'member.added': '成员加入',
@@ -216,12 +223,14 @@ function ArtifactCard({ artifact, projectCode }: { artifact: TaskArtifact; proje
   );
 }
 
-export function TaskDetail({ task, events, stale, staleHint, canManageWorkflow = false }: {
+export function TaskDetail({ task, events, stale, staleHint, canManageWorkflow = false, managementActions, viewerCode }: {
   task: TaskDetail;
   events: AuditEvent[];
   stale: boolean;
   staleHint?: string;
   canManageWorkflow?: boolean;
+  managementActions?: ReactNode;
+  viewerCode?: string;
 }) {
   useLocale();
   const meta = STATUS_META[task.status] ?? { label: task.status, color: 'bg-slate-200 text-slate-700' };
@@ -272,7 +281,7 @@ export function TaskDetail({ task, events, stale, staleHint, canManageWorkflow =
             <OverviewItem label={t("快照")} value={`#${task.base_snapshot}`} mono />
           </div>
         </div>
-        {canManageWorkflow && <TaskWorkflowPanel task={task} />}
+        <TaskWorkflowPanel task={task} canManageWorkflow={canManageWorkflow} managementActions={managementActions} viewerCode={viewerCode} />
       </section>
 
       <TaskBaselinePanel key={`baseline-${task.code}`} task={task} />
