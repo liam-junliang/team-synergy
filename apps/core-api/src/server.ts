@@ -53,7 +53,7 @@ import { createCodeAnalysisWorker } from './code-analysis-worker.js';
 import { registerBackgroundDrain, registerBackgroundLoop } from './background-loop.js';
 import { configuredRemoteMcpUrl, isPublicConnectorRoute, registerRemoteMcp } from './remote-mcp.js';
 import { registerRemoteMcpOAuthRoutes } from './remote-mcp-oauth.js';
-import { registerRemoteMcpGrantRoutes } from './remote-mcp-authorization.js';
+import { serviceVersion } from './remote-mcp-release.js';
 
 export interface BuildServerOptions {
   /** Borrow an existing handle. The caller remains responsible for closing it. */
@@ -136,7 +136,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
     openapi: {
       info: {
         title: 'Team Synergy Core API',
-        version: '0.1.0',
+        version: serviceVersion,
       },
     },
   });
@@ -145,7 +145,6 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   registerMetrics(app, db);
   registerAuthMiddleware(app, db, remoteMcpUrl ? isPublicConnectorRoute : undefined);
   if (remoteMcpUrl) {
-    registerRemoteMcpGrantRoutes(app, db);
     registerRemoteMcpOAuthRoutes(app, db, { resourceUrl: remoteMcpUrl });
     registerRemoteMcp(app, db, remoteMcpUrl);
   }

@@ -4,6 +4,7 @@ export interface PlatformClientConfig {
   public_web_url: string | null;
   public_api_url: string | null;
   remote_mcp_url?: string | null;
+  remote_mcp_release?: { serviceVersion: string; sourceRevision: string | null };
 }
 
 export const PLATFORM_CLIENT_CONFIG_QUERY_KEY = ['platform-client-config'] as const;

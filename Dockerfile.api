@@ -13,7 +13,7 @@ FROM ${NODE_IMAGE} AS runtime
 ARG SOURCE_REVISION=unknown
 LABEL org.opencontainers.image.source="https://github.com/liam-junliang/team-synergy" \
       org.opencontainers.image.revision="${SOURCE_REVISION}"
-ENV NODE_ENV=production HOST=127.0.0.1 PORT=8080 TSP_AUTO_MIGRATE=false
+ENV NODE_ENV=production HOST=127.0.0.1 PORT=8080 TSP_AUTO_MIGRATE=false TSP_SOURCE_REVISION=${SOURCE_REVISION}
 WORKDIR /app
 COPY --from=build --chown=node:node /release/package.json ./package.json
 COPY --from=build --chown=node:node /release/node_modules ./node_modules

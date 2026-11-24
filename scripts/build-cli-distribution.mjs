@@ -121,6 +121,16 @@ try {
     await fs.writeFile(path.join(payload, command), `#!/bin/sh\nTSP_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec "$TSP_ROOT/runtime/node" "$TSP_ROOT/apps/${app}/dist/index.js" "$@"\n`, { mode: 0o755 });
   }
   const version = JSON.parse(await fs.readFile(path.join(root, 'apps/cli/package.json'), 'utf8')).version;
+  const agentdVersion = JSON.parse(await fs.readFile(path.join(root, 'apps/agentd/package.json'), 'utf8')).version;
+  if (version !== agentdVersion || !/^\d+\.\d+\.\d+$/.test(version)) throw new Error('tsp and agentd must have the same release version');
+  const revision = option('--source-revision', process.env.GITHUB_SHA);
+  if (revision && !/^[a-f0-9]{40}$/.test(revision)) throw new Error('Provide the exact 40-character source revision');
+  if (revision !== undefined) {
+    const checkout = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', windowsHide: true });
+    if (checkout.status !== 0 || checkout.stdout.trim() !== revision) throw new Error('Source revision does not match the checked-out commit');
+  }
+  await fs.writeFile(path.join(payload, 'distribution.json'), `${JSON.stringify({ source_revision: revision ?? null })}\n`);
+  await copyTree(path.join(root, 'scripts/cli-install'), path.join(payload, 'installers'));
   const format = platform === 'win32' ? 'zip' : 'tar.gz';
   const archivePath = path.join(stage, `release.${format}`);
   if (format === 'zip') {
@@ -137,10 +147,13 @@ try {
   const archiveHash = sha256(bytes);
   const release = `${version}-${archiveHash.slice(0, 16)}`;
   const filename = `tsp-${release}-${platform}-${arch}.${format}`;
+  let old = { artifacts: [] }; try { old = JSON.parse(await fs.readFile(path.join(output, 'manifest.json'), 'utf8')); } catch { /* first release */ }
+  if (old.artifacts.length > 0 && (old.version !== version || old.node_version !== nodeVersion || (old.source_revision ?? null) !== (revision ?? null))) {
+    throw new Error('Use a clean output directory for each CLI source revision and runtime');
+  }
   await fs.rename(archivePath, path.join(output, filename));
   const artifact = { platform, arch, filename, sha256: archiveHash, size_bytes: bytes.length, format, release, node_version: nodeVersion, runtime_source: runtimeSource };
-  let old = { artifacts: [] }; try { old = JSON.parse(await fs.readFile(path.join(output, 'manifest.json'), 'utf8')); } catch { /* first release */ }
-  const manifest = { schema_version: 1, version, release, node_version: nodeVersion, artifacts: [...old.artifacts.filter((item) => item.platform !== platform || item.arch !== arch), artifact] };
+  const manifest = { schema_version: 1, version, release, node_version: nodeVersion, source_revision: revision ?? null, artifacts: [...old.artifacts.filter((item) => item.platform !== platform || item.arch !== arch), artifact] };
   const manifestTemp = path.join(stage, 'manifest.json'); await fs.writeFile(manifestTemp, `${JSON.stringify(manifest, null, 2)}\n`); await fs.rename(manifestTemp, path.join(output, 'manifest.json'));
   for (const script of ['install.ps1', 'install.sh']) await fs.copyFile(path.join(root, 'scripts/cli-install', script), path.join(output, script));
   process.stdout.write(`${JSON.stringify({ output, artifact })}\n`);

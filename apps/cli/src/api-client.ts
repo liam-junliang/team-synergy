@@ -6,6 +6,8 @@
  */
 
 import { authDirectory, matchesLocalDeviceFingerprint, readAuthConfig } from './auth-store.js';
+import { DeviceSessionError, localDeviceSession } from '@team-synergy/contracts/device-session';
+import type { CliLoginResult } from './browser-auth.js';
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -35,18 +37,25 @@ function isApiEnvelope<T>(value: unknown): value is ApiResult<T> {
 export function createApiClient(opts: ApiClientOptions) {
   const storedAuth = readAuthConfig();
   const baseUrl = (opts.baseUrl || storedAuth?.api_url || '').replace(/\/+$/, '');
-  const storedToken = storedAuth?.api_url.replace(/\/+$/, '') === baseUrl ? storedAuth.device_token : undefined;
+  const storedApi = storedAuth?.api_url.replace(/\/+$/, '');
   // 身份优先级（docs/23）：显式 principalCode（机器模式/编排者指定）> 显式 deviceToken > ACP_TOKEN > 本机 auth.json
   // 显式 principalCode 时不带 Bearer，避免本机登录的 device token 覆盖编排者指定的执行身份
-  const deviceToken = opts.skipAuth
+  const overrideToken = opts.skipAuth
     ? undefined
     : opts.principalCode
       ? undefined
-      : opts.deviceToken || process.env.ACP_DEVICE_TOKEN || process.env.ACP_TOKEN || storedToken;
+      : opts.deviceToken || process.env.ACP_DEVICE_TOKEN || process.env.ACP_TOKEN;
+  const profile = !opts.skipAuth && !opts.principalCode && !overrideToken ? storedAuth : null;
+  const session = profile && storedApi === baseUrl ? localDeviceSession(baseUrl, profile) : undefined;
+  async function resolveDeviceToken() {
+    if (profile && !session) throw new DeviceSessionError('auth_profile_mismatch', '当前 API 地址与本机已登录的平台不同，请核对 ACP_API_URL');
+    return session ? session.token() : overrideToken;
+  }
 
   async function request<T>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown, extraHeaders: Record<string, string> = {}): Promise<ApiResult<T>> {
     let res: Response;
     try {
+      const deviceToken = await resolveDeviceToken();
       const headers: Record<string, string> = { ...extraHeaders };
       if (body !== undefined) headers['content-type'] = 'application/json';
       if (deviceToken) {
@@ -62,6 +71,7 @@ export function createApiClient(opts: ApiClientOptions) {
         ...(opts.requestTimeoutMs ? { signal: AbortSignal.timeout(opts.requestTimeoutMs) } : {}),
       });
     } catch (e) {
+      if (e instanceof DeviceSessionError) return { ok: false, error: { code: e.code, message: e.message } };
       return {
         ok: false,
         error: {
@@ -90,10 +100,11 @@ export function createApiClient(opts: ApiClientOptions) {
   }
 
   async function downloadAttachment(route: string): Promise<ApiResult<Uint8Array>> {
-    const headers: Record<string, string> = {};
-    if (deviceToken) headers.authorization = `Bearer ${deviceToken}`;
-    else if (opts.principalCode) headers['x-principal-code'] = opts.principalCode;
     try {
+      const deviceToken = await resolveDeviceToken();
+      const headers: Record<string, string> = {};
+      if (deviceToken) headers.authorization = `Bearer ${deviceToken}`;
+      else if (opts.principalCode) headers['x-principal-code'] = opts.principalCode;
       const response = await fetch(`${baseUrl}${route}`, { headers, redirect: 'error' });
       if (!response.ok || response.headers.get('content-type')?.includes('application/json') && !response.headers.has('content-disposition')) {
         const error: unknown = await response.json().catch(() => null);
@@ -102,11 +113,18 @@ export function createApiClient(opts: ApiClientOptions) {
       }
       return { ok: true, data: new Uint8Array(await response.arrayBuffer()) };
     } catch (error) {
+      if (error instanceof DeviceSessionError) return { ok: false, error: { code: error.code, message: error.message } };
       return { ok: false, error: { code: 'api_unreachable', message: `无法下载附件（${error instanceof Error ? error.message : String(error)}）` } };
     }
   }
 
   async function executionRequest<T>(route: string, body: Record<string, unknown>): Promise<ApiResult<T>> {
+    let deviceToken: string | undefined;
+    try { deviceToken = await resolveDeviceToken(); }
+    catch (error) {
+      if (error instanceof DeviceSessionError) return { ok: false, error: { code: error.code, message: error.message } };
+      throw error;
+    }
     const headers: Record<string, string> = {};
     const runCode = typeof body.run_code === 'string' ? body.run_code : '';
     const directory = path.join(authDirectory(), 'handovers');
@@ -152,10 +170,10 @@ export function createApiClient(opts: ApiClientOptions) {
     async skillRequest<T = Record<string, unknown>>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', route: string, body?: unknown): Promise<ApiResult<T>> {
       return request<T>(method, route, body);
     },
-    async login(body: { bind_token: string; device_name: string; device_identity?: import('./device-identity.js').DeviceIdentity }): Promise<ApiResult<{ device_code: string; device_token: string; user_code: string; device_name: string }>> {
+    async login(body: { bind_token: string; device_name: string; device_identity?: import('./device-identity.js').DeviceIdentity; renewable_session?: boolean }): Promise<ApiResult<CliLoginResult>> {
       return request('POST', '/auth/login', body);
     },
-    async passwordLogin(body: { account: string; password: string; device_name: string; device_identity?: import('./device-identity.js').DeviceIdentity }): Promise<ApiResult<{ device_code: string; device_token: string; user_code: string; device_name: string }>> {
+    async passwordLogin(body: { account: string; password: string; device_name: string; device_identity?: import('./device-identity.js').DeviceIdentity; renewable_session?: boolean }): Promise<ApiResult<CliLoginResult>> {
       return request('POST', '/auth/password-login', body);
     },
     async changePassword(body: { new_password: string; current_password?: string }): Promise<ApiResult<{ user_code: string; revoked_devices: number }>> {

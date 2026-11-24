@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
@@ -42,10 +42,19 @@ async function start(options: StartOptions, previous?: Session): Promise<Session
   const session = await apiRequest<Session & { created: boolean }>(config, 'POST', `/runs/${context.run_code}/sessions`, { start_key: startKey, agent_command: command, prompt_path: promptPath, launch_kind: launchKind, resumed_from_session_code: previous?.session_code, ...lease });
   if (!session.created && !local) throw new AgentdError('session_already_registered', '启动已登记；本机没有对应 journal，拒绝重复启动');
   if (!session.created && local?.journal.completed) return local.journal.session;
+  // Startup may have upgraded a legacy profile. Pin that verified session and
+  // absolute profile directory before the detached process switches to repoPath.
+  const currentSessionCode = config.localSession?.currentSessionCode();
   const file = journalPath(session.session_code);
   const journal: Journal = { session, runCode: context.run_code, taskCode: context.task_code, workspace, repoPath, credentialFingerprint: fingerprint, lease, startKey, completed: false, exitCode: null, error: null, output: '', processId: null };
   writeJournal(file, journal);
-  const child = spawn(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), 'supervisor.js'), file], { cwd: repoPath, env: { ...process.env, ACP_API_URL: config.apiUrl, ACP_DEVICE_TOKEN: config.deviceToken, TSP_DATABASE_URL: undefined }, detached: true, windowsHide: true, stdio: 'ignore' });
+  const child = spawn(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), 'supervisor.js'), file], {
+    cwd: repoPath,
+    env: { ...process.env, AGENTCTL_HOME: config.authDirectory, ACP_API_URL: config.apiUrl,
+      ACP_DEVICE_TOKEN: currentSessionCode ? undefined : config.deviceToken,
+      ACP_DEVICE_SESSION_CODE: currentSessionCode, TSP_DATABASE_URL: undefined },
+    detached: true, windowsHide: true, stdio: 'ignore',
+  });
   journal.processId = child.pid ?? null; journal.session.process_id = child.pid ?? null; writeJournal(file, journal);
   try {
     await new Promise<void>((resolve, reject) => { child.once('error', reject); child.once('spawn', () => { child.unref(); resolve(); }); });
@@ -85,7 +94,8 @@ async function stop(options: { session?: string; run?: string }) {
   }
   return { run_code: options.run ?? targets[0]?.journal.runCode, sessions: targets.map(({ journal }) => journal.session), local_stopped: true };
 }
-const program = new Command().name('agentd').description('通过设备鉴权 HTTP 管理本机 Agent Session').version('0.1.0').exitOverride();
+const version = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version as string;
+const program = new Command().name('agentd').description('通过设备鉴权 HTTP 管理本机 Agent Session').version(version).exitOverride();
 function launchOptions(command: Command): Command { return command.requiredOption('--run <run_code>', 'Run 编码').option('--prompt <file>', '本机 Prompt 文件').option('--agent-command <cmd>', '自定义本机 Agent 命令').option('--workspace <path>', '本机 Workspace 路径').option('--lease-token <token>', '执行租约，建议使用 ACP_RUN_LEASE_TOKEN').option('--execution-epoch <epoch>', '执行代数').option('--start-key <key>', '幂等启动 key'); }
 launchOptions(program.command('start')).action(async options => { try { print(await start(options)); } catch (error) { failure(error); } });
 launchOptions(program.command('resume')).action(async (options: StartOptions) => {

@@ -4,6 +4,7 @@ import { and, eq } from 'drizzle-orm';
 import { createMemorySliceUseCases, hashPassword } from '@team-synergy/application';
 import { schema } from '@team-synergy/persistence';
 import { configuredRemoteMcpUrl } from '../dist/remote-mcp.js';
+import { remoteMcpRelease, serviceVersion } from '../dist/remote-mcp-release.js';
 import { buildServer } from '../dist/server.js';
 import { closeTestDb, insertFeature, insertProject, insertProjectMember, insertTeam, insertUser, openTestDb } from './test-db.mjs';
 
@@ -85,9 +86,13 @@ test('remote MCP advertises OAuth, returns project tool context and enforces rev
   const { connection, headers, token } = await grant(member);
   const config = await app.inject({ url: '/platform/client-config', headers });
   assert.equal(config.json().data.remote_mcp_url, resource);
+  assert.equal(config.headers['cache-control'], 'no-store');
+  assert.deepEqual(config.json().data.remote_mcp_release, remoteMcpRelease());
   const init = await mcp(token, 'initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'Connector test host', version: '1' } });
   assert.equal(init.status, 200, JSON.stringify(init.body));
   assert.equal(init.body.result.protocolVersion, '2025-11-25');
+  assert.equal(init.body.result.serverInfo.version, serviceVersion);
+  assert.equal(init.body.result.capabilities.tools.listChanged, false);
   assert.match(init.body.result.instructions, /search_tools/);
   assert.match(init.body.result.instructions, /read_connector_skill/);
   const catalog = await mcp(token, 'tools/call', { name: 'search_tools', arguments: {} });
@@ -96,6 +101,12 @@ test('remote MCP advertises OAuth, returns project tool context and enforces rev
   const context = await mcp(token, 'tools/call', { name: 'get_connection_context', arguments: {} });
   assert.equal(context.body.result.isError, false, JSON.stringify(context.body));
   assert.ok(JSON.stringify(context.body.result.structuredContent).includes(project.code));
+  const release = context.body.result.structuredContent.connector;
+  assert.equal(release.serviceVersion, serviceVersion);
+  assert.match(release.toolsetRevision, /^[0-9a-f]{64}$/);
+  assert.equal(release.toolsetChanged, null);
+  const connectionList = await app.inject({ url: connectionPath, headers });
+  assert.equal(connectionList.json().data.find(item => item.code === connection.code).toolsetRevision, release.toolsetRevision);
 
   const modern = await mcp(token, 'tools/list', { _meta: {
     'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientCapabilities': {},
@@ -110,9 +121,12 @@ test('remote MCP advertises OAuth, returns project tool context and enforces rev
 });
 
 test('remote MCP preserves project boundaries, task idempotency and current project write permissions', async t => {
-  const { db, member, project, feature, otherFeature, grant, mcp } = await fixture(t);
-  const { token } = await grant(member, { allowTaskWrite: true });
+  const { app, db, member, project, feature, otherFeature, grant, mcp } = await fixture(t);
+  const { connection, headers, token } = await grant(member, { allowTaskWrite: true });
   const call = (name, args) => mcp(token, 'tools/call', { name, arguments: args });
+  const before = (await call('get_connection_context', {})).body.result.structuredContent.connector;
+  const previous = { knownToolsetRevision: before.toolsetRevision };
+  assert.equal((await call('get_connection_context', previous)).body.result.structuredContent.connector.toolsetChanged, false);
   const initial = await mcp(token, 'tools/list', {});
   const names = initial.body.result.tools.map(tool => tool.name);
   assert.ok(names.includes('create_task_draft'));
@@ -130,6 +144,12 @@ test('remote MCP preserves project boundaries, task idempotency and current proj
   await db.update(schema.members).set({ role: 'viewer' }).where(and(eq(schema.members.project_id, project.id), eq(schema.members.principal_id, member.id)));
   const current = await mcp(token, 'tools/list', {});
   assert.ok(!current.body.result.tools.some(tool => tool.name === 'create_task_draft'));
+  const changed = (await call('get_connection_context', previous)).body.result.structuredContent;
+  assert.equal(changed.connector.toolsetChanged, true);
+  assert.notEqual(changed.connector.toolsetRevision, before.toolsetRevision);
+  assert.match(changed.toolsetNextStep, /tools\/list/);
+  const connectionList = await app.inject({ url: connectionPath, headers });
+  assert.equal(connectionList.json().data.find(item => item.code === connection.code).toolsetRevision, changed.connector.toolsetRevision);
   const blocked = await call('create_task_draft', { ...create, idempotency_key: 'connector-test-draft-after-downgrade' });
   assert.ok(blocked.body.error || blocked.body.result.isError);
 });

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { eq } from 'drizzle-orm';
 import { isPublicCode } from '@team-synergy/contracts';
-import { createAuthUseCases, createDeviceAuthorizationUseCases, createAuthRateLimiter, getWebSessionUser, recordRateLimitedLogin } from '@team-synergy/application';
+import { createAuthUseCases, createDeviceAuthorizationUseCases, createAuthRateLimiter, getWebSessionUser, recordRateLimitedLogin, refreshCliDeviceSession, upgradeCliDeviceSession } from '@team-synergy/application';
 import { schema, type Db } from '@team-synergy/persistence';
 import { hasAuthenticatedSession, unauthorized } from '../auth.js';
 import { browserIdentity, clearWebSession, createWebCsrf, readWebCookies, refreshWebCsrf, setWebSession, validWebCsrf, webCookieSecure } from '../web-session.js';
@@ -52,12 +52,34 @@ export function registerAuthRoutes(app: FastifyInstance, db: Db): void {
     if (retry) return throttled(reply, retry);
     return deviceAuth.start(request.body ?? {});
   });
-  app.post<{ Body: { device_code?: string } }>('/auth/device/token', { bodyLimit: 16 * 1024 }, async (request, reply) => {
+  app.post<{ Body: { device_code?: string; renewable_session?: boolean } }>('/auth/device/token', { bodyLimit: 16 * 1024 }, async (request, reply) => {
     const retry = await limited('token', request.ip, undefined, 120, 1200);
     if (retry) return throttled(reply, retry);
-    const result = await deviceAuth.token(typeof request.body?.device_code === 'string' ? request.body.device_code : '');
+    const result = await deviceAuth.token(typeof request.body?.device_code === 'string' ? request.body.device_code : '', request.body?.renewable_session === true);
     if (!result.ok && result.error.code === 'slow_down') return throttled(reply, Number((result.error.details as { retry_after: number }).retry_after));
+    reply.header('Cache-Control', 'no-store');
     return result;
+  });
+  app.post<{ Body: { refresh_token?: unknown; request_id?: unknown; device_identity?: unknown } }>('/auth/device/refresh', { bodyLimit: 16 * 1024 }, async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const retry = await limited('cli-refresh', request.ip, undefined, 120, 1200);
+    if (retry) return throttled(reply, retry);
+    const body = request.body ?? {};
+    const data = await refreshCliDeviceSession(db, body.refresh_token, body.request_id, body.device_identity);
+    if (!data) return reply.code(401).send({ ok: false, error: { code: 'auth_reauthentication_required', message: '设备授权已失效，请重新运行 tsp auth login' } });
+    return { ok: true, data };
+  });
+  app.post<{ Body: { device_identity?: unknown } }>('/auth/device/upgrade', { bodyLimit: 16 * 1024 }, async (request, reply) => {
+    if (request.authKind !== 'bearer' || !request.authDeviceToken) return unauthorized(reply);
+    reply.header('Cache-Control', 'no-store');
+    const retry = await limited('cli-upgrade', request.ip, request.authSessionCode ?? undefined, 120, 1200);
+    if (retry) return throttled(reply, retry);
+    const data = await upgradeCliDeviceSession(db, request.authDeviceToken, request.body?.device_identity);
+    if (!data) return reply.code(409).send({ ok: false, error: { code: 'auth_upgrade_unavailable', message: '此设备会话无法自动迁移，请在到期前重新登录' } });
+    if ('deferred' in data) return reply.header('Retry-After', 60).code(409).send({
+      ok: false, error: { code: 'auth_upgrade_run_active', message: '此设备仍有运行中的任务，授权将在运行结束后自动续期' },
+    });
+    return { ok: true, data };
   });
   app.get<{ Querystring: { user_code?: string } }>('/auth/device/request', async (request, reply) => {
     if (!hasAuthenticatedSession(request) || !request.principal) return unauthorized(reply);
@@ -85,6 +107,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Db): void {
   }
 
   app.post<{ Body: Record<string, unknown> }>('/auth/login', { bodyLimit: 16 * 1024 }, async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
     const body = request.body ?? {};
     const retry = await limited('bind', request.ip, typeof body.bind_token === 'string' ? body.bind_token : undefined);
     if (retry) return throttled(reply, retry);
@@ -93,12 +116,14 @@ export function registerAuthRoutes(app: FastifyInstance, db: Db): void {
       typeof body.device_name === 'string' ? body.device_name : '',
       undefined,
       body.device_identity,
+      body.renewable_session === true,
     );
     if (!result.ok) return unauthorized(reply);
     return result;
   });
 
   app.post<{ Body: Record<string, unknown> }>('/auth/password-login', { bodyLimit: 16 * 1024 }, async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
     const body = request.body ?? {};
     const account = typeof body.account === 'string' ? body.account.trim().toLowerCase() : '';
     const retry = await limited('password', request.ip, account);
@@ -109,6 +134,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Db): void {
       typeof body.device_name === 'string' ? body.device_name : '',
       body.device_identity,
       { ip: request.ip },
+      body.renewable_session === true,
     );
     if (!result.ok && result.error.code === 'slow_down') return throttled(reply, Number((result.error.details as { retry_after: number }).retry_after));
     if (!result.ok) return unauthorized(reply);

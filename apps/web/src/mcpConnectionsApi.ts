@@ -1,5 +1,7 @@
 import { fetchEnvelope } from './api';
 
+export type McpRefreshFailureReason = 'idle_expired' | 'authorization_expired' | 'authorization_revoked' | 'access_lost' | 'scope_changed' | 'refresh_token_reused';
+
 export interface McpConnection {
   code: string;
   name: string;
@@ -7,7 +9,15 @@ export interface McpConnection {
   allowPersonalMemory: boolean;
   allowTaskWrite: boolean;
   allowWorkspaceWrite?: boolean;
+  credentialType?: 'oauth' | 'manual';
+  canRefresh?: boolean;
+  accessExpiresAt?: string | null;
   expiresAt: string;
+  absoluteExpiresAt?: string | null;
+  lastRefreshedAt?: string | null;
+  lastRefreshFailedAt?: string | null;
+  lastRefreshFailureReason?: McpRefreshFailureReason | null;
+  toolsetRevision?: string;
   revokedAt: string | null;
 }
 

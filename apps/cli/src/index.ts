@@ -18,9 +18,10 @@ import {
   type RemoteTaskShape,
 } from './pack.js';
 import { createApiClient, apiUrlConfigured } from './api-client.js';
-import { authFilePath, readAuthConfig, removeAuthConfig, writeAuthConfig } from './auth-store.js';
+import { authFilePath, clearCurrentAuthConfig, readAuthConfig, saveAuthConfig } from './auth-store.js';
 import { identifyExistingCliDevice, normalizeApiUrl, readOrCreateDeviceIdentity } from './device-identity.js';
-import { loginThroughBrowser } from './browser-auth.js';
+import { loginThroughBrowser, type CliLoginResult } from './browser-auth.js';
+import { DeviceSessionError, localDeviceSession, secureDeviceRenewalEndpoint } from '@team-synergy/contracts/device-session';
 import { collectHandoffUploadPlan } from './handoff-upload.js';
 import { registerHandoverCommands } from './handover.js';
 import { registerArchitectureCommands } from './architecture.js';
@@ -50,6 +51,7 @@ import {
 } from '@team-synergy/contracts';
 import { z } from 'zod';
 import { spawnSync, spawn } from 'node:child_process';
+import { cliVersion, notifyCliUpdate, runCliUpdate } from './cli-update.js';
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { hostname } from 'node:os';
@@ -71,8 +73,25 @@ const HandoffDocumentKindSchema = z.enum(['doc', 'api', 'diagram', 'general', 'i
 program
   .name('tsp')
   .description('Team Synergy CLI — 项目事实的通用操作入口')
-  .version('0.1.0')
+  .version(cliVersion().version)
   .exitOverride();
+
+program.command('version').description('查看 CLI 版本、安装包标识与源码提交').action(() => {
+  printResult({ ok: true, data: cliVersion() });
+});
+
+program.command('update')
+  .description('检查、升级或回退平台安装包')
+  .option('--check', '立即查询可用更新')
+  .option('--rollback', '切换到上一次安装')
+  .option('--yes', '明确确认切换，用于非交互终端')
+  .action(async (options: { check?: boolean; rollback?: boolean; yes?: boolean }) => {
+    printResult({ ok: true, data: await runCliUpdate(options, readAuthConfig()?.api_url) });
+  });
+
+program.hook('preAction', async (_program, command) => {
+  if (!['update', 'version', 'mcp', 'agentd'].includes(command.name())) await notifyCliUpdate();
+});
 
 // ---- 全局配置：身份、数据库、仓库与工作区根 ----
 function principalCode(): string {
@@ -93,6 +112,7 @@ function printResult<T>(result: CliErrorResult | CliSuccessResult<T>): void {
 }
 
 function failResult(e: unknown): CliErrorResult {
+  if (e instanceof DeviceSessionError) return { ok: false, error: { code: e.code, message: e.message } };
   if (e instanceof DomainError) {
     const domainError: DomainError & { details?: unknown } = e;
     return {
@@ -191,7 +211,15 @@ function parseStringArrayJson(raw: string): string[] {
 }
 
 // ---- auth 命令族（docs/23：一次性绑定 token → 本机设备凭据） ----
-const auth = program.command('auth').description('CLI 设备认证：login / logout / whoami');
+const auth = program.command('auth').description('CLI 设备认证：login / logout / whoami / status');
+
+async function saveLogin(apiUrl: string, result: CliLoginResult) {
+  await saveAuthConfig({
+    api_url: apiUrl, device_token: result.device_token, user_code: result.user_code,
+    device_name: result.device_name, device_code: result.device_code, session_code: result.session_code,
+    session_expires_at: result.session_expires_at, access_expires_at: result.access_expires_at, refresh_token: result.refresh_token,
+  });
+}
 
 auth
   .command('login')
@@ -206,22 +234,16 @@ auth
       const apiUrl = normalizeApiUrl(opts.api);
       const identity = readOrCreateDeviceIdentity(apiUrl);
       await identifyExistingCliDevice(apiUrl, identity);
-      const client = createApiClient({ baseUrl: apiUrl, skipAuth: true });
+      const client = createApiClient({ baseUrl: apiUrl, skipAuth: true, redirect: 'error' });
       const result = opts.token
-        ? await client.login({ bind_token: opts.token, device_name: opts.name, device_identity: identity })
+        ? await client.login({ bind_token: opts.token, device_name: opts.name, device_identity: identity, renewable_session: secureDeviceRenewalEndpoint(apiUrl) })
         : await loginThroughBrowser({ api: apiUrl, name: opts.name, identity, noBrowser: !opts.browser, web: opts.web });
       if (!result.ok) {
         printResult(result);
         process.exitCode = 1;
         return;
       }
-      writeAuthConfig({
-        api_url: apiUrl,
-        device_token: result.data.device_token,
-        user_code: result.data.user_code,
-        device_name: result.data.device_name,
-        device_code: result.data.device_code,
-      });
+      await saveLogin(apiUrl, result.data);
       printResult({ ok: true, data: { device_code: result.data.device_code, user_code: result.data.user_code, device_name: result.data.device_name, auth_file: authFilePath() } });
     } catch (error) {
       printResult(failResult(error));
@@ -236,9 +258,13 @@ auth
     try {
       const config = readAuthConfig();
       if (!config) throw new DomainError('auth_not_logged_in', '本机尚未登录');
-      const client = createApiClient({ baseUrl: config.api_url, deviceToken: config.device_token });
-      const result = await client.logout();
-      removeAuthConfig();
+      const device = localDeviceSession(config.api_url, config);
+      let result;
+      try {
+        const token = await device.token();
+        result = await createApiClient({ baseUrl: config.api_url, deviceToken: token }).logout();
+      } catch (error) { result = failResult(error); }
+      if (result.ok || ['unauthorized', 'auth_reauthentication_required'].includes(result.error.code)) await clearCurrentAuthConfig(config);
       printResult(result);
       if (!result.ok) process.exitCode = 1;
     } catch (error) {
@@ -260,27 +286,22 @@ auth
       const apiUrl = normalizeApiUrl(opts.api);
       const identity = readOrCreateDeviceIdentity(apiUrl);
       await identifyExistingCliDevice(apiUrl, identity);
-      const client = createApiClient({ baseUrl: apiUrl, skipAuth: true });
-      const login = await client.passwordLogin({ account: opts.account, password: opts.password, device_name: opts.name, device_identity: identity });
+      const client = createApiClient({ baseUrl: apiUrl, skipAuth: true, redirect: 'error' });
+      const login = await client.passwordLogin({ account: opts.account, password: opts.password, device_name: opts.name, device_identity: identity,
+        renewable_session: secureDeviceRenewalEndpoint(apiUrl) });
       if (!login.ok) {
         printResult(login);
         process.exitCode = 1;
         return;
       }
-      writeAuthConfig({
-        api_url: apiUrl,
-        device_token: login.data.device_token,
-        user_code: login.data.user_code,
-        device_name: login.data.device_name,
-        device_code: login.data.device_code,
-      });
+      await saveLogin(apiUrl, login.data);
 
       // 初始密码用户：服务端会以 password_change_required 拦截业务请求。
       // 提供 --new-password 时当场完成改密，一步进入可用状态。
       // 改密必须携带刚获取的 Bearer 设备 token（skipAuth client 会被 401 拒绝）。
       let changed: { revoked_devices?: number } | undefined;
       if (opts.newPassword) {
-        const authedClient = createApiClient({ baseUrl: apiUrl, deviceToken: login.data.device_token });
+        const authedClient = createApiClient({ baseUrl: apiUrl, deviceToken: login.data.device_token, redirect: 'error' });
         const change = await authedClient.changePassword({
           new_password: opts.newPassword,
           current_password: opts.password,
@@ -292,7 +313,7 @@ auth
         }
         changed = { revoked_devices: change.data.revoked_devices };
       }
-      const whoami = await createApiClient({ baseUrl: apiUrl, deviceToken: readAuthConfig()?.device_token ?? login.data.device_token }).whoami();
+      const whoami = await createApiClient({ baseUrl: apiUrl, deviceToken: login.data.device_token, redirect: 'error' }).whoami();
       printResult({
         ok: true as const,
         data: {
@@ -322,7 +343,8 @@ auth
     try {
       const config = readAuthConfig();
       if (!config) throw new DomainError('auth_not_logged_in', '本机尚未登录');
-      const client = createApiClient({ baseUrl: config.api_url, deviceToken: config.device_token });
+      const token = await localDeviceSession(config.api_url, config).token();
+      const client = createApiClient({ baseUrl: config.api_url, deviceToken: token });
       const result = await client.changePassword({
         new_password: opts.new,
         current_password: opts.current,
@@ -345,9 +367,33 @@ auth
   .action(async () => {
     try {
       const config = readAuthConfig();
-      if (!config) throw new DomainError('auth_not_logged_in', '本机尚未登录');
-      const result = await createApiClient({ baseUrl: config.api_url }).whoami();
+      if (!config && !process.env.ACP_DEVICE_TOKEN && !process.env.ACP_TOKEN) throw new DomainError('auth_not_logged_in', '本机尚未登录');
+      const result = await createApiClient({ baseUrl: normalizeApiUrl(requireAuthApiUrl()) }).whoami();
       printResult(result);
+      if (!result.ok) process.exitCode = 1;
+    } catch (error) {
+      printResult(failResult(error));
+      process.exitCode = 1;
+    }
+  });
+
+auth
+  .command('status')
+  .description('检查当前平台、设备授权来源及续期状态')
+  .action(async () => {
+    try {
+      const apiUrl = normalizeApiUrl(requireAuthApiUrl());
+      const credentialSource = process.env.ACP_DEVICE_TOKEN ? 'ACP_DEVICE_TOKEN' : process.env.ACP_TOKEN ? 'ACP_TOKEN' : 'device_profile';
+      const result = await createApiClient({ baseUrl: apiUrl }).whoami();
+      const config = readAuthConfig();
+      const activeProfile = credentialSource === 'device_profile' && config?.api_url === apiUrl ? config : null;
+      const status = {
+        api_url: apiUrl, credential_source: credentialSource, renewable: Boolean(activeProfile?.refresh_token),
+        access_expires_at: activeProfile?.access_expires_at ?? null, session_expires_at: activeProfile?.session_expires_at ?? null,
+        last_refreshed_at: activeProfile?.last_refreshed_at ?? null,
+      };
+      printResult(result.ok ? { ok: true, data: { ...status, ...result.data } }
+        : { ok: false, error: { ...result.error, details: status } });
       if (!result.ok) process.exitCode = 1;
     } catch (error) {
       printResult(failResult(error));

@@ -72,17 +72,29 @@ core-api 首次连接数据库时保证存在系统管理员：
 
 ## 5. CLI / Agent 设备认证
 
-CLI 与 Agent 继续使用设备 token，不保存用户密码：
+CLI 与 Agent 共享本机设备会话。默认先执行 `tsp auth login --api <地址>`，
+在浏览器核对设备名称和授权码。批准窗口为 10 分钟。
 
 ```text
 系统管理员签发一次性 bind token
   POST /users/:user_code/bind-token
 
-tsp auth login --token <bind-token> --name <device>
+tsp auth login --api <地址> --token <bind-token> --name <device>
   → POST /auth/login
-  → 返回长期 device token
-  → 本地保存 api_url / device_token / user_code
+  → 保存与平台及安装身份绑定的本机凭据
 ```
+
+新版 CLI 通过 HTTPS 登录后获得 1 小时访问令牌，临近到期时由 `tsp` 和
+`agentd` 自动续期。每次续期轮换访问令牌和刷新令牌，设备编码、会话编码和
+90 天会话上限沿用登录时的值。可验证安装身份的旧 CLI 会话可在到期前迁移。
+本机回环开发环境也可测试续期。授权记录保存在 PostgreSQL，API 进程重启后
+继续校验同一会话。退出或吊销会话、吊销设备、账号禁用等操作立即停止该授权的访问和续期。
+
+`tsp auth status` 显示当前 API 地址、凭据来源、到期时间和最近一次续期。
+`ACP_DEVICE_TOKEN` / `ACP_TOKEN` 会选择显式凭据，显式凭据由调用方管理。
+若 `ACP_API_URL` 指向其他平台，先核对地址再重新登录。
+Run 执行租约独立于设备登录，其默认期限为 30 秒。长时间 API 断连可能令
+`agentd` 停止任务，即使设备授权仍有效，可用 `tsp auth status` 核对。
 
 所有账号管理与设备管理接口都要求 Bearer 认证。机器模式的 `X-Principal-Code` 身份头是
 无凭据验证的过渡通道，受环境开关控制：默认仅在非生产环境放行；生产环境（`NODE_ENV=production`

@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, or } from 'drizzle-orm';
 import { schema, type Db } from '@team-synergy/persistence';
 import { DomainError } from '@team-synergy/domain';
 import { createPublicCode } from './public-code.js';
@@ -8,6 +8,7 @@ import { generateToken, hashToken } from './user-use-cases.js';
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 export type AuthDb = Db | Tx;
 export const MAX_DEVICES_PER_USER = 10;
+export const CLI_ACCESS_TTL_MS = 60 * 60_000;
 export interface DeviceIdentity { installation_id: string; installation_secret: string; client_type: 'web' | 'cli'; platform: string }
 export interface StoredDeviceIdentity { installation_id: string; installation_secret_hash: string; client_type: 'web' | 'cli'; platform: string }
 
@@ -23,12 +24,12 @@ export function parseDeviceIdentity(value: unknown): StoredDeviceIdentity | unde
   return { installation_id: v.installation_id.toLowerCase(), installation_secret_hash: hashToken(v.installation_secret), client_type: v.client_type as 'web' | 'cli', platform: v.platform.trim() };
 }
 
-function equalHash(a: string | null, b: string) {
+export function equalHash(a: string | null, b: string) {
   return a !== null && a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
 /** Caller holds the user row lock. The execution secret and device id never change on relogin. */
-export async function createDeviceLogin(tx: Tx, user: typeof schema.users.$inferSelect, deviceName: string, identity?: StoredDeviceIdentity) {
+export async function createDeviceLogin(tx: Tx, user: typeof schema.users.$inferSelect, deviceName: string, identity?: StoredDeviceIdentity, renewable = false) {
   if (user.status !== 'active') throw new DomainError('auth_user_disabled', '用户已禁用');
   const name = deviceName.trim();
   if (!name || name.length > 200) throw new DomainError('auth_device_name_required', '设备名称不能为空且最多 200 字符');
@@ -51,18 +52,25 @@ export async function createDeviceLogin(tx: Tx, user: typeof schema.users.$infer
   }
   if (!device) throw new DomainError('internal_error', '无法创建客户端');
   const token = generateToken();
+  const refreshToken = renewable && identity?.client_type === 'cli' && !user.must_change_password ? generateToken() : undefined;
+  const expiresAt = new Date(Date.parse(timestamp) + 90 * 24 * 60 * 60_000).toISOString();
+  const accessExpiresAt = refreshToken ? new Date(Date.parse(timestamp) + CLI_ACCESS_TTL_MS).toISOString() : null;
   const [session] = await tx.insert(schema.deviceSessions).values({ code: createPublicCode(), device_id: device.id,
-    token_hash: hashToken(token), created_at: timestamp, expires_at: new Date(Date.now() + 90 * 24 * 60 * 60_000).toISOString(),
+    token_hash: hashToken(token), created_at: timestamp, expires_at: expiresAt, access_expires_at: accessExpiresAt,
+    refresh_token_hash: refreshToken ? hashToken(refreshToken) : null,
   }).returning();
   if (!session) throw new DomainError('internal_error', '无法创建登录会话');
-  return { device_code: device.code, device_token: token, user_code: user.code, device_name: device.device_name ?? name, session_code: session.code };
+  return { device_code: device.code, device_token: token, user_code: user.code, device_name: device.device_name ?? name, session_code: session.code,
+    session_expires_at: expiresAt, ...(refreshToken && accessExpiresAt ? { refresh_token: refreshToken, access_expires_at: accessExpiresAt } : {}) };
 }
 
 /** One-time legacy enrollment preserves existing fixtures/credentials, never resurrects a revoked session. */
 export async function resolveSessionToken(db: AuthDb, token: string) {
   if (!token) return undefined;
   const tokenHash = hashToken(token);
-  let session = (await db.select().from(schema.deviceSessions).where(eq(schema.deviceSessions.token_hash, tokenHash)).limit(1))[0];
+  const { deviceSessions } = schema;
+  let session = (await db.select().from(deviceSessions).where(or(eq(deviceSessions.token_hash, tokenHash),
+    eq(deviceSessions.previous_access_token_hash, tokenHash))).limit(1))[0];
   if (!session) {
     await db.transaction(async tx => {
       const [legacy] = await tx.select().from(schema.devices).where(eq(schema.devices.credential_hash, tokenHash)).for('update').limit(1);
@@ -73,6 +81,8 @@ export async function resolveSessionToken(db: AuthDb, token: string) {
     session = (await db.select().from(schema.deviceSessions).where(eq(schema.deviceSessions.token_hash, tokenHash)).limit(1))[0];
   }
   if (!session || session.revoked_at || session.expires_at && Date.parse(session.expires_at) <= Date.now()) return undefined;
+  const accessExpiry = session.token_hash === tokenHash ? session.access_expires_at : session.previous_access_expires_at;
+  if (accessExpiry && Date.parse(accessExpiry) <= Date.now()) return undefined;
   const [device] = await db.select().from(schema.devices).where(eq(schema.devices.id, session.device_id)).limit(1);
   if (!device || device.revoked_at) return undefined;
   const [user] = await db.select().from(schema.users).where(eq(schema.users.id, device.principal_id)).limit(1);

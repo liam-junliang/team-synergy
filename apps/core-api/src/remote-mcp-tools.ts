@@ -16,6 +16,7 @@ import { DomainError } from '@team-synergy/domain';
 import { schema, type Db } from '@team-synergy/persistence';
 import type { RemoteMcpGrant } from './remote-mcp-authorization.js';
 import type { ExecuteWorkspaceAction } from './agent-workspace-actions.js';
+import { fingerprintRemoteMcpTools, remoteMcpRelease } from './remote-mcp-release.js';
 import { RemoteMcpToolModuleSchema, SearchRemoteMcpToolsInput, searchRemoteMcpTools, type RemoteMcpToolModule } from './remote-mcp-tool-catalog.js';
 
 export type RemoteMcpRequest = (options: { method: 'GET' | 'POST'; url: string; projectCode: string; payload?: object }) => Promise<unknown>;
@@ -232,14 +233,21 @@ export function remoteMcpTools(db: Db, grant: RemoteMcpGrant, request: RemoteMcp
             }).join('') : ''),
         };
       }),
-    capability('projects', 'get_connection_context', '查看当前账号和连接授权。用 list_projects 按名称定位项目，再用本连接的 search_tools 选择后续工作所需工具。传入 projectCode 可检查目标项目的角色和权限。',
-      z.strictObject({ projectCode: projectSelector.optional() }), async ({ projectCode }) => {
+    capability('projects', 'get_connection_context', '查看当前账号、连接授权、服务版本和工具目录版本。传入 knownToolsetRevision 可核对已有目录是否变化。用 list_projects 定位项目，用本连接的 search_tools 查工具。传入 projectCode 可核对项目权限。',
+      z.strictObject({
+        projectCode: projectSelector.optional(),
+        knownToolsetRevision: z.string().regex(/^[0-9a-f]{64}$/).optional().describe('此连接上一次返回的工具目录版本。'),
+      }), async ({ projectCode, knownToolsetRevision }) => {
       const principal = await currentPrincipal();
+      const toolsetRevision = fingerprintRemoteMcpTools(tools, grant.allowPersonalMemory);
+      const toolsetChanged = knownToolsetRevision === undefined ? null : knownToolsetRevision !== toolsetRevision;
       const identity = {
         userCode: principal.code, account: principal.account, displayName: principal.display_name,
         connectionScope: accountScoped ? 'account' : 'project',
         allowPersonalMemory: grant.allowPersonalMemory, allowTaskWrite: grant.allowTaskWrite,
         allowWorkspaceWrite: grant.allowWorkspaceWrite === true,
+        connector: { ...remoteMcpRelease(), toolsetRevision, toolsetChanged },
+        ...(toolsetChanged ? { toolsetNextStep: '重新列出此连接的工具（tools/list）。如果宿主缓存了工具列表，请在宿主刷新此连接。' } : {}),
       };
       const target = projectCode ?? grant.projectCode;
       if (!target) return { ...identity, projectCode: null, projectSelection: 'required',
@@ -382,5 +390,6 @@ export function remoteMcpTools(db: Db, grant: RemoteMcpGrant, request: RemoteMcp
       }
       return searchRemoteMcpTools([search, ...read, ...visibleWrites, ...visibleWorkspace.map(({ tool }) => tool)], input);
     });
-  return [search, ...read, ...write, ...workspace.map(({ tool }) => tool)];
+  const tools = [search, ...read, ...write, ...workspace.map(({ tool }) => tool)];
+  return tools;
 }

@@ -35,6 +35,7 @@ export { ensurePlatformSkillRelease, platformSkillVersion } from './platform-ski
 export { captureRunSkills, resolveRunSkillManifest, copyRunSkills, projectSkillManifest, skillManifestMetadata } from './skills-run.js';
 
 export { resolveSessionToken, revokeStableDevice } from './auth-device.js';
+export { refreshCliDeviceSession, upgradeCliDeviceSession } from './auth-cli-session.js';
 export { createDeviceAuthorizationUseCases } from './device-authorization-use-cases.js';
 export { createSystemSettingsUseCases, type SystemSettingsView } from './system-settings-use-cases.js';
 export { createAdminGovernanceUseCases } from './admin-governance-use-cases.js';

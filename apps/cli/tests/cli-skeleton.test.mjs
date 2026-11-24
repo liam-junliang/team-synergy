@@ -15,10 +15,14 @@ test('tsp 主入口和 agentctl、acp 兼容入口指向同一 CLI', () => {
   assert.equal(manifest.bin.acp, manifest.bin.tsp);
 });
 
-test('tsp --version 输出 0.1.0', () => {
+test('tsp --version 输出包版本，version 提供结构化安装信息', () => {
+  const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   const res = spawnSync(process.execPath, [cliEntry, '--version'], { encoding: 'utf8' });
   assert.equal(res.status, 0);
-  assert.match(res.stdout, /0\.1\.0/);
+  assert.equal(res.stdout.trim(), version);
+  const details = spawnSync(process.execPath, [cliEntry, 'version'], { encoding: 'utf8' });
+  assert.equal(details.status, 0);
+  assert.deepEqual(JSON.parse(details.stdout), { ok: true, data: { version, release: null, source_revision: null } });
 });
 
 test('tsp --help 输出主命令名、docs 文档组与描述', () => {

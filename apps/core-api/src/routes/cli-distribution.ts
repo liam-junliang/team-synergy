@@ -6,7 +6,7 @@ import type { FastifyInstance } from 'fastify';
 
 const releaseName = /^tsp-[0-9]+\.[0-9]+\.[0-9]+-[a-f0-9]{16}-(?:win32|linux|darwin)-(?:x64|arm64)\.(?:zip|tar\.gz)$/;
 type Artifact = { platform: string; arch: string; filename: string; sha256: string; size_bytes: number; format: string; release: string; node_version: string };
-type Manifest = { schema_version: 1; version: string; release: string; node_version: string; artifacts: Artifact[] };
+type Manifest = { schema_version: 1; version: string; release: string; node_version: string; source_revision?: string | null; artifacts: Artifact[] };
 
 /** Exact public download paths only. Never expose a generic static directory. */
 export function isCliDistributionPath(urlPath: string): boolean {
@@ -17,7 +17,8 @@ export function isCliDistributionPath(urlPath: string): boolean {
 async function readManifest(directory: string): Promise<Manifest> {
   const input = JSON.parse(await readFile(await safeFile(directory, 'manifest.json'), 'utf8')) as Manifest;
   if (input.schema_version !== 1 || !/^\d+\.\d+\.\d+$/.test(input.version) || !/^\d+\.\d+\.\d+-[a-f0-9]{16}$/.test(input.release)
-    || !/^22\.\d+\.\d+$/.test(input.node_version) || !Array.isArray(input.artifacts)) throw new Error('Invalid CLI distribution manifest');
+    || !/^22\.\d+\.\d+$/.test(input.node_version) || !Array.isArray(input.artifacts)
+    || input.source_revision != null && (typeof input.source_revision !== 'string' || !/^[a-f0-9]{40}$/.test(input.source_revision))) throw new Error('Invalid CLI distribution manifest');
   const artifacts: Artifact[] = []; const targets = new Set<string>();
   for (const artifact of input.artifacts) {
     const target = `${artifact.platform}-${artifact.arch}`;
@@ -30,7 +31,10 @@ async function readManifest(directory: string): Promise<Manifest> {
     // Deliberately project public fields; runtime configuration and arbitrary JSON never leak.
     artifacts.push({ platform: artifact.platform, arch: artifact.arch, filename: artifact.filename, sha256: artifact.sha256, size_bytes: artifact.size_bytes, format: artifact.format, release: artifact.release, node_version: artifact.node_version });
   }
-  return { schema_version: 1, version: input.version, release: String(input.release), node_version: String(input.node_version), artifacts };
+  return {
+    schema_version: 1, version: input.version, release: String(input.release), node_version: String(input.node_version),
+    ...(input.source_revision ? { source_revision: input.source_revision } : {}), artifacts,
+  };
 }
 
 async function safeFile(directory: string, filename: string) {
