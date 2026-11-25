@@ -2,7 +2,7 @@ import { useProjectAccess } from './useProjectAccess';
 import { t, getLocale } from './i18n.ts';
 import { useLocale } from './useLocale';
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import {
   createRequirement,
   createRequirementDocument,
@@ -30,6 +30,7 @@ import { navigateWorkspace } from './workspaceNavigation';
 import { useProjectDisplayNames } from './ProjectDisplayNames';
 import { RequirementIdeasWorkbench, RequirementReviewPanel, RequirementTopicsWorkbench } from './RequirementDiscoveryWorkbench';
 import { FormSelect } from './FormSelect';
+import { DialogLayer } from './DialogLayer';
 
 const DOCUMENT_TEMPLATE = `# 模块需求说明
 
@@ -587,7 +588,7 @@ function RequirementDocumentEditor({ mode, initial, modules, pending, error, onC
   }
 
   return (
-    <ModalShell title={mode === 'create' ? t("上传或新建需求文档") : t("编辑 {0}", { "0": initial?.title ?? '' })} eyebrow="COLLABORATIVE DOCUMENT" description={mode === 'create' ? t("支持 Markdown / TXT 文件；保存后团队成员即可阅读和分享。") : t("保存后生成 Revision {0}，历史内容继续保留。", { "0": String((initial?.current_revision ?? 0) + 1) })} onClose={onClose}>
+    <ModalShell title={mode === 'create' ? t("上传或新建需求文档") : t("编辑 {0}", { "0": initial?.title ?? '' })} eyebrow="COLLABORATIVE DOCUMENT" description={mode === 'create' ? t("支持 Markdown / TXT 文件；保存后团队成员即可阅读和分享。") : t("保存后生成 Revision {0}，历史内容继续保留。", { "0": String((initial?.current_revision ?? 0) + 1) })} pending={pending} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="space-y-5 p-6">
           <label className="flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-dashed border-cyan-300 bg-cyan-50/60 px-5 py-4 text-sm text-cyan-800 hover:bg-cyan-50"><span><strong className="block">{t("选择 Markdown / TXT 文件")}</strong><span className="mt-1 block text-xs text-cyan-700/70">{t("自动读取正文，并从文件名或一级标题推断文档标题。")}</span></span><span className="rounded-lg bg-white px-4 py-2 text-xs font-bold shadow-sm">{fileName || t("选择文件")}</span><input type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" className="sr-only" onChange={(event) => void loadFile(event.target.files?.[0])} /></label>
@@ -680,7 +681,7 @@ function RequirementEntryDialog({ initialDocument, documents, features, pending,
   }
 
   return (
-    <ModalShell title={t("新增需求项")} eyebrow="REQUIREMENT CHECKLIST" description={t("把文档中的独立需求整理成稳定条目，供 Agent 引用并继续拆解任务。")} onClose={onClose}>
+    <ModalShell title={t("新增需求项")} eyebrow="REQUIREMENT CHECKLIST" description={t("把文档中的独立需求整理成稳定条目，供 Agent 引用并继续拆解任务。")} pending={pending} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="space-y-5 p-6">
           <div className="grid gap-4 sm:grid-cols-3"><Field label={t("来源文档")}><select value={documentCode} onChange={(event) => setDocumentCode(event.target.value)} className="form-control bg-white"><option value="">{t("暂不关联")}</option>{documents.map((document) => <option key={document.code} value={document.code}>{document.module_key} · {document.title}</option>)}</select></Field><Field label={t("所属模块")}><select value={moduleCode} onChange={(event) => { setModuleCode(event.target.value); setFeatureCode(''); }} className="form-control bg-white"><option value="">{t("暂不归属")}</option>{moduleOptions.map((module) => <option key={module.code} value={module.code}>{module.name} · {module.code}</option>)}</select></Field><Field label={t("所属 Feature")}><select value={featureCode} onChange={(event) => setFeatureCode(event.target.value)} className="form-control bg-white"><option value="">{t("暂不绑定")}</option>{filteredFeatures.map((feature) => <option key={feature.code} value={feature.code}>{feature.title} · {feature.code}</option>)}</select></Field></div>
@@ -715,7 +716,7 @@ function RequirementTaskDialog({ requirement, pending, error, onClose, onSubmit 
   }
 
   return (
-    <ModalShell title={t("从需求项拆解任务")} eyebrow={requirement.code} description={t("Web 可直接登记一个任务；Agent 也可以读取这条需求后，通过 CLI 连续创建多条关联任务。")} onClose={onClose}>
+    <ModalShell title={t("从需求项拆解任务")} eyebrow={requirement.code} description={t("Web 可直接登记一个任务；Agent 也可以读取这条需求后，通过 CLI 连续创建多条关联任务。")} pending={pending} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="space-y-5 p-6">
           <section className="rounded-xl border border-slate-200 bg-slate-950 p-4 text-slate-100"><div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-bold">{t("交给 Agent 拆解")}</h3><p className="mt-1 text-xs text-slate-400">{t("先 show 获取完整需求项，再按拆解结果创建一个或多个 Task。")}</p></div><button type="button" onClick={() => void navigator.clipboard.writeText(agentCommand).then(() => setCopied(true))} className="ui-button ui-button-compact border-white/10 bg-white/10 text-white shadow-none hover:bg-white/20">{copied ? t("已复制") : t("复制指令")}</button></div><pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs leading-5 text-cyan-200">{agentCommand}</pre></section>
@@ -765,22 +766,23 @@ function EmptyLibrary({ onCreate, canWrite }: { canWrite: boolean; onCreate: () 
   return <div className="grid min-h-[720px] place-items-center p-8 text-center"><div><div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-cyan-50 text-xl text-cyan-700">{t("需")}</div><h2 className="mt-4 text-xl font-bold text-slate-900">{t("上传第一份需求文档")}</h2><p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-slate-500">{t("支持 Markdown 和纯文本。保存后团队成员即可阅读、分享，并继续提炼需求项。")}</p>{canWrite && <button type="button" onClick={onCreate} className="ui-button ui-button-primary mt-5">{t("上传 / 新建文档")}</button>}</div></div>;
 }
 
-function ModalShell({ title, eyebrow, description, onClose, children }: { title: string; eyebrow: string; description: string; onClose: () => void; children: ReactNode }) {
+function ModalShell({ title, eyebrow, description, onClose, pending, children }: { title: string; eyebrow: string; description: string; onClose: () => void; pending: boolean; children: ReactNode }) {
+  const titleId = useId();
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
-      <section role="dialog" aria-modal="true" aria-labelledby="modal-title" className="flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+    <DialogLayer className="flex items-start justify-center bg-slate-950/55 p-4 sm:pt-[5dvh]" onDismiss={onClose} dismissDisabled={pending}>
+      <section role="dialog" aria-modal="true" aria-busy={pending || undefined} aria-labelledby={titleId} className="flex max-h-[calc(100dvh-2rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl sm:max-h-[90dvh]">
         <header className="z-10 flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 bg-white px-6 py-5">
-          <div><p className="text-xs font-bold tracking-[0.16em] text-cyan-700">{eyebrow}</p><h2 id="modal-title" className="mt-1 text-xl font-bold text-slate-950">{title}</h2><p className="mt-1 text-xs text-slate-500">{description}</p></div>
-          <button type="button" onClick={onClose} aria-label={t("关闭弹窗")} className="ui-button ui-button-secondary">{t("关闭")}</button>
+          <div><p className="text-xs font-bold tracking-[0.16em] text-cyan-700">{eyebrow}</p><h2 id={titleId} className="mt-1 text-xl font-bold text-slate-950">{title}</h2><p className="mt-1 text-xs text-slate-500">{description}</p></div>
+          <button type="button" disabled={pending} onClick={onClose} aria-label={t("关闭弹窗")} title={pending ? t("保存中…") : undefined} className="ui-button ui-button-secondary">{t("关闭")}</button>
         </header>
         <div className="modal-scroll-region min-h-0 flex-1 overflow-y-auto">{children}</div>
       </section>
-    </div>
+    </DialogLayer>
   );
 }
 
 function ModalFooter({ onClose, pending, submitLabel, disabled }: { onClose: () => void; pending: boolean; submitLabel: string; disabled: boolean }) {
-  return <footer className="sticky bottom-0 flex justify-end gap-2 border-t border-slate-200 bg-white px-6 py-4"><button type="button" onClick={onClose} className="ui-button ui-button-secondary">{t("取消")}</button><button disabled={pending || disabled} className="ui-button ui-button-primary">{pending ? t("保存中…") : submitLabel}</button></footer>;
+  return <footer className="sticky bottom-0 flex justify-end gap-2 border-t border-slate-200 bg-white px-6 py-4"><button type="button" disabled={pending} onClick={onClose} className="ui-button ui-button-secondary">{t("取消")}</button><button disabled={pending || disabled} className="ui-button ui-button-primary">{pending ? t("保存中…") : submitLabel}</button></footer>;
 }
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {

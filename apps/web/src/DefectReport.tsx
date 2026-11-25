@@ -85,7 +85,7 @@ export function ReportDefectDialog({ features, requirements, onClose, onSubmit }
       setPending(false);
     }
   }
-  return <WorkspaceDialog id="defect-report" size="wide" title={t('提交缺陷')} description={t('提交后由项目负责人或管理员确认。')} onClose={() => { if (!pending) onClose(); }}
+  return <WorkspaceDialog id="defect-report" size="wide" title={t('提交缺陷')} description={t('提交后由项目负责人或管理员确认。')} dismissDisabled={pending} onClose={onClose}
     footer={<>
       {error && <p role="alert" className="mb-3 break-words text-sm text-rose-700">{error}</p>}
       {!features.length && <p className="mb-3 text-sm text-amber-700">{t('请先在项目中创建 Feature。')}</p>}

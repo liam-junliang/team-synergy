@@ -2,7 +2,8 @@ import { useProjectAccess } from './useProjectAccess';
 import { useLocale } from './useLocale';
 import { t } from './i18n.ts';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState, type DragEvent as ReactDragEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useState, type DragEvent as ReactDragEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { DialogLayer } from './DialogLayer';
 import {
   createFeature,
   createProjectModule,
@@ -458,7 +459,7 @@ function ModuleDialog({ state, pending, error, onClose, onSubmit, onLifecycleCha
   }
 
   return (
-    <ModalShell title={state.mode === 'create' ? t("新建模块") : t("编辑模块")} eyebrow="MODULE" description={t("模块在结构树中位于 Feature 之上。名称优先，编码作为辅助。")} onClose={onClose}>
+    <ModalShell title={state.mode === 'create' ? t("新建模块") : t("编辑模块")} eyebrow="MODULE" description={t("模块在结构树中位于 Feature 之上。名称优先，编码作为辅助。")} pending={pending} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="space-y-5 p-6">
           <Field label={t("模块名称")}><input autoFocus required value={name} onChange={(event) => setName(event.target.value)} className="form-control" /></Field>
@@ -531,7 +532,7 @@ function FeatureDialog({ state, projectCode, modules, pending, error, onClose, o
   const selectedModule = moduleLookup.get(moduleCode) ?? null;
 
   return (
-    <ModalShell title={state.mode === 'create' ? t("新建 Feature") : t("编辑 Feature")} eyebrow="FEATURE" description={t("维护 Feature 的名称、目标、所属模块和状态。")} onClose={onClose}>
+    <ModalShell title={state.mode === 'create' ? t("新建 Feature") : t("编辑 Feature")} eyebrow="FEATURE" description={t("维护 Feature 的名称、目标、所属模块和状态。")} pending={pending} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="space-y-5 p-6">
           <Field label={t("Feature 名称")}><input autoFocus required value={title} onChange={(event) => setTitle(event.target.value)} className="form-control" /></Field>
@@ -558,22 +559,23 @@ function FeatureDialog({ state, projectCode, modules, pending, error, onClose, o
   );
 }
 
-function ModalShell({ title, eyebrow, description, children, onClose }: { title: string; eyebrow: string; description: string; children: ReactNode; onClose?: () => void }) {
+function ModalShell({ title, eyebrow, description, children, pending, onClose }: { title: string; eyebrow: string; description: string; children: ReactNode; pending: boolean; onClose: () => void }) {
   useLocale();
+  const titleId = useId();
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose?.(); }}>
-      <section role="dialog" aria-modal="true" aria-labelledby="modal-title" className="max-h-[94vh] w-full max-w-5xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+    <DialogLayer className="grid place-items-center bg-slate-950/55 p-4" onDismiss={onClose} dismissDisabled={pending}>
+      <section role="dialog" aria-modal="true" aria-labelledby={titleId} aria-busy={pending} className="max-h-[94vh] w-full max-w-5xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
         <header className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-6 py-5">
           <div>
             <p className="text-xs font-bold tracking-[0.16em] text-cyan-700">{eyebrow}</p>
-            <h2 id="modal-title" className="mt-1 text-xl font-bold text-slate-950">{title}</h2>
+            <h2 id={titleId} className="mt-1 text-xl font-bold text-slate-950">{title}</h2>
             <p className="mt-1 text-xs text-slate-500">{description}</p>
           </div>
-          <button type="button" onClick={onClose} aria-label={t("关闭弹窗")} className="ui-button ui-button-secondary">{t("关闭")}</button>
+          <button type="button" disabled={pending} onClick={onClose} aria-label={t("关闭弹窗")} className="ui-button ui-button-secondary">{t("关闭")}</button>
         </header>
         {children}
       </section>
-    </div>
+    </DialogLayer>
   );
 }
 
@@ -584,7 +586,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 function ModalFooter({ onClose, pending, submitLabel, disabled, leading }: { onClose: () => void; pending: boolean; submitLabel: string; disabled: boolean; leading?: ReactNode }) {
   useLocale();
-  return <footer className="sticky bottom-0 flex items-center gap-2 border-t border-slate-200 bg-white px-6 py-4">{leading}<div className="ml-auto flex items-center gap-2"><button type="button" onClick={onClose} className="ui-button ui-button-secondary">{t("取消")}</button><button disabled={pending || disabled} className="ui-button ui-button-primary">{pending ? t("保存中…") : submitLabel}</button></div></footer>;
+  return <footer className="sticky bottom-0 flex items-center gap-2 border-t border-slate-200 bg-white px-6 py-4">{leading}<div className="ml-auto flex items-center gap-2"><button type="button" disabled={pending} onClick={onClose} className="ui-button ui-button-secondary">{t("取消")}</button><button disabled={pending || disabled} className="ui-button ui-button-primary">{pending ? t("保存中…") : submitLabel}</button></div></footer>;
 }
 
 function StructurePlusIcon() {

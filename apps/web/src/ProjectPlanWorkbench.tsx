@@ -3,7 +3,8 @@ import { useLocale } from './useLocale';
 import { t, translate, formatDate, formatNumber, getLocale, type Locale } from './i18n.ts';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Gantt, Willow, type IColumnConfig, type ITask } from '@svar-ui/react-gantt';
-import { useEffect, useMemo, useState, type FormEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useState, type FormEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { DialogLayer } from './DialogLayer';
 import '@svar-ui/react-gantt/all.css';
 import {
   createProjectMilestone,
@@ -418,7 +419,7 @@ function UnplannedFeatureDrawer({ canManage, features, total, search, onSearch, 
 }) {
   useLocale();
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/35" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <DialogLayer className="bg-slate-950/35" onDismiss={onClose}>
       <aside role="dialog" aria-modal="true" aria-labelledby="unplanned-title" className="ml-auto flex h-full w-full max-w-md flex-col bg-white shadow-2xl">
         <header className="border-b border-slate-200 px-5 py-5">
           <div className="flex items-start justify-between gap-3">
@@ -451,7 +452,7 @@ function UnplannedFeatureDrawer({ canManage, features, total, search, onSearch, 
         </div>
         <footer className="border-t border-slate-200 bg-slate-50 px-5 py-3 text-xs text-slate-500">{t("共 {count} 条待规划 Feature", { count: total })}</footer>
       </aside>
-    </div>
+    </DialogLayer>
   );
 }
 
@@ -553,7 +554,7 @@ function PhaseDialog({
   }
 
   return (
-    <ModalShell title={state.mode === 'create' ? t("新建阶段") : t("编辑阶段")} eyebrow="PHASE" description={t("阶段是计划甘特图的一级排期容器。")} onClose={onClose}>
+    <ModalShell title={state.mode === 'create' ? t("新建阶段") : t("编辑阶段")} eyebrow="PHASE" description={t("阶段是计划甘特图的一级排期容器。")} pending={pending} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="space-y-5 p-6">
           <Field label={t("阶段名称")}><input autoFocus required value={name} onChange={(event) => setName(event.target.value)} className="form-control" /></Field>
@@ -625,7 +626,7 @@ function MilestoneDialog({
   }
 
   return (
-    <ModalShell title={state.mode === 'create' ? t("新建里程碑") : t("编辑里程碑")} eyebrow="MILESTONE" description={t("里程碑承接阶段排期，并汇聚对应的 Feature。")} onClose={onClose}>
+    <ModalShell title={state.mode === 'create' ? t("新建里程碑") : t("编辑里程碑")} eyebrow="MILESTONE" description={t("里程碑承接阶段排期，并汇聚对应的 Feature。")} pending={pending} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="space-y-5 p-6">
           <Field label={t("里程碑名称")}><input autoFocus required value={name} onChange={(event) => setName(event.target.value)} className="form-control" /></Field>
@@ -691,7 +692,7 @@ function AssignmentDialog({
   const hasMilestoneWindow = Boolean(selectedMilestone?.start_at && selectedMilestone?.target_at);
 
   return (
-    <ModalShell title={t("安排 Feature 排期")} eyebrow={feature.code} description={t("Feature 使用自己的起止日期，并且必须落在目标里程碑窗口内。")} onClose={onClose}>
+    <ModalShell title={t("安排 Feature 排期")} eyebrow={feature.code} description={t("Feature 使用自己的起止日期，并且必须落在目标里程碑窗口内。")} pending={pending} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="space-y-5 p-6">
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -735,22 +736,23 @@ function AssignmentDialog({
   );
 }
 
-function ModalShell({ title, eyebrow, description, children, onClose }: { title: string; eyebrow: string; description: string; children: ReactNode; onClose?: () => void }) {
+function ModalShell({ title, eyebrow, description, children, pending, onClose }: { title: string; eyebrow: string; description: string; children: ReactNode; pending: boolean; onClose: () => void }) {
   useLocale();
+  const titleId = useId();
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4" role="presentation">
-      <section role="dialog" aria-modal="true" aria-labelledby="modal-title" className="max-h-[94vh] w-full max-w-5xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+    <DialogLayer className="grid place-items-center bg-slate-950/55 p-4" onDismiss={onClose} dismissDisabled={pending}>
+      <section role="dialog" aria-modal="true" aria-labelledby={titleId} aria-busy={pending} className="max-h-[94vh] w-full max-w-5xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
         <header className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-6 py-5">
           <div>
             <p className="text-xs font-bold tracking-[0.16em] text-cyan-700">{eyebrow}</p>
-            <h2 id="modal-title" className="mt-1 text-xl font-bold text-slate-950">{title}</h2>
+            <h2 id={titleId} className="mt-1 text-xl font-bold text-slate-950">{title}</h2>
             <p className="mt-1 text-xs text-slate-500">{description}</p>
           </div>
-          <button type="button" onClick={onClose} aria-label={t("关闭弹窗")} className="ui-button ui-button-secondary">{t("关闭")}</button>
+          <button type="button" disabled={pending} onClick={onClose} aria-label={t("关闭弹窗")} className="ui-button ui-button-secondary">{t("关闭")}</button>
         </header>
         {children}
       </section>
-    </div>
+    </DialogLayer>
   );
 }
 
@@ -761,7 +763,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 function ModalFooter({ onClose, pending, submitLabel, disabled }: { onClose: () => void; pending: boolean; submitLabel: string; disabled: boolean }) {
   useLocale();
-  return <footer className="sticky bottom-0 flex justify-end gap-2 border-t border-slate-200 bg-white px-6 py-4"><button type="button" onClick={onClose} className="ui-button ui-button-secondary">{t("取消")}</button><button disabled={pending || disabled} className="ui-button ui-button-primary">{pending ? t("保存中…") : submitLabel}</button></footer>;
+  return <footer className="sticky bottom-0 flex justify-end gap-2 border-t border-slate-200 bg-white px-6 py-4"><button type="button" disabled={pending} onClick={onClose} className="ui-button ui-button-secondary">{t("取消")}</button><button disabled={pending || disabled} className="ui-button ui-button-primary">{pending ? t("保存中…") : submitLabel}</button></footer>;
 }
 
 function NoticeBar({ notice, onClose }: { notice: Parameters<typeof t>; onClose: () => void }) {
