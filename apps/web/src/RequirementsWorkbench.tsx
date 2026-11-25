@@ -591,38 +591,36 @@ function RequirementDocumentEditor({ mode, initial, modules, pending, error, onC
   }
 
   return (
-    <ModalShell title={mode === 'create' ? t("上传或新建需求文档") : t("编辑 {0}", { "0": initial?.title ?? '' })} eyebrow="COLLABORATIVE DOCUMENT" description={mode === 'create' ? t("支持 Markdown / TXT 文件；保存后团队成员即可阅读和分享。") : t("保存后生成 Revision {0}，历史内容继续保留。", { "0": String((initial?.current_revision ?? 0) + 1) })} pending={pending} onClose={onClose}>
-      <form onSubmit={submit}>
-        <div className="space-y-5 p-6">
-          <label className="flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-dashed border-cyan-300 bg-cyan-50/60 px-5 py-4 text-sm text-cyan-800 hover:bg-cyan-50"><span><strong className="block">{t("选择 Markdown / TXT 文件")}</strong><span className="mt-1 block text-xs text-cyan-700/70">{t("自动读取正文，并从文件名或一级标题推断文档标题。")}</span></span><span className="rounded-lg bg-white px-4 py-2 text-xs font-bold shadow-sm">{fileName || t("选择文件")}</span><input type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" className="sr-only" onChange={(event) => void loadFile(event.target.files?.[0])} /></label>
-          <div className="grid gap-4 sm:grid-cols-[240px_1fr]">
-            <div className="block text-sm font-semibold text-slate-700">
-              {t("所属模块")}<div className="mt-1.5">
-                <FormSelect
-                  required
-                  value={moduleCode}
-                  onChange={setModuleCode}
-                  ariaLabel={t("所属模块")}
-                  placeholder={t("请选择功能模块")}
-                  options={modules.map((module) => ({
-                    value: module.code,
-                    label: module.name,
-                    meta: module.status === 'archived' ? t("已归档") : undefined,
-                    disabled: module.status === 'archived' && module.code !== moduleCode,
-                  }))}
-                />
-              </div>
+    <ModalShell title={mode === 'create' ? t("上传或新建需求文档") : t("编辑 {0}", { "0": initial?.title ?? '' })} eyebrow="COLLABORATIVE DOCUMENT" description={mode === 'create' ? t("支持 Markdown / TXT 文件；保存后团队成员即可阅读和分享。") : t("保存后生成 Revision {0}，历史内容继续保留。", { "0": String((initial?.current_revision ?? 0) + 1) })} pending={pending} onClose={onClose} onSubmit={submit}
+      submitLabel={mode === 'create' ? t("保存需求文档") : t("保存新版本")} submitDisabled={!moduleCode || !title.trim() || !content.trim() || (mode === 'edit' && !changeSummary.trim())}>
+      <div className="space-y-5 p-6">
+        <label className="flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-dashed border-cyan-300 bg-cyan-50/60 px-5 py-4 text-sm text-cyan-800 hover:bg-cyan-50"><span><strong className="block">{t("选择 Markdown / TXT 文件")}</strong><span className="mt-1 block text-xs text-cyan-700/70">{t("自动读取正文，并从文件名或一级标题推断文档标题。")}</span></span><span className="rounded-lg bg-white px-4 py-2 text-xs font-bold shadow-sm">{fileName || t("选择文件")}</span><input type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" className="sr-only" onChange={(event) => void loadFile(event.target.files?.[0])} /></label>
+        <div className="grid gap-4 sm:grid-cols-[240px_1fr]">
+          <div className="block text-sm font-semibold text-slate-700">
+            {t("所属模块")}<div className="mt-1.5">
+              <FormSelect
+                required
+                value={moduleCode}
+                onChange={setModuleCode}
+                ariaLabel={t("所属模块")}
+                placeholder={t("请选择功能模块")}
+                options={modules.map((module) => ({
+                  value: module.code,
+                  label: module.name,
+                  meta: module.status === 'archived' ? t("已归档") : undefined,
+                  disabled: module.status === 'archived' && module.code !== moduleCode,
+                }))}
+              />
             </div>
-            <Field label={t("文档标题")}><input autoFocus required value={title} onChange={(event) => setTitle(event.target.value)} placeholder={t("例如：账号、身份与权限需求说明")} className="form-control" /></Field>
           </div>
-          <Field label={t("摘要")} hint={t("可留空，系统会从正文首段自动生成。")}><textarea rows={3} value={summary} onChange={(event) => setSummary(event.target.value)} className="form-control resize-y leading-6" /></Field>
-          <Field label={t("检索关键词")} hint={t("逗号分隔，帮助人和 Agent 快速找到文档。")}><input value={keywords} onChange={(event) => setKeywords(event.target.value)} placeholder={t("登录，账号，密码，权限")} className="form-control" /></Field>
-          <Field label={t("Markdown 正文")}><textarea required rows={24} value={content} onChange={(event) => setContent(event.target.value)} className="form-control resize-y font-mono text-sm leading-6" /></Field>
-          {mode === 'edit' && <Field label={t("本次修改说明")} hint={t("一句话说明改了什么，便于协作者判断是否需要重读。")}><input required value={changeSummary} onChange={(event) => setChangeSummary(event.target.value)} placeholder={t("例如：补充首次登录和密码重置规则")} className="form-control" /></Field>}
-          {error && <ErrorMessage prefix={t("保存失败")} error={error} />}
+          <Field label={t("文档标题")}><input autoFocus required value={title} onChange={(event) => setTitle(event.target.value)} placeholder={t("例如：账号、身份与权限需求说明")} className="form-control" /></Field>
         </div>
-        <ModalFooter onClose={onClose} pending={pending} submitLabel={mode === 'create' ? t("保存需求文档") : t("保存新版本")} disabled={!moduleCode || !title.trim() || !content.trim() || (mode === 'edit' && !changeSummary.trim())} />
-      </form>
+        <Field label={t("摘要")} hint={t("可留空，系统会从正文首段自动生成。")}><textarea rows={3} value={summary} onChange={(event) => setSummary(event.target.value)} className="form-control resize-y leading-6" /></Field>
+        <Field label={t("检索关键词")} hint={t("逗号分隔，帮助人和 Agent 快速找到文档。")}><input value={keywords} onChange={(event) => setKeywords(event.target.value)} placeholder={t("登录，账号，密码，权限")} className="form-control" /></Field>
+        <Field label={t("Markdown 正文")}><textarea required rows={24} value={content} onChange={(event) => setContent(event.target.value)} className="form-control resize-y font-mono text-sm leading-6" /></Field>
+        {mode === 'edit' && <Field label={t("本次修改说明")} hint={t("一句话说明改了什么，便于协作者判断是否需要重读。")}><input required value={changeSummary} onChange={(event) => setChangeSummary(event.target.value)} placeholder={t("例如：补充首次登录和密码重置规则")} className="form-control" /></Field>}
+        {error && <ErrorMessage prefix={t("保存失败")} error={error} />}
+      </div>
     </ModalShell>
   );
 }
@@ -684,18 +682,16 @@ function RequirementEntryDialog({ initialDocument, documents, features, pending,
   }
 
   return (
-    <ModalShell title={t("新增需求项")} eyebrow="REQUIREMENT CHECKLIST" description={t("把文档中的独立需求整理成稳定条目，供 Agent 引用并继续拆解任务。")} pending={pending} onClose={onClose}>
-      <form onSubmit={submit}>
-        <div className="space-y-5 p-6">
-          <div className="grid gap-4 sm:grid-cols-3"><Field label={t("来源文档")}><select value={documentCode} onChange={(event) => setDocumentCode(event.target.value)} className="form-control bg-white"><option value="">{t("暂不关联")}</option>{documents.map((document) => <option key={document.code} value={document.code}>{document.module_key} · {document.title}</option>)}</select></Field><Field label={t("所属模块")}><select value={moduleCode} onChange={(event) => { setModuleCode(event.target.value); setFeatureCode(''); }} className="form-control bg-white"><option value="">{t("暂不归属")}</option>{moduleOptions.map((module) => <option key={module.code} value={module.code}>{module.name} · {module.code}</option>)}</select></Field><Field label={t("所属 Feature")}><select value={featureCode} onChange={(event) => setFeatureCode(event.target.value)} className="form-control bg-white"><option value="">{t("暂不绑定")}</option>{filteredFeatures.map((feature) => <option key={feature.code} value={feature.code}>{feature.title} · {feature.code}</option>)}</select></Field></div>
-          <Field label={t("需求项标题")}><input autoFocus required value={title} onChange={(event) => setTitle(event.target.value)} className="form-control" /></Field>
-          <Field label={t("需求说明")}><textarea required rows={6} value={body} onChange={(event) => setBody(event.target.value)} className="form-control resize-y leading-6" /></Field>
-          <EditableList title={t("验收标准")} onAdd={() => setCriteria((items) => [...items, { id: `AC-${items.length + 1}`, text: '' }])}>{criteria.map((criterion, index) => <div key={index} className="grid gap-2 sm:grid-cols-[90px_1fr_auto]"><input aria-label={t("验收标准 {0} 编码", { "0": index + 1 })} value={criterion.id} onChange={(event) => setCriteria((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, id: event.target.value } : item))} className="form-control font-mono" /><input aria-label={t("验收标准 {0}", { "0": index + 1 })} value={criterion.text} onChange={(event) => setCriteria((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, text: event.target.value } : item))} className="form-control" /><RemoveButton onClick={() => setCriteria((items) => items.filter((_, itemIndex) => itemIndex !== index))} /></div>)}</EditableList>
-          <EditableList title={t("待澄清问题")} onAdd={() => setQuestions((items) => [...items, ''])}>{questions.map((question, index) => <div key={index} className="grid gap-2 sm:grid-cols-[1fr_auto]"><input aria-label={t("待澄清问题 {0}", { "0": index + 1 })} value={question} onChange={(event) => setQuestions((items) => items.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} className="form-control" /><RemoveButton onClick={() => setQuestions((items) => items.filter((_, itemIndex) => itemIndex !== index))} /></div>)}</EditableList>
-          {error && <ErrorMessage prefix={t("创建失败")} error={error} />}
-        </div>
-        <ModalFooter onClose={onClose} pending={pending} submitLabel={t("加入需求清单")} disabled={!title.trim() || !body.trim()} />
-      </form>
+    <ModalShell title={t("新增需求项")} eyebrow="REQUIREMENT CHECKLIST" description={t("把文档中的独立需求整理成稳定条目，供 Agent 引用并继续拆解任务。")} pending={pending} onClose={onClose} onSubmit={submit}
+      submitLabel={t("加入需求清单")} submitDisabled={!title.trim() || !body.trim()}>
+      <div className="space-y-5 p-6">
+        <div className="grid gap-4 sm:grid-cols-3"><Field label={t("来源文档")}><select value={documentCode} onChange={(event) => setDocumentCode(event.target.value)} className="form-control bg-white"><option value="">{t("暂不关联")}</option>{documents.map((document) => <option key={document.code} value={document.code}>{document.module_key} · {document.title}</option>)}</select></Field><Field label={t("所属模块")}><select value={moduleCode} onChange={(event) => { setModuleCode(event.target.value); setFeatureCode(''); }} className="form-control bg-white"><option value="">{t("暂不归属")}</option>{moduleOptions.map((module) => <option key={module.code} value={module.code}>{module.name} · {module.code}</option>)}</select></Field><Field label={t("所属 Feature")}><select value={featureCode} onChange={(event) => setFeatureCode(event.target.value)} className="form-control bg-white"><option value="">{t("暂不绑定")}</option>{filteredFeatures.map((feature) => <option key={feature.code} value={feature.code}>{feature.title} · {feature.code}</option>)}</select></Field></div>
+        <Field label={t("需求项标题")}><input autoFocus required value={title} onChange={(event) => setTitle(event.target.value)} className="form-control" /></Field>
+        <Field label={t("需求说明")}><textarea required rows={6} value={body} onChange={(event) => setBody(event.target.value)} className="form-control resize-y leading-6" /></Field>
+        <EditableList title={t("验收标准")} onAdd={() => setCriteria((items) => [...items, { id: `AC-${items.length + 1}`, text: '' }])}>{criteria.map((criterion, index) => <div key={index} className="grid gap-2 sm:grid-cols-[90px_1fr_auto]"><input aria-label={t("验收标准 {0} 编码", { "0": index + 1 })} value={criterion.id} onChange={(event) => setCriteria((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, id: event.target.value } : item))} className="form-control font-mono" /><input aria-label={t("验收标准 {0}", { "0": index + 1 })} value={criterion.text} onChange={(event) => setCriteria((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, text: event.target.value } : item))} className="form-control" /><RemoveButton onClick={() => setCriteria((items) => items.filter((_, itemIndex) => itemIndex !== index))} /></div>)}</EditableList>
+        <EditableList title={t("待澄清问题")} onAdd={() => setQuestions((items) => [...items, ''])}>{questions.map((question, index) => <div key={index} className="grid gap-2 sm:grid-cols-[1fr_auto]"><input aria-label={t("待澄清问题 {0}", { "0": index + 1 })} value={question} onChange={(event) => setQuestions((items) => items.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} className="form-control" /><RemoveButton onClick={() => setQuestions((items) => items.filter((_, itemIndex) => itemIndex !== index))} /></div>)}</EditableList>
+        {error && <ErrorMessage prefix={t("创建失败")} error={error} />}
+      </div>
     </ModalShell>
   );
 }
@@ -719,17 +715,15 @@ function RequirementTaskDialog({ requirement, pending, error, onClose, onSubmit 
   }
 
   return (
-    <ModalShell title={t("从需求项拆解任务")} eyebrow={requirement.code} description={t("Web 可直接登记一个任务；Agent 也可以读取这条需求后，通过 CLI 连续创建多条关联任务。")} pending={pending} onClose={onClose}>
-      <form onSubmit={submit}>
-        <div className="space-y-5 p-6">
-          <section className="rounded-xl border border-slate-200 bg-slate-950 p-4 text-slate-100"><div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-bold">{t("交给 Agent 拆解")}</h3><p className="mt-1 text-xs text-slate-400">{t("先 show 获取完整需求项，再按拆解结果创建一个或多个 Task。")}</p></div><button type="button" onClick={() => void navigator.clipboard.writeText(agentCommand).then(() => setCopied(true))} className="ui-button ui-button-compact border-white/10 bg-white/10 text-white shadow-none hover:bg-white/20">{copied ? t("已复制") : t("复制指令")}</button></div><pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs leading-5 text-cyan-200">{agentCommand}</pre></section>
-          <div className="grid gap-4 sm:grid-cols-[1fr]"><Field label={t("任务标题")}><input autoFocus required value={title} onChange={(event) => setTitle(event.target.value)} className="form-control" /></Field></div>
-          <Field label="Agent Profile"><select value={profile} onChange={(event) => setProfile(event.target.value as typeof profile)} className="form-control bg-white"><option value="planner">{t("planner · 规划与拆解")}</option><option value="builder">{t("builder · 实现")}</option><option value="verifier">{t("verifier · 独立验证")}</option></select></Field>
-          <EditableList title={t("任务验收标准")} onAdd={() => setCriteria((items) => [...items, { id: `AC-${items.length + 1}`, text: '' }])}>{criteria.map((criterion, index) => <div key={index} className="grid gap-2 sm:grid-cols-[90px_1fr_auto]"><input value={criterion.id} onChange={(event) => setCriteria((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, id: event.target.value } : item))} className="form-control font-mono" /><input value={criterion.text} onChange={(event) => setCriteria((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, text: event.target.value } : item))} className="form-control" /><RemoveButton onClick={() => setCriteria((items) => items.filter((_, itemIndex) => itemIndex !== index))} /></div>)}</EditableList>
-          {error && <ErrorMessage prefix={t("任务创建失败")} error={error} />}
-        </div>
-        <ModalFooter onClose={onClose} pending={pending} submitLabel={t("创建关联任务")} disabled={!title.trim() || !criteria.some((item) => item.text.trim())} />
-      </form>
+    <ModalShell title={t("从需求项拆解任务")} eyebrow={requirement.code} description={t("Web 可直接登记一个任务；Agent 也可以读取这条需求后，通过 CLI 连续创建多条关联任务。")} pending={pending} onClose={onClose} onSubmit={submit}
+      submitLabel={t("创建关联任务")} submitDisabled={!title.trim() || !criteria.some((item) => item.text.trim())}>
+      <div className="space-y-5 p-6">
+        <section className="rounded-xl border border-slate-200 bg-slate-950 p-4 text-slate-100"><div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-bold">{t("交给 Agent 拆解")}</h3><p className="mt-1 text-xs text-slate-400">{t("先 show 获取完整需求项，再按拆解结果创建一个或多个 Task。")}</p></div><button type="button" onClick={() => void navigator.clipboard.writeText(agentCommand).then(() => setCopied(true))} className="ui-button ui-button-compact border-white/10 bg-white/10 text-white shadow-none hover:bg-white/20">{copied ? t("已复制") : t("复制指令")}</button></div><pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs leading-5 text-cyan-200">{agentCommand}</pre></section>
+        <div className="grid gap-4 sm:grid-cols-[1fr]"><Field label={t("任务标题")}><input autoFocus required value={title} onChange={(event) => setTitle(event.target.value)} className="form-control" /></Field></div>
+        <Field label="Agent Profile"><select value={profile} onChange={(event) => setProfile(event.target.value as typeof profile)} className="form-control bg-white"><option value="planner">{t("planner · 规划与拆解")}</option><option value="builder">{t("builder · 实现")}</option><option value="verifier">{t("verifier · 独立验证")}</option></select></Field>
+        <EditableList title={t("任务验收标准")} onAdd={() => setCriteria((items) => [...items, { id: `AC-${items.length + 1}`, text: '' }])}>{criteria.map((criterion, index) => <div key={index} className="grid gap-2 sm:grid-cols-[90px_1fr_auto]"><input value={criterion.id} onChange={(event) => setCriteria((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, id: event.target.value } : item))} className="form-control font-mono" /><input value={criterion.text} onChange={(event) => setCriteria((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, text: event.target.value } : item))} className="form-control" /><RemoveButton onClick={() => setCriteria((items) => items.filter((_, itemIndex) => itemIndex !== index))} /></div>)}</EditableList>
+        {error && <ErrorMessage prefix={t("任务创建失败")} error={error} />}
+      </div>
     </ModalShell>
   );
 }
@@ -769,7 +763,17 @@ function EmptyLibrary({ onCreate, canWrite }: { canWrite: boolean; onCreate: () 
   return <div className="grid min-h-[720px] place-items-center p-8 text-center"><div><div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-cyan-50 text-xl text-cyan-700">{t("需")}</div><h2 className="mt-4 text-xl font-bold text-slate-900">{t("上传第一份需求文档")}</h2><p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-slate-500">{t("支持 Markdown 和纯文本。保存后团队成员即可阅读、分享，并继续提炼需求项。")}</p>{canWrite && <button type="button" onClick={onCreate} className="ui-button ui-button-primary mt-5">{t("上传 / 新建文档")}</button>}</div></div>;
 }
 
-function ModalShell({ title, eyebrow, description, onClose, pending, children }: { title: string; eyebrow: string; description: string; onClose: () => void; pending: boolean; children: ReactNode }) {
+function ModalShell({ title, eyebrow, description, onClose, onSubmit, pending, submitLabel, submitDisabled, children }: {
+  title: string;
+  eyebrow: string;
+  description: string;
+  onClose: () => void;
+  onSubmit: (event: FormEvent) => void;
+  pending: boolean;
+  submitLabel: string;
+  submitDisabled: boolean;
+  children: ReactNode;
+}) {
   const titleId = useId();
   return (
     <DialogLayer className="flex items-start justify-center bg-slate-950/55 p-4 sm:pt-[5dvh]" onDismiss={onClose} dismissDisabled={pending}>
@@ -778,14 +782,16 @@ function ModalShell({ title, eyebrow, description, onClose, pending, children }:
           <div><p className="text-xs font-bold tracking-[0.16em] text-cyan-700">{eyebrow}</p><h2 id={titleId} className="mt-1 text-xl font-bold text-slate-950">{title}</h2><p className="mt-1 text-xs text-slate-500">{description}</p></div>
           <button type="button" disabled={pending} onClick={onClose} aria-label={t("关闭弹窗")} title={pending ? t("保存中…") : undefined} className="ui-button ui-button-secondary">{t("关闭")}</button>
         </header>
-        <div className="modal-scroll-region min-h-0 flex-1 overflow-y-auto">{children}</div>
+        <form className="flex min-h-0 flex-1 flex-col" onSubmit={onSubmit}>
+          <div className="modal-scroll-region min-h-0 flex-1 overflow-y-auto">{children}</div>
+          <footer className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-slate-200 bg-white px-6 py-4">
+            <button type="button" disabled={pending} onClick={onClose} className="ui-button ui-button-secondary">{t("取消")}</button>
+            <button type="submit" disabled={pending || submitDisabled} className="ui-button ui-button-primary">{pending ? t("保存中…") : submitLabel}</button>
+          </footer>
+        </form>
       </section>
     </DialogLayer>
   );
-}
-
-function ModalFooter({ onClose, pending, submitLabel, disabled }: { onClose: () => void; pending: boolean; submitLabel: string; disabled: boolean }) {
-  return <footer className="sticky bottom-0 flex justify-end gap-2 border-t border-slate-200 bg-white px-6 py-4"><button type="button" disabled={pending} onClick={onClose} className="ui-button ui-button-secondary">{t("取消")}</button><button disabled={pending || disabled} className="ui-button ui-button-primary">{pending ? t("保存中…") : submitLabel}</button></footer>;
 }
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
