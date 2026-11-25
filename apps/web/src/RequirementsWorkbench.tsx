@@ -2,7 +2,7 @@ import { useProjectAccess } from './useProjectAccess';
 import { t, getLocale } from './i18n.ts';
 import { useLocale } from './useLocale';
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { useEffect, useId, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { memo, useEffect, useId, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import {
   createRequirement,
   createRequirementDocument,
@@ -31,6 +31,9 @@ import { useProjectDisplayNames } from './ProjectDisplayNames';
 import { RequirementIdeasWorkbench, RequirementReviewPanel, RequirementTopicsWorkbench } from './RequirementDiscoveryWorkbench';
 import { FormSelect } from './FormSelect';
 import { DialogLayer } from './DialogLayer';
+
+// Keep Markdown parsing out of the render triggered by opening or dismissing a form.
+const RequirementDocumentMarkdown = memo(MarkdownDocument);
 
 const DOCUMENT_TEMPLATE = `# 模块需求说明
 
@@ -450,7 +453,7 @@ function RequirementDocumentReader({ document, onEdit, onShare, onCreateEntry }:
         <div className="min-w-0">
           <RequirementReviewPanel canWrite={canWrite} canManage={canManage} documentCode={document.code} currentRevision={document.current_revision} />
           <div className="h-6" />
-          <MarkdownDocument content={document.content} outline={outline} />
+          <RequirementDocumentMarkdown content={document.content} outline={document.outline ?? undefined} />
 
           <section className="mt-10 border-t border-slate-200 pt-8">
             <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-bold tracking-[0.14em] text-cyan-700">REQUIREMENT ITEMS</p><h3 className="mt-1 text-xl font-bold text-slate-950">{t("从本文档提炼的需求项")}</h3></div><span className="text-xs text-slate-400">{t("{0} 条", { "0": document.linked_requirements.length })}</span></div>
