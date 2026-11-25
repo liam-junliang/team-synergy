@@ -1,6 +1,6 @@
 import { useRef, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { listProjectModules, listRequirements } from './api';
+import { listProjectModules, listRequirements, type TestAssetDetail, type TestCaseDetail, type TestExecutionDetail } from './api';
 import { t } from './i18n';
 import { WorkspaceDialog } from './WorkspaceDialog';
 import { DocumentVersionHistory, formatDocumentDate } from './DocumentVersionHistory';
@@ -22,7 +22,7 @@ export async function invalidateTestingQueries(client: QueryClient, projectCode:
   if (code) await Promise.all(['test-case', 'test-asset', 'test-execution', 'handoff-document'].map(key => client.invalidateQueries({ queryKey: [key, code] })));
 }
 export function TestingEditorDialog({ id, title, onClose, onSubmit, pending, error, children, submitLabel = '保存', disabled = false }: { id: string; title: string; onClose: () => void; onSubmit: () => void; pending: boolean; error: unknown; children: ReactNode; submitLabel?: string; disabled?: boolean }) {
-  return <WorkspaceDialog id={id} title={t(title)} description={t('内容按版本保存；已有历史和执行结果保持不变。')} size="wide" onClose={() => { if (!pending) onClose(); }} footer={<div className="space-y-3"><TestingError error={error} /><div className="flex justify-end gap-2"><button type="button" disabled={pending} className="ui-button ui-button-secondary" onClick={onClose}>{t('取消')}</button><button form={`${id}-form`} type="submit" disabled={pending || disabled} className="ui-button ui-button-primary">{t(pending ? '保存中…' : submitLabel)}</button></div></div>}><form id={`${id}-form`} onSubmit={event => { event.preventDefault(); if (!pending) onSubmit(); }}><fieldset disabled={pending} className="min-w-0 space-y-4">{children}</fieldset></form></WorkspaceDialog>;
+  return <WorkspaceDialog id={id} title={t(title)} description={t('内容按版本保存；已有历史和执行结果保持不变。')} size="wide" dismissDisabled={pending} onClose={onClose} footer={<div className="space-y-3"><TestingError error={error} /><div className="flex justify-end gap-2"><button type="button" disabled={pending} className="ui-button ui-button-secondary" onClick={onClose}>{t('取消')}</button><button form={`${id}-form`} type="submit" disabled={pending || disabled} className="ui-button ui-button-primary">{t(pending ? '保存中…' : submitLabel)}</button></div></div>}><form id={`${id}-form`} onSubmit={event => { event.preventDefault(); if (!pending) onSubmit(); }}><fieldset disabled={pending} className="min-w-0 space-y-4">{children}</fieldset></form></WorkspaceDialog>;
 }
 export function TestVersionedReader<T extends TestDocumentMetadata & { title: string; summary: string; revisions: Array<TestRevisionMetadata & { title: string; summary: string }> }>({ document, category, onEdit, render, embedded = false, actions, renderNotice, requestedRevision }: { document: T; category: string; onEdit: () => void; render: (view: T | T['revisions'][number]) => ReactNode; embedded?: boolean; actions?: (view: T | T['revisions'][number]) => ReactNode; renderNotice?: (revision: number) => ReactNode; requestedRevision?: number }) {
   const [revision, setRevision] = useState<number | null>(requestedRevision ?? null);
@@ -34,4 +34,10 @@ export function TestVersionedReader<T extends TestDocumentMetadata & { title: st
   const close = () => { setHistory(false); toggle.current?.focus(); };
   return <article className={`relative grid min-w-0 grid-cols-[minmax(0,1fr)] overflow-clip bg-white ${embedded ? '' : 'rounded-2xl border border-slate-200 shadow-sm'} ${history ? 'xl:grid-cols-[minmax(0,1fr)_240px]' : ''}`} onKeyDown={event => { if (history && event.key === 'Escape') { event.stopPropagation(); close(); } }}><div className="min-w-0"><DocumentReaderHeader title={viewed.title} summary={viewed.summary} breadcrumb={<span>{t(category)}</span>} metadata={<><span>r{selected?.revision ?? document.current_revision} · {formatDocumentDate(selected?.created_at ?? document.updated_at)}</span><code className="break-all">{document.code}</code></>} actionsLabel={t('测试资料操作')} notice={<>{selected && <p role="status" className="mt-3 text-sm text-amber-700">{t('正在查看历史版本 r{revision}。', { revision: selected.revision })}</p>}{renderNotice?.(selected?.revision ?? document.current_revision)}</>}>{actions?.(viewed)}{selected ? <button type="button" className="ui-button ui-button-secondary" onClick={() => setRevision(null)}>{t('返回当前版本')}</button> : document.can_edit && <button type="button" className="ui-button ui-button-secondary" onClick={onEdit}>{t('编辑当前版本')}</button>}<button ref={toggle} type="button" className="ui-button ui-button-secondary" aria-expanded={history} aria-controls={`testing-history-${document.code}`} onClick={() => setHistory(!history)}>{t('版本记录')}</button></DocumentReaderHeader><div className="min-w-0 space-y-5 p-4 sm:p-6">{render(viewed)}</div></div>{history && <DocumentVersionHistory id={`testing-history-${document.code}`} document={document} viewRevision={revision} onSelect={setRevision} onClose={close} />}</article>;
 }
-export function useTestingSave(projectCode: string) { const client = useQueryClient(); return (code: string) => invalidateTestingQueries(client, projectCode, code); }
+export function useTestingSave(projectCode: string, detailKey: 'test-case' | 'test-asset' | 'test-execution') {
+  const client = useQueryClient();
+  return (saved: TestCaseDetail | TestAssetDetail | TestExecutionDetail) => {
+    client.setQueryData([detailKey, saved.code], saved);
+    void invalidateTestingQueries(client, projectCode, saved.code);
+  };
+}

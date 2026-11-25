@@ -689,7 +689,7 @@ export function TeamsWorkspace() {
         </div>
       </WorkspaceDialog>
     )}
-    {removingMember && selectedTeam && <TeamMemberRemovalDialog teamCode={selectedTeam.code} member={removingMember} pending={removeTeamMemberMutation.isPending} error={removeTeamMemberMutation.error} onClose={() => { if (!removeTeamMemberMutation.isPending) setRemovingMember(null); }} onConfirm={() => removeTeamMemberMutation.mutate(removingMember.code)} />}
+    {removingMember && selectedTeam && <TeamMemberRemovalDialog teamCode={selectedTeam.code} member={removingMember} pending={removeTeamMemberMutation.isPending} error={removeTeamMemberMutation.error} onClose={() => setRemovingMember(null)} onConfirm={() => removeTeamMemberMutation.mutate(removingMember.code)} />}
     </>
   );
 }
@@ -723,7 +723,7 @@ function TeamMemberRemovalDialog({ teamCode, member, pending, error, onClose, on
   useLocale();
   const impact = useQuery({ queryKey: ['team-member-removal-impact', teamCode, member.code], queryFn: () => getTeamMemberRemovalImpact(teamCode, member.code), staleTime: 0 });
   const blocked = (impact.data?.blocked_owned_projects.length ?? 0) > 0 || (impact.data?.open_tasks.length ?? 0) > 0 || (impact.data?.active_runs?.length ?? 0) > 0;
-  return <WorkspaceDialog id="team-member-removal" title={t('移出团队成员')} description={member.display_name} onClose={onClose}>
+  return <WorkspaceDialog id="team-member-removal" title={t('移出团队成员')} description={member.display_name} dismissDisabled={pending} onClose={onClose}>
     <div className="space-y-4"><p className="ui-help">{t('移出团队将撤销团队继承权限及本团队项目的单独授权。需要继续外部协作时，由项目负责人重新授权。')}</p>
       {impact.isPending && <p className="ui-help">{t('正在检查权限影响…')}</p>}{impact.error && <p role="alert" className="text-sm text-rose-700">{impact.error.message}</p>}
       {impact.data && <><h3 className="text-sm font-semibold text-slate-800">{t('受影响的项目')}</h3><ul className="max-h-56 space-y-2 overflow-y-auto">{impact.data.projects.map((project) => <li key={project.project_code} className="flex justify-between gap-3 rounded-lg bg-slate-50 p-3 text-sm"><span className="break-words">{project.name}</span><span className="shrink-0 text-xs text-slate-500">{roleMeta(project.role).label}</span></li>)}</ul>{impact.data.projects.length === 0 && <p className="ui-help">{t('没有需要撤销的项目权限。')}</p>}

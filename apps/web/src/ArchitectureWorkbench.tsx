@@ -159,7 +159,7 @@ export function ArchitectureDocumentEditor({ projectCode, initial, onClose, onSa
       : createArchitectureDocument(projectCode, architectureWriteInput(submitted)),
     onSuccess: async (document) => {
       queryClient.setQueryData(['architecture-document', document.document_code], document);
-      await invalidateArchitectureDocumentQueries(queryClient, projectCode, document.document_code);
+      void invalidateArchitectureDocumentQueries(queryClient, projectCode, document.document_code);
       await onSaved(document);
     },
     onError: (error) => {

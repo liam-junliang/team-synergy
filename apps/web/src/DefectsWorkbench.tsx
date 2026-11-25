@@ -2,7 +2,7 @@ import { useProjectAccess } from './useProjectAccess';
 import { useLocale } from './useLocale';
 import { t, getLocale } from './i18n.ts';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { type FormEvent, type ReactNode, useMemo, useRef, useState } from 'react';
 import {
   createDefect,
   createTask,
@@ -16,6 +16,7 @@ import {
 import { defectRepairContext, DefectReportDetails, ReportDefectDialog } from './DefectReport';
 import { STATUS_META } from './status';
 import { WorkspaceDialog } from './WorkspaceDialog';
+import { DialogLayer } from './DialogLayer';
 import { projectWorkspacePath } from './workspaceRouting';
 
 const DEFECT_STATUS: Record<string, { label: string; short: string; color: string; dot: string }> = {
@@ -120,8 +121,8 @@ export function DefectsWorkbench({ projectCode, projectId }: { projectCode?: str
   };
   const reportMutation = useMutation({
     mutationFn: createDefect,
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['defects', activeProjectCode] });
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['defects', activeProjectCode] });
       setStatusFilter('active');
       setSeverityFilter('');
       setSearch('');
@@ -366,16 +367,20 @@ function RepairTaskDialog({ defect, pending, error, onClose, onSubmit }: { defec
   const [title, setTitle] = useState(t("修复：{value0}", { value0: defect.title }));
   const [brief, setBrief] = useState(() => t("## 缺陷背景\n- 缺陷：{value0}\n- 严重度：{value1}\n- 发现版本 / 环境：{value2}\n\n## 复现与预期\n{value3}\n\n## 交付要求\n修复根因，补充相应回归测试，并在提交时提供覆盖验收标准的自测证据。", { value0: defect.code, value1: t(SEVERITY[defect.severity]?.label ?? defect.severity), value2: defect.found_in || t('未填写'), value3: defectRepairContext(defect) }));
   const [acceptance, setAcceptance] = useState(() => t('按原复现步骤无法再次复现该缺陷，且相关回归测试通过'));
-  function submit(event: FormEvent) { event.preventDefault(); onSubmit({ title: title.trim(), brief: brief.trim(), acceptance: acceptance.trim() }); }
-  return <ModalShell title={t("创建修复任务")} eyebrow={defect.code} description={t("任务将绑定当前缺陷并立即出现在任务看板，Agent 领取后可读取完整任务上下文。")} onClose={onClose}><form onSubmit={submit}><div className="space-y-5 p-6"><Field label={t("任务标题")}><input autoFocus required value={title} onChange={(event) => setTitle(event.target.value)} className="form-control" /></Field><Field label={t("任务说明")}><textarea required rows={12} value={brief} onChange={(event) => setBrief(event.target.value)} className="form-control resize-y font-mono text-sm leading-6" /></Field><Field label={t("验收标准")}><textarea required rows={3} value={acceptance} onChange={(event) => setAcceptance(event.target.value)} className="form-control resize-y" /></Field><p className="rounded-xl bg-cyan-50 px-4 py-3 text-xs leading-5 text-cyan-800">{t("来源固定为“缺陷修复”，执行 Profile 为 builder；后续仍需在任务看板分派、领取、提交和验收。")}</p>{error && <ErrorMessage prefix={t("修复任务创建失败")} error={error} />}</div><ModalFooter onClose={onClose} pending={pending} submitLabel={t("创建并开始修复")} disabled={!title.trim() || !brief.trim() || !acceptance.trim()} /></form></ModalShell>;
+  const valid = Boolean(title.trim() && brief.trim() && acceptance.trim());
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (pending || !valid) return;
+    onSubmit({ title: title.trim(), brief: brief.trim(), acceptance: acceptance.trim() });
+  }
+  return <ModalShell title={t("创建修复任务")} eyebrow={defect.code} description={t("任务将绑定当前缺陷并立即出现在任务看板，Agent 领取后可读取完整任务上下文。")} onClose={onClose} dismissDisabled={pending}><form onSubmit={submit}><div className="space-y-5 p-6"><Field label={t("任务标题")}><input autoFocus required value={title} onChange={(event) => setTitle(event.target.value)} className="form-control" /></Field><Field label={t("任务说明")}><textarea required rows={12} value={brief} onChange={(event) => setBrief(event.target.value)} className="form-control resize-y font-mono text-sm leading-6" /></Field><Field label={t("验收标准")}><textarea required rows={3} value={acceptance} onChange={(event) => setAcceptance(event.target.value)} className="form-control resize-y" /></Field><p className="rounded-xl bg-cyan-50 px-4 py-3 text-xs leading-5 text-cyan-800">{t("来源固定为“缺陷修复”，执行 Profile 为 builder；后续仍需在任务看板分派、领取、提交和验收。")}</p>{error && <ErrorMessage prefix={t("修复任务创建失败")} error={error} />}</div><ModalFooter onClose={onClose} pending={pending} submitLabel={t("创建并开始修复")} disabled={!valid} /></form></ModalShell>;
 }
 
-function ModalShell({ title, eyebrow, description, onClose, children }: { title: string; eyebrow: string; description: string; onClose: () => void; children: ReactNode }) {
-  useEffect(() => { const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); }; window.addEventListener('keydown', onKeyDown); return () => window.removeEventListener('keydown', onKeyDown); }, [onClose]);
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/60 p-4 backdrop-blur-[2px]" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}><section role="dialog" aria-modal="true" aria-labelledby="defect-modal-title" className="max-h-[94vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl"><header className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-6 py-5"><div><p className="text-xs font-bold tracking-[0.16em] text-cyan-700">{eyebrow}</p><h2 id="defect-modal-title" className="mt-1 text-xl font-bold text-slate-950">{title}</h2><p className="mt-1 text-sm text-slate-500">{description}</p></div><button type="button" onClick={onClose} aria-label={t("关闭弹窗")} className="ui-button ui-button-secondary">{t("关闭")}</button></header>{children}</section></div>;
+function ModalShell({ title, eyebrow, description, onClose, dismissDisabled, children }: { title: string; eyebrow: string; description: string; onClose: () => void; dismissDisabled: boolean; children: ReactNode }) {
+  return <DialogLayer className="grid place-items-center bg-slate-950/60 p-4" onDismiss={onClose} dismissDisabled={dismissDisabled}><section role="dialog" aria-modal="true" aria-busy={dismissDisabled || undefined} aria-labelledby="defect-modal-title" className="max-h-[calc(100dvh-2rem)] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl"><header className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-6 py-5"><div><p className="text-xs font-bold tracking-[0.16em] text-cyan-700">{eyebrow}</p><h2 id="defect-modal-title" className="mt-1 text-xl font-bold text-slate-950">{title}</h2><p className="mt-1 text-sm text-slate-500">{description}</p></div><button type="button" onClick={onClose} disabled={dismissDisabled} aria-label={t("关闭弹窗")} className="ui-button ui-button-secondary">{t("关闭")}</button></header>{children}</section></DialogLayer>;
 }
 
-function ModalFooter({ onClose, pending, submitLabel, disabled }: { onClose: () => void; pending: boolean; submitLabel: string; disabled: boolean }) { return <footer className="sticky bottom-0 flex justify-end gap-2 border-t border-slate-200 bg-white px-6 py-4"><button type="button" onClick={onClose} className="ui-button ui-button-secondary">{t("取消")}</button><button disabled={pending || disabled} className="ui-button ui-button-primary">{pending ? t('处理中…') : submitLabel}</button></footer>; }
+function ModalFooter({ onClose, pending, submitLabel, disabled }: { onClose: () => void; pending: boolean; submitLabel: string; disabled: boolean }) { return <footer className="sticky bottom-0 flex justify-end gap-2 border-t border-slate-200 bg-white px-6 py-4"><button type="button" onClick={onClose} disabled={pending} className="ui-button ui-button-secondary">{t("取消")}</button><button disabled={pending || disabled} className="ui-button ui-button-primary">{pending ? t('处理中…') : submitLabel}</button></footer>; }
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) { return <label className="ui-field-label block">{label}{hint && <span className="ml-2 text-xs font-normal text-slate-400">{hint}</span>}<div className="mt-1.5">{children}</div></label>; }
 function ErrorMessage({ prefix, error }: { prefix: string; error: Error }) { return <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{prefix}：{t(error.message)}</p>; }
 function MetaRow({ label, value, title }: { label: string; value: string; title?: string }) { return <div><dt className="text-slate-400">{label}</dt><dd title={title} className="mt-1 font-semibold leading-5 text-slate-700">{value}</dd></div>; }

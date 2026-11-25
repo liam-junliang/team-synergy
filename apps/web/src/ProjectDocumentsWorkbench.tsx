@@ -25,14 +25,15 @@ import { ArchitectureDocumentEditor, ArchitectureDocumentReader } from './Archit
 import { TestAssetEditor, TestAssetReader } from './TestAssets';
 import { DocumentVersionHistory as ProjectDocumentHistory, formatDocumentDate as formatDate } from './DocumentVersionHistory';
 import { DocumentReaderHeader } from './DocumentReaderHeader';
+import { DialogLayer } from './DialogLayer';
 import { DocumentQualityPanel } from './DocumentQualityPanel';
 import { ProjectMemoryPanel } from './ProjectMemoryPanel';
 import { isDocumentLibraryTestAsset } from '../../../packages/contracts/src/testing';
-import { navigateWorkspace } from './workspaceNavigation';
+import { navigateWorkspace, readWorkspaceRoute } from './workspaceNavigation';
 import { projectMemoryQueryKey } from './memoryManagementApi';
 import { SystemAgentAnnotation } from './SystemAgentPanel';
 import { systemAgentDocumentEligible } from './systemAgentApi';
-import { projectHomeWorkspacePath, requirementWorkspacePath, testingWorkspacePath } from './workspaceRouting';
+import { projectDocumentWorkspacePath, projectFolderWorkspacePath, projectHomeWorkspacePath, requirementWorkspacePath, testingWorkspacePath } from './workspaceRouting';
 export { MarkdownDocument } from './MarkdownDocument';
 export { DocumentVersionHistory as ProjectDocumentHistory } from './DocumentVersionHistory';
 
@@ -170,9 +171,18 @@ export function ProjectDocumentsWorkbench({ projectCode, projectId, documentCode
       setSelectedDocumentCode(saved.document_code);
       setSelectedFolderCode(saved.folder_code);
       setDialog(null);
+      const route = readWorkspaceRoute(window.location);
+      if (createDocument && route.view === 'documents' && route.projectCode === activeProjectCode && route.folderCode === folderCode && route.createDocument) {
+        navigateWorkspace(projectDocumentWorkspacePath(activeProjectCode, saved.document_code), { replace: true });
+      }
       await invalidateProjectDocumentQueries(queryClient, activeProjectCode, saved.document_code);
     },
   });
+
+  function closeDocumentDialog() {
+    setDialog(null);
+    if (createDocument && folderCode) navigateWorkspace(projectFolderWorkspacePath(activeProjectCode, folderCode), { replace: true });
+  }
 
   function openFolderDialog(folder?: HandoffFolder, parentCode: string | null = selectedFolderCode) {
     if (folder?.system_role || (!folder && !canCreateHandoffSubfolder(activeFolders, parentCode))) return;
@@ -376,7 +386,7 @@ export function ProjectDocumentsWorkbench({ projectCode, projectId, documentCode
         </div>
       </section>
 
-      {canWrite && dialog === 'folder' && <Dialog title={editingFolder ? t("编辑文件夹") : t("新建文件夹")} onClose={() => setDialog(null)}>
+      {canWrite && dialog === 'folder' && <Dialog title={editingFolder ? t("编辑文件夹") : t("新建文件夹")} pending={folderMutation.isPending} onClose={() => setDialog(null)}>
         <form onSubmit={submitFolder} className="space-y-4">
           <label className="ui-field-label block">{t("文件夹名称")}<input autoFocus required value={folderName} onChange={(event) => setFolderName(event.target.value)} className="form-control mt-1.5" /></label>
           <label className="ui-field-label block">{t("上级文件夹")}<select value={folderParent ?? ''} onChange={(event) => setFolderParent(event.target.value || null)} className="form-control mt-1.5"><option value="">{t("文档库根目录")}</option>{folderParents.filter((folder) => folder.folder_code !== editingFolder?.folder_code).map((folder) => <option key={folder.folder_code} value={folder.folder_code}>{systemFolderName(folder)}</option>)}</select></label>
@@ -385,7 +395,7 @@ export function ProjectDocumentsWorkbench({ projectCode, projectId, documentCode
         </form>
       </Dialog>}
 
-      {canWrite && dialog === 'document' && !missingFolder && !sourceFolderSelected && !isSourceDocument(editingDocument) && (editingDocument?.can_edit || library?.can_create) && <Dialog title={editingDocument ? t("编辑项目文档") : t("新建项目文档")} wide onClose={() => setDialog(null)}>
+      {canWrite && dialog === 'document' && !missingFolder && !sourceFolderSelected && !isSourceDocument(editingDocument) && (editingDocument?.can_edit || library?.can_create) && <Dialog title={editingDocument ? t("编辑项目文档") : t("新建项目文档")} wide pending={documentMutation.isPending} onClose={closeDocumentDialog}>
         <form onSubmit={submitDocument} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <label className="ui-field-label block">{t("文档类型")}<select value={documentDraft.kind} onChange={(event) => setDocumentDraft((current) => ({ ...current, kind: event.target.value as HandoffDocumentKind }))} className="form-control mt-1.5">{Object.entries(kindMeta).map(([kind, meta]) => <option key={kind} value={kind}>{t(meta.label)}</option>)}</select></label>
@@ -398,7 +408,7 @@ export function ProjectDocumentsWorkbench({ projectCode, projectId, documentCode
           <textarea required value={documentDraft.content} onChange={(event) => setDocumentDraft((current) => ({ ...current, content: event.target.value }))} rows={18} placeholder={documentDraft.kind === 'api' ? t(apiDocumentTemplate) : t("# 文档标题\n\n## 目标\n\n## 约定\n\n## 注意事项")} className="form-control resize-y font-mono leading-6" />
           {editingDocument && <label className="ui-field-label block">{t("本次修订说明")}<input required value={documentDraft.change_summary ?? ''} onChange={(event) => setDocumentDraft((current) => ({ ...current, change_summary: event.target.value }))} placeholder={t("例如：补充鉴权错误码与重试约定")} className="form-control mt-1.5" /></label>}
           {documentMutation.error && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{documentMutation.error.message}</p>}
-          <DialogActions pending={documentMutation.isPending} disabled={!documentDraft.title.trim() || !documentDraft.content.trim() || Boolean(editingDocument && !documentDraft.change_summary?.trim())} onCancel={() => setDialog(null)} label={editingDocument ? t("保存新 Revision") : t("创建文档")} />
+          <DialogActions pending={documentMutation.isPending} disabled={!documentDraft.title.trim() || !documentDraft.content.trim() || Boolean(editingDocument && !documentDraft.change_summary?.trim())} onCancel={closeDocumentDialog} label={editingDocument ? t("保存新 Revision") : t("创建文档")} />
         </form>
       </Dialog>}
     </main>
@@ -539,15 +549,15 @@ const kindMeta: Record<HandoffDocumentKind, { label: string; short: string; badg
 
 const apiDocumentTemplate = '# 接口名称\n\n## 使用场景\n\n## 鉴权与权限\n\n## 请求\n\n## 响应\n\n## 错误码\n\n## 幂等与重试\n\n## 联调示例\n\n## 变更注意事项';
 
-function Dialog({ title, wide = false, onClose, children }: { title: string; wide?: boolean; onClose: () => void; children: ReactNode }) {
-  return <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <section className={`max-h-[92vh] w-full overflow-y-auto rounded-2xl bg-white shadow-2xl ${wide ? 'max-w-4xl' : 'max-w-lg'}`}>
-      <header className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4"><h2 className="text-lg font-bold text-slate-950">{title}</h2><button type="button" onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-800">×</button></header>
+function Dialog({ title, wide = false, pending, onClose, children }: { title: string; wide?: boolean; pending: boolean; onClose: () => void; children: ReactNode }) {
+  return <DialogLayer className="grid place-items-center bg-slate-950/40 p-4" onDismiss={onClose} dismissDisabled={pending}>
+    <section role="dialog" aria-modal="true" aria-busy={pending || undefined} aria-label={title} className={`max-h-[calc(100dvh-2rem)] w-full overflow-y-auto rounded-2xl bg-white shadow-2xl ${wide ? 'max-w-4xl' : 'max-w-lg'}`}>
+      <header className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4"><h2 className="text-lg font-bold text-slate-950">{title}</h2><button type="button" disabled={pending} onClick={onClose} aria-label={t("关闭弹窗")} title={pending ? t("保存中…") : undefined} className="ui-icon-button text-xl">×</button></header>
       <div className="p-6">{children}</div>
     </section>
-  </div>;
+  </DialogLayer>;
 }
 
 function DialogActions({ pending, disabled, onCancel, label }: { pending: boolean; disabled: boolean; onCancel: () => void; label: string }) {
-  return <div className="flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" onClick={onCancel} className="ui-button ui-button-secondary">{t("取消")}</button><button disabled={pending || disabled} className="ui-button ui-button-primary">{pending ? t("保存中…") : label}</button></div>;
+  return <div className="flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" disabled={pending} onClick={onCancel} className="ui-button ui-button-secondary">{t("取消")}</button><button disabled={pending || disabled} className="ui-button ui-button-primary">{pending ? t("保存中…") : label}</button></div>;
 }

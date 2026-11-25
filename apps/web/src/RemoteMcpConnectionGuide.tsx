@@ -201,7 +201,7 @@ function CreateRemoteMcpDialog({ accountCode, endpoint, onClose }: {
 
   return <WorkspaceDialog id="remote-mcp-create" title={t(created ? '远程连接已授权' : '新建远程 MCP 连接')} description={t(created
     ? '授权头只在此处显示一次。将它和服务地址填入客户端的远程 MCP 设置。'
-    : '客户端以你的身份访问有权限的项目。你可以随时撤销授权。')} onClose={() => { if (!creating.current) onClose(); }}>
+    : '客户端以你的身份访问有权限的项目。你可以随时撤销授权。')} dismissDisabled={pending} onClose={onClose}>
     {created ? <div className="space-y-4">
       <CopyCommand command={endpoint} copyLabel={t('复制服务地址')} />
       <CopyCommand command={`Authorization: Bearer ${created.token}`} copyLabel={t('复制授权头')} />
@@ -226,9 +226,12 @@ function RevokeRemoteMcpDialog({ accountCode, connection, onClose }: { accountCo
   const client = useQueryClient();
   const revoke = useMutation({
     mutationFn: () => revokeMcpConnection(connection.code),
-    onSuccess: async () => { await client.invalidateQueries({ queryKey: connectionsKey(accountCode) }); onClose(); },
+    onSuccess: () => {
+      onClose();
+      void client.invalidateQueries({ queryKey: connectionsKey(accountCode) });
+    },
   });
-  return <WorkspaceDialog id="remote-mcp-revoke" title={t('撤销连接')} description={t('撤销后，客户端将无法继续使用 {name} 的授权。', { name: connection.name })} onClose={() => { if (!revoke.isPending) onClose(); }}>
+  return <WorkspaceDialog id="remote-mcp-revoke" title={t('撤销连接')} description={t('撤销后，客户端将无法继续使用 {name} 的授权。', { name: connection.name })} dismissDisabled={revoke.isPending} onClose={onClose}>
     {revoke.isError && <p role="alert" className="mb-3 text-sm text-rose-700">{t('未能撤销远程连接，请重试。')}</p>}
     <div className="flex justify-end gap-2">
       <button type="button" className="ui-button ui-button-secondary" disabled={revoke.isPending} onClick={onClose}>{t('取消')}</button>

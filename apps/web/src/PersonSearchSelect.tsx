@@ -65,6 +65,7 @@ export function PersonSearchSelect({
   const [query, setQuery] = useState('');
   const [menuPlacement, setMenuPlacement] = useState<'top' | 'bottom'>('bottom');
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const listboxId = useId();
   const selectedOption = options.find((option) => option.code === value);
   const visibleOptions = useMemo(() => filterPersonOptions(options, query), [options, query]);
@@ -91,18 +92,8 @@ export function PersonSearchSelect({
         setQuery('');
       }
     };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setOpen(false);
-        setQuery('');
-      }
-    };
     document.addEventListener('pointerdown', closeOnOutsideClick);
-    document.addEventListener('keydown', closeOnEscape);
-    return () => {
-      document.removeEventListener('pointerdown', closeOnOutsideClick);
-      document.removeEventListener('keydown', closeOnEscape);
-    };
+    return () => document.removeEventListener('pointerdown', closeOnOutsideClick);
   }, [open]);
 
   useEffect(() => {
@@ -124,8 +115,16 @@ export function PersonSearchSelect({
   };
 
   return (
-    <div ref={rootRef} className={`relative min-w-0 ${open ? 'z-30' : ''}`}>
+    <div ref={rootRef} className={`relative min-w-0 ${open ? 'z-30' : ''}`} onKeyDown={(event) => {
+      if (!open || event.key !== 'Escape' || event.defaultPrevented || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+      setQuery('');
+      triggerRef.current?.focus({ preventScroll: true });
+    }}>
       <button
+        ref={triggerRef}
         type="button"
         aria-label={ariaLabel}
         aria-haspopup="listbox"

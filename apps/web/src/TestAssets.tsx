@@ -33,8 +33,8 @@ export function TestAssetEditor({ projectCode, initial, onClose, onSaved }: { pr
   const [preview, setPreview] = useState(false);
   const fileSequence = useRef(0);
   const repositories = useQuery({ queryKey: ['project-repositories', projectCode], queryFn: () => listProjectRepositories(projectCode) });
-  const invalidate = useTestingSave(projectCode);
-  const mutation = useMutation({ mutationFn: () => { const input = testAssetWriteContent({ ...draft, tags: splitTestTags(tags) }); return initial ? reviseTestAsset(initial.code, { ...input, base_revision: initial.current_revision, change_summary: changeSummary }) : createTestAsset(projectCode, input); }, onSuccess: async saved => { await invalidate(saved.code); await onSaved(saved); } });
+  const refreshSaved = useTestingSave(projectCode, 'test-asset');
+  const mutation = useMutation({ mutationFn: () => { const input = testAssetWriteContent({ ...draft, tags: splitTestTags(tags) }); return initial ? reviseTestAsset(initial.code, { ...input, base_revision: initial.current_revision, change_summary: changeSummary }) : createTestAsset(projectCode, input); }, onSuccess: saved => { refreshSaved(saved); return onSaved(saved); } });
   const set = <K extends keyof TestAssetContent>(key: K, value: TestAssetContent[K]) => setDraft(current => ({ ...current, [key]: value }));
   const gitSet = (key: keyof TestGit, value: string) => set('git', { ...(draft.git ?? emptyGit), [key]: value });
   async function upload(file?: File) {

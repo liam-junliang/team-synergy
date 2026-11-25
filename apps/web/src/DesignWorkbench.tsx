@@ -3,6 +3,7 @@ import { t, getLocale } from './i18n.ts';
 import { useLocale } from './useLocale';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { DialogLayer } from './DialogLayer';
 import {
   createDesignPrototype,
   getDesignPrototype,
@@ -265,11 +266,11 @@ export function DesignWorkbench({ projectCode }: { projectCode: string }) {
     },
   });
   const reviseMutation = useMutation({
-    mutationFn: ({ code, input }: { code: string; input: DesignPrototypeInput }) => reviseDesignPrototype(code, input),
-    onSuccess: (prototype) => {
+    mutationFn: ({ code, input }: { code: string; input: DesignPrototypeInput; closeEditor?: boolean }) => reviseDesignPrototype(code, input),
+    onSuccess: (prototype, { closeEditor }) => {
       queryClient.setQueryData(['design-prototype', prototype.code], prototype);
       void queryClient.invalidateQueries({ queryKey: ['design-prototypes', projectCode] });
-      setDialog(null);
+      if (closeEditor) setDialog(null);
     },
   });
 
@@ -332,7 +333,7 @@ export function DesignWorkbench({ projectCode }: { projectCode: string }) {
         )}
       </section>
 
-      {canWrite && dialog && <PrototypeEditorDialog key={`${dialog}-${detail?.code ?? 'new'}`} mode={dialog} initial={dialog === 'edit' ? detail : undefined} requirements={requirementsQuery.data ?? []} pending={createMutation.isPending || reviseMutation.isPending} error={(createMutation.error ?? reviseMutation.error) as Error | null} onClose={() => { createMutation.reset(); reviseMutation.reset(); setDialog(null); }} onSubmit={(input) => dialog === 'create' ? createMutation.mutate(input) : detail && reviseMutation.mutate({ code: detail.code, input })} />}
+      {canWrite && dialog && <PrototypeEditorDialog key={`${dialog}-${detail?.code ?? 'new'}`} mode={dialog} initial={dialog === 'edit' ? detail : undefined} requirements={requirementsQuery.data ?? []} pending={createMutation.isPending || (Boolean(reviseMutation.variables?.closeEditor) && reviseMutation.isPending)} error={createMutation.error ?? (reviseMutation.variables?.closeEditor ? reviseMutation.error : null)} onClose={() => { createMutation.reset(); if (reviseMutation.variables?.closeEditor) reviseMutation.reset(); setDialog(null); }} onSubmit={(input) => dialog === 'create' ? createMutation.mutate(input) : detail && reviseMutation.mutate({ code: detail.code, input, closeEditor: true })} />}
     </main>
   );
 }
@@ -560,15 +561,15 @@ export function PrototypeEditorDialog({ mode, initial, requirements, pending, er
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/60 p-3 sm:p-4" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
-      <section role="dialog" aria-modal="true" aria-labelledby="prototype-dialog-title" className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl sm:max-h-[92dvh]">
+    <DialogLayer className="grid place-items-center bg-slate-950/60 p-3 sm:p-4" onDismiss={onClose} dismissDisabled={pending}>
+      <section role="dialog" aria-modal="true" aria-labelledby="prototype-dialog-title" aria-busy={pending} className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl sm:max-h-[92dvh]">
         <header className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-6">
           <div>
             <p className="text-[11px] font-bold tracking-[0.18em] text-cyan-700">VISUAL PROTOTYPE · {mode === 'create' ? 'NEW' : `REVISION ${initial ? initial.current_revision + 1 : ''}`}</p>
             <h2 id="prototype-dialog-title" className="mt-1 text-xl font-semibold leading-7 text-slate-950">{mode === 'create' ? t("添加设计资料") : t("编辑并创建新版本")}</h2>
             <p className="ui-help mt-1">{t("支持 HTML、图片、URL 链接和特殊文件；资料内容和配套说明按版本保存，可关联需求。")}</p>
           </div>
-          <button type="button" onClick={onClose} className="ui-button ui-button-secondary">{t("关闭")}</button>
+          <button type="button" disabled={pending} onClick={onClose} className="ui-button ui-button-secondary">{t("关闭")}</button>
         </header>
 
         <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
@@ -628,11 +629,11 @@ export function PrototypeEditorDialog({ mode, initial, requirements, pending, er
 
           <footer className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-4 py-4 sm:px-6">
             <span className="ui-help min-w-0 flex-1 basis-64">{t("资料内容和配套说明按版本保存，可关联需求。")}</span>
-            <div className="ml-auto flex shrink-0 gap-2"><button type="button" onClick={onClose} className="ui-button ui-button-secondary">{t("取消")}</button><button type="submit" disabled={pending || readingFile || Boolean(fileError) || !title.trim() || !hasContent || (mode === 'edit' && !changeSummary.trim())} className="ui-button ui-button-primary">{pending ? t("保存中…") : mode === 'create' ? t("保存设计资料") : t("保存为新版本")}</button></div>
+            <div className="ml-auto flex shrink-0 gap-2"><button type="button" disabled={pending} onClick={onClose} className="ui-button ui-button-secondary">{t("取消")}</button><button type="submit" disabled={pending || readingFile || Boolean(fileError) || !title.trim() || !hasContent || (mode === 'edit' && !changeSummary.trim())} className="ui-button ui-button-primary">{pending ? t("保存中…") : mode === 'create' ? t("保存设计资料") : t("保存为新版本")}</button></div>
           </footer>
         </form>
       </section>
-    </div>
+    </DialogLayer>
   );
 }
 

@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Component, lazy, Suspense, useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { cancelTask, getProject, listFeatures, listMembers, listTasks, getTask, logoutWebSession, restoreWebSession, taskHistory, updateTaskContract, type AuthUser, type Feature, type Member, type TaskDetail as TaskDetailData, type TaskSummary, type UpdateTaskContractInput } from './api';
 import { ApiError } from './apiError';
+import { DialogLayer } from './DialogLayer';
 import { STATUS_META, BOARD_COLUMNS, PROFILE_META, SOURCE_META, isStale } from './status';
 import { AGENT_WORKSPACE_TABS, agentWorkspacePath, safeAgentReturnPath, projectWorkspacePath, taskWorkspacePath, workspacePathAfterLogin, type ProjectSection, type WorkspaceRoute } from './workspaceRouting';
 import { listenWorkspaceNavigation, navigateWorkspace, readWorkspaceRoute } from './workspaceNavigation';
@@ -489,7 +490,7 @@ function TaskContractEditor({ task, onCancel, onSave, saving, error }: {
         </div>
       </div>
       {error && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</p>}
-      <div className="flex justify-end gap-2 border-t border-slate-200 pt-4"><button type="button" onClick={onCancel} className="ui-button ui-button-secondary">{t("返回详情")}</button><button type="submit" disabled={!canSave || saving} className="ui-button ui-button-primary">{saving ? t("保存中…") : t("保存修改")}</button></div>
+      <div className="flex justify-end gap-2 border-t border-slate-200 pt-4"><button type="button" disabled={saving} onClick={onCancel} className="ui-button ui-button-secondary">{t("返回详情")}</button><button type="submit" disabled={!canSave || saving} className="ui-button ui-button-primary">{saving ? t("保存中…") : t("保存修改")}</button></div>
     </form>
   );
 }
@@ -526,23 +527,17 @@ function TaskDetailModal({ taskId, projectCode, onClose, viewerCode }: {
       onClose();
     },
   });
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  const writing = updateMutation.isPending || cancelMutation.isPending;
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/55 p-0 backdrop-blur-[2px] sm:items-center sm:p-4" onClick={onClose}>
+    <DialogLayer className="flex items-end justify-center bg-slate-950/55 sm:items-start sm:p-4 sm:pt-[6dvh]" onDismiss={onClose} dismissDisabled={writing}>
       <div
         role="dialog"
         aria-modal="true"
+        aria-busy={writing || undefined}
         aria-labelledby="task-detail-dialog-title"
-        className="flex h-[min(94vh,900px)] w-full flex-col overflow-hidden rounded-t-2xl border border-slate-200 bg-slate-50 shadow-2xl sm:h-auto sm:max-h-[88vh] sm:max-w-4xl sm:rounded-2xl"
-        onClick={(e) => e.stopPropagation()}
+        className="flex h-[min(94dvh,900px)] w-full flex-col overflow-hidden rounded-t-2xl border border-slate-200 bg-slate-50 shadow-2xl sm:h-auto sm:max-h-[88dvh] sm:max-w-4xl sm:rounded-2xl"
       >
-        <header className="z-10 flex shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur sm:px-5">
+        <header className="z-10 flex shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3 sm:px-5">
           <div className="flex min-w-0 items-center gap-3">
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-cyan-50 text-cyan-700 ring-1 ring-cyan-100" aria-hidden="true">
               <span className="h-3.5 w-3.5 rounded-sm border-2 border-current" />
@@ -556,9 +551,10 @@ function TaskDetailModal({ taskId, projectCode, onClose, viewerCode }: {
             type="button"
             autoFocus
             onClick={onClose}
+            disabled={writing}
             aria-label={t("关闭详情")}
             title={t("关闭任务详情（Esc）")}
-            className="ui-icon-button !border-transparent !bg-transparent !shadow-none active:scale-[0.96]"
+            className="ui-icon-button !border-transparent !bg-transparent !shadow-none"
           >
             <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" className="h-4 w-4 shrink-0 transition-colors">
               <path d="M5 5l10 10M15 5 5 15" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
@@ -571,7 +567,7 @@ function TaskDetailModal({ taskId, projectCode, onClose, viewerCode }: {
         ) : editing && canManageTask ? (
           <TaskContractEditor task={detail.data} onCancel={() => setEditing(false)} onSave={(input) => updateMutation.mutate(input)} saving={updateMutation.isPending} error={updateMutation.error instanceof Error ? updateMutation.error.message : null} />
         ) : confirmingCancel && canManageTask ? (
-          <div className="grid min-h-72 place-items-center p-6"><section className="w-full max-w-lg rounded-2xl border border-rose-200 bg-white p-6 text-center shadow-sm"><div className="mx-auto grid h-11 w-11 place-items-center rounded-full bg-rose-50 text-lg text-rose-700">×</div><h2 className="mt-4 text-base font-bold text-slate-900">{t("取消这个任务？")}</h2><p className="mt-2 text-sm leading-6 text-slate-500">{t("任务会保留在看板“已取消”列和审计记录中，但不能再被领取或执行。")}</p><label className="mt-5 block text-left text-xs font-semibold text-slate-600">{t("取消原因（可选）")}<textarea value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} rows={3} className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-normal outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100" /></label>{cancelMutation.error instanceof Error && <p role="alert" className="mt-3 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{cancelMutation.error.message}</p>}<div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setConfirmingCancel(false)} className="ui-button ui-button-secondary">{t("返回")}</button><button type="button" disabled={cancelMutation.isPending} onClick={() => cancelMutation.mutate()} className="ui-button ui-button-danger">{cancelMutation.isPending ? t("取消中…") : t("确认取消任务")}</button></div></section></div>
+          <div className="grid min-h-72 place-items-center p-6"><section className="w-full max-w-lg rounded-2xl border border-rose-200 bg-white p-6 text-center shadow-sm"><div className="mx-auto grid h-11 w-11 place-items-center rounded-full bg-rose-50 text-lg text-rose-700">×</div><h2 className="mt-4 text-base font-bold text-slate-900">{t("取消这个任务？")}</h2><p className="mt-2 text-sm leading-6 text-slate-500">{t("任务会保留在看板“已取消”列和审计记录中，但不能再被领取或执行。")}</p><label className="mt-5 block text-left text-xs font-semibold text-slate-600">{t("取消原因（可选）")}<textarea value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} rows={3} className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-normal outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100" /></label>{cancelMutation.error instanceof Error && <p role="alert" className="mt-3 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{cancelMutation.error.message}</p>}<div className="mt-5 flex justify-end gap-2"><button type="button" disabled={cancelMutation.isPending} onClick={() => setConfirmingCancel(false)} className="ui-button ui-button-secondary">{t("返回")}</button><button type="button" disabled={cancelMutation.isPending} onClick={() => cancelMutation.mutate()} className="ui-button ui-button-danger">{cancelMutation.isPending ? t("取消中…") : t("确认取消任务")}</button></div></section></div>
         ) : (
           (() => {
             const task = detail.data;
@@ -601,7 +597,7 @@ function TaskDetailModal({ taskId, projectCode, onClose, viewerCode }: {
         )}
         </div>
       </div>
-    </div>
+    </DialogLayer>
   );
 }
 

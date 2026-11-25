@@ -42,14 +42,14 @@ export function ProjectOverviewWorkbench({ projectCode }: { projectCode: string 
   const repositories = (repositoriesQuery.data ?? []).filter((repository) => repository.status === 'active');
   const members = membersQuery.data ?? [];
 
-  async function saved(updatedHome?: ProjectHome) {
+  function saved(updatedHome?: ProjectHome) {
     if (updatedHome) queryClient.setQueryData(['project-home', projectCode], updatedHome);
-    await Promise.all([
+    setDialog(null);
+    void Promise.all([
       queryClient.invalidateQueries({ queryKey: ['project-home', projectCode] }),
       queryClient.invalidateQueries({ queryKey: ['handoff-library', projectCode] }),
       queryClient.invalidateQueries({ queryKey: ['handoff-document'] }),
     ]);
-    setDialog(null);
   }
 
   return (
@@ -118,7 +118,7 @@ function ProjectStandardsSection({ projectCode, home }: { projectCode: string; h
   </section>;
 }
 
-function HomeSectionDialog({ projectCode, overviewFolderCode, dialog, onClose, onSaved }: { projectCode: string; overviewFolderCode?: string; dialog: HomeDialog; onClose: () => void; onSaved: (home?: ProjectHome) => Promise<void> }) {
+function HomeSectionDialog({ projectCode, overviewFolderCode, dialog, onClose, onSaved }: { projectCode: string; overviewFolderCode?: string; dialog: HomeDialog; onClose: () => void; onSaved: (home?: ProjectHome) => void }) {
   useLocale();
   const section = HOME_SECTIONS.find((item) => item.slot === dialog.slot) ?? HOME_SECTIONS[0];
   const [pending, setPending] = useState(false);
@@ -127,7 +127,7 @@ function HomeSectionDialog({ projectCode, overviewFolderCode, dialog, onClose, o
   </div></section></div>;
 }
 
-function HomeBindingForm({ projectCode, slot, current, overviewFolderCode, onSaved, onPending }: { projectCode: string; slot: ProjectHomeSlot; current: ProjectHomeDocument | null; overviewFolderCode?: string; onSaved: (home?: ProjectHome) => Promise<void>; onPending: (pending: boolean) => void }) {
+function HomeBindingForm({ projectCode, slot, current, overviewFolderCode, onSaved, onPending }: { projectCode: string; slot: ProjectHomeSlot; current: ProjectHomeDocument | null; overviewFolderCode?: string; onSaved: (home?: ProjectHome) => void; onPending: (pending: boolean) => void }) {
   useLocale();
   const [documentCode, setDocumentCode] = useState(current?.document_code ?? '');
   const libraryQuery = useQuery({ queryKey: ['handoff-library', projectCode, ''], queryFn: () => listHandoffLibrary(projectCode) });
@@ -144,7 +144,7 @@ function HomeBindingForm({ projectCode, slot, current, overviewFolderCode, onSav
   return <form onSubmit={(event) => { event.preventDefault(); if (validSelection) mutation.mutate(); }} className="space-y-4"><label className="block text-sm font-semibold text-slate-700">{t("选择现有文档")}<select value={documentCode} onChange={(event) => setDocumentCode(event.target.value)} disabled={libraryQuery.isLoading || mutation.isPending} className="form-control mt-2 w-full bg-white"><option value="">{t("暂不绑定")}</option>{documents.map((document) => <option key={document.document_code} value={document.document_code}>{document.title} · r{document.current_revision}</option>)}</select></label>{libraryQuery.isLoading && <p className="text-xs text-slate-400">{t("正在加载项目文档…")}</p>}{libraryQuery.error && <InlineError error={libraryQuery.error} />}{!libraryQuery.isLoading && !libraryQuery.error && documents.length === 0 && <p className="text-sm text-slate-500">{t("文档库中还没有可用文档，可关闭后选择“新建文档”。")}</p>}<p className="text-xs leading-6 text-slate-500">{t("仅展示当前项目未归档的文档。更换或解除绑定会保留原文档。")}</p>{mutation.error && <InlineError error={mutation.error} />}<div className="flex justify-end"><button disabled={mutation.isPending || libraryQuery.isLoading || Boolean(libraryQuery.error) || !validSelection} className="ui-button ui-button-primary">{mutation.isPending ? t("保存中…") : t("保存绑定")}</button></div></form>;
 }
 
-function ExistingHomeDocumentEditor({ projectCode, documentCode, onSaved, onPending }: { projectCode: string; documentCode: string; onSaved: (home?: ProjectHome) => Promise<void>; onPending: (pending: boolean) => void }) {
+function ExistingHomeDocumentEditor({ projectCode, documentCode, onSaved, onPending }: { projectCode: string; documentCode: string; onSaved: (home?: ProjectHome) => void; onPending: (pending: boolean) => void }) {
   useLocale();
   const documentQuery = useQuery({ queryKey: ['home-document-editor', documentCode], queryFn: () => getHandoffDocument(documentCode), gcTime: 0, refetchOnWindowFocus: false });
   if (documentQuery.isLoading) return <p className="py-8 text-sm text-slate-400">{t("正在读取文档正文…")}</p>;
@@ -154,7 +154,7 @@ function ExistingHomeDocumentEditor({ projectCode, documentCode, onSaved, onPend
   return <HomeDocumentForm projectCode={projectCode} existing={documentQuery.data} title={documentQuery.data.title} placeholder="" onSaved={onSaved} onPending={onPending} />;
 }
 
-function HomeDocumentForm({ projectCode, slot, existing, folderCode, title: initialTitle, placeholder, onSaved, onPending }: { projectCode: string; slot?: ProjectHomeSlot; existing?: HandoffDocumentDetail; folderCode?: string; title: string; placeholder: string; onSaved: (home?: ProjectHome) => Promise<void>; onPending: (pending: boolean) => void }) {
+function HomeDocumentForm({ projectCode, slot, existing, folderCode, title: initialTitle, placeholder, onSaved, onPending }: { projectCode: string; slot?: ProjectHomeSlot; existing?: HandoffDocumentDetail; folderCode?: string; title: string; placeholder: string; onSaved: (home?: ProjectHome) => void; onPending: (pending: boolean) => void }) {
   useLocale();
   const [title, setTitle] = useState(initialTitle);
   const [summary, setSummary] = useState(existing?.summary ?? '');

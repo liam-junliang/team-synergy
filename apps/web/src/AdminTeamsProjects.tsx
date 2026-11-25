@@ -60,12 +60,15 @@ export function AdminEditDialog({ selection, onClose }: { selection: Selection; 
   const mutation = useMutation({ mutationFn: () => selection.kind === 'team' ? adminUpdateTeam(selection.item.team_code, { name: name.trim(), reason: reason.trim() }) : adminUpdateProject(selection.item.project_code, {
     name: name.trim(), description: description.trim() || null, status, reason: reason.trim(),
     base_snapshot: selection.item.current_snapshot, ...(isArchiving ? { force_archive: true as const } : {}),
-  }), onSuccess: async () => {
-    await Promise.all(['admin-teams', 'admin-projects', 'teams', 'projects', 'project', 'team-projects-governance'].map(key => queryClient.invalidateQueries({ queryKey: [key] }))); onClose();
+  }), onSuccess: () => {
+    onClose();
+    for (const key of ['admin-teams', 'admin-projects', 'teams', 'projects', 'project', 'team-projects-governance']) {
+      void queryClient.invalidateQueries({ queryKey: [key] });
+    }
   } });
   const submitLabel = mutation.isPending ? '保存中…' : isRestoring ? '恢复项目' : isArchiving ? '强制归档' : '保存';
   function submit(event: FormEvent) { event.preventDefault(); if (name.trim() && reason.trim()) mutation.mutate(); }
-  return <WorkspaceDialog id="admin-resource-edit" title={t(selection.kind === 'team' ? '编辑团队' : '管理项目')} description={t('管理操作会记录审计日志，请说明调整原因。')} onClose={() => { if (!mutation.isPending) onClose(); }}>
+  return <WorkspaceDialog id="admin-resource-edit" title={t(selection.kind === 'team' ? '编辑团队' : '管理项目')} description={t('管理操作会记录审计日志，请说明调整原因。')} dismissDisabled={mutation.isPending} onClose={onClose}>
     <form className="space-y-4" onSubmit={submit}>
       <label className="ui-field-label block">{t('名称')}<input className="form-control mt-2" required maxLength={200} value={name} onChange={event => setName(event.target.value)} /></label>
       {selection.kind === 'project' && <>
