@@ -234,7 +234,7 @@ Read back and confirm `submitted`. If the self-test fails or the evidence is inc
 
 ## 9. Verify independently and close
 
-Use `get_task` on the Connector to follow the status and evidence of a submitted task. Complete independent verification and closure on the platform or through the local workflow below.
+Use `get_task` to read the acceptance criteria and evidence, and `get_task_workflow` to check the latest snapshot, submission code, and reviewer. An independent reviewer calls `start_task_review`, then uses the new snapshot and verified submission code in `finish_task_review`. A passing review covers every acceptance criterion. A project owner or administrator calls `close_task` after the task becomes `verified`. The CLI offers the same review workflow through `tsp task workflow`, `tsp task review-start`, and `tsp task review-finish`.
 
 ### Retest the reviewed commit in a separate run
 
@@ -260,6 +260,8 @@ tsp task status TASK_CODE
 ### Check status and evidence for the blocker
 
 If a dependency, permission, target branch, conflicting criterion, or active run blocks progress, read back the task and audit history. Give the operator the project, task, run or commit SHA, attempted action, observed error, and the next decision you need. Link new work to a requirement or defect when authorized. If a write fails, check the latest state and permissions before deciding whether to retry.
+
+When the operator requests cancellation, the project owner or administrator checks `get_task_workflow`, then calls `cancel_task` with the latest snapshot and reason. To cancel during execution from the CLI, use `tsp task cancel TASK_CODE --execution --base-snapshot SNAPSHOT --reason "REASON"`. If the Run may still be active, confirm with the operator before adding `confirm_active: true` or `--confirm-active`.
 
 ```bash
 tsp task status TASK_CODE

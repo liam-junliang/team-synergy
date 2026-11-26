@@ -63,6 +63,10 @@ test('Previously issued project grants preserve their exact scope', async t => {
   await assert.rejects(call('create_task_draft', { ...draft, feature_code: outside.code }), { code: 'connector_object_not_found' });
   await assert.rejects(call('get_task', { task_code: otherTask.task_code }), { code: 'connector_object_not_found' });
   await assert.rejects(call('assign_task', { task_code: otherTask.task_code, assignee_principal_code: owner.code, base_snapshot: 0 }), { code: 'connector_object_not_found' });
+  await assert.rejects(call('get_task_workflow', { task_code: otherTask.task_code }), { code: 'connector_object_not_found' });
+  await assert.rejects(call('cancel_task', { task_code: otherTask.task_code, base_snapshot: 0, reason: 'Other project' }), { code: 'connector_object_not_found' });
+  await assert.rejects(call('start_task_review', { task_code: otherTask.task_code, base_snapshot: 0 }), { code: 'connector_object_not_found' });
+  await assert.rejects(call('close_task', { task_code: otherTask.task_code, base_snapshot: 0 }), { code: 'connector_object_not_found' });
   await assert.rejects(call('list_tasks', { projectCode: other.code }), { code: 'connector_project_mismatch' });
   assert.deepEqual((await call('list_projects', {})).items.map(item => item.projectCode), [project.code]);
   assert.deepEqual((await call('list_tasks', { projectCode: project.code })).data, []);
@@ -124,18 +128,21 @@ test('Per-project access and write capability of account grants are reevaluated 
 test('The tool catalog filters operations by the target project and current role', async t => {
   const { db, owner, member, project, other, session } = await fixture(t);
   const { call } = session(member, { projectCode: null });
-  const lookup = projectCode => call('search_tools', { module: 'tasks', projectCode });
+  const lookup = projectCode => call('search_tools', { module: 'tasks', projectCode, limit: 20 });
   const available = await lookup(project.code);
   assert.ok(available.tools.some(item => item.name === 'create_task_draft'));
-  assert.ok(available.tools.every(item => item.name !== 'assign_task'));
-  assert.ok((await session(owner, { projectCode: null }).call('search_tools', { module: 'tasks', projectCode: project.code }))
-    .tools.some(item => item.name === 'assign_task'));
+  const managerOnly = ['assign_task', 'cancel_task', 'close_task'];
+  assert.ok(available.tools.every(item => !managerOnly.includes(item.name)));
+  assert.ok(available.tools.some(item => item.name === 'finish_task_review'));
+  const ownerCatalog = await session(owner, { projectCode: null }).call('search_tools', { module: 'tasks', projectCode: project.code, limit: 20 });
+  for (const name of managerOnly) assert.ok(ownerCatalog.tools.some(item => item.name === name));
   await assert.rejects(lookup(other.code), { code: 'project_forbidden' });
   const membership = and(eq(schema.members.project_id, project.id), eq(schema.members.principal_id, member.id));
   await db.update(schema.members).set({ role: 'viewer' }).where(membership);
   const readonly = await lookup(project.code);
   assert.ok(readonly.tools.every(item => item.readOnly));
   assert.ok(readonly.tools.some(item => item.name === 'list_tasks'));
+  assert.ok(readonly.tools.some(item => item.name === 'get_task_workflow'));
 });
 
 test('Only a collaborating Connector can write tasks; assignment still requires a project manager', async t => {
@@ -148,6 +155,14 @@ test('Only a collaborating Connector can write tasks; assignment still requires 
   }
   const memberConnection = session(member);
   const created = await memberConnection.call('create_task_draft', draft);
+  const ownerWorkflow = await session().call('get_task_workflow', { task_code: created.task_code });
+  assert.equal(ownerWorkflow.allowTaskWrite, true);
+  assert.equal(ownerWorkflow.execution.can_cancel, true);
+  for (const connection of [session(viewer, { allowTaskWrite: true }), privateReader]) {
+    const workflow = await connection.call('get_task_workflow', { task_code: created.task_code });
+    assert.equal(workflow.allowTaskWrite, false);
+    assert.equal(workflow.execution.can_cancel, false);
+  }
   await assert.rejects(memberConnection.call('assign_task', { task_code: created.task_code, assignee_principal_code: member.code, base_snapshot: 0 }), { code: 'assign_forbidden' });
 });
 

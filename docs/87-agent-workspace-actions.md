@@ -53,7 +53,7 @@ tsp tools call get_project --project PROJECT_CODE
 | 账号与项目 | `get_connection_context`、`list_projects`、`list_project_members` | `tsp auth`、`tsp project`、`tsp team`、`tsp ownership` |
 | 资料与代码 | `list_project_materials`、Glob、Grep、按引用读原文、`read_code_catalog`、`query_code_graph` | `tsp docs`、`tsp code`、`tsp intake` |
 | 记忆 | 查简报、关键词和来源，个人范围读取需单独授权 | `tsp memory`、个人记忆编辑与撤回、原生会话采集 |
-| 任务与交接 | 查 Feature 和任务，创建草稿、分派、远程领取、提交自测 | `tsp task`、`tsp task handover`、设备租约、工作树与执行证据 |
+| 任务与交接 | 查 Feature、任务与操作状态，创建草稿、分派、远程领取、提交自测、取消、独立验收、关闭 | `tsp task`、`tsp task workflow`、`tsp task cancel`、`tsp task review-start`、`tsp task review-finish`、`tsp task handover`，以及设备租约、工作树与执行证据 |
 | 测试 | 查用例，登记实际执行结果 | `tsp test case`、`tsp test asset`、`tsp test execution` |
 | 业务管理 | 本次扩展补充下表动作 | `tsp feature`、`module`、`phase`、`milestone`、`requirement`、`requirement-doc`、`idea`、`topic`、`architecture`、`design`、`defect`、`skill` 原生命令，以及下表共用动作 |
 

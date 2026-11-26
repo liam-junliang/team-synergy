@@ -2,7 +2,7 @@
 name: team-synergy-connector
 description: 通过 TeamSynergy HTTP Connector 按项目查资料、记忆和代码，创建和处理任务，以及提交可复核的交付证据。适用于已接入 Connector 的 Agent。
 metadata:
-  version: 1.2.0
+  version: 1.3.0
 ---
 
 # 使用 TeamSynergy Connector
@@ -27,7 +27,7 @@ metadata:
 | `materials` | [资料和文档](references/materials.md) | 看文档目录、匹配路径、搜正文、取固定修订 |
 | `memory` | [项目和个人记忆](references/memory.md) | 查近期讨论、决定、来源或个人偏好 |
 | `code` | [代码规格](references/code.md) | 查仓库版本、符号、依赖和源码证据 |
-| `tasks` | [任务协作](references/tasks.md) | 查看契约、创建草稿、分派、领取或提交自测 |
+| `tasks` | [任务协作](references/tasks.md) | 查契约和操作状态，创建、分派、领取、提交、取消、验收或关闭任务 |
 | `testing` | [测试执行](references/testing.md) | 核对用例修订，登记实际结果和关联证据 |
 
 | `teams` | [团队管理](references/teams.md) | 先用 list_teams 找团队和当前角色 |

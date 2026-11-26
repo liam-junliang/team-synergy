@@ -50,12 +50,17 @@ test('状态机：blocked / failed 旁路（running 进入，回到 ready）', (
   assert.equal(canTransition('failed', 'ready'), true);
 });
 
-test('状态机：未执行任务可取消，执行开始后不能取消', () => {
+test('状态机：未执行任务可以直接取消，已开始任务需先终止旧执行', () => {
   for (const status of ['draft', 'ready', 'assigned']) {
     assert.equal(canTransition(status, 'cancelled'), true, `${status} → cancelled 应合法`);
     assert.doesNotThrow(() => transitionOrThrow(status, 'cancelled', ctx()));
   }
-  assert.equal(canTransition('running', 'cancelled'), false);
+  for (const status of ['running', 'self_tested', 'blocked']) {
+    assert.equal(canTransition(status, 'cancelled'), false);
+    assert.throws(() => transitionOrThrow(status, 'cancelled', ctx()), { code: 'invalid_transition' });
+    assert.doesNotThrow(() => transitionOrThrow(status, 'cancelled', ctx({ executionStopped: true })));
+  }
+  assert.throws(() => transitionOrThrow('submitted', 'cancelled', ctx({ executionStopped: true })), { code: 'invalid_transition' });
   assert.equal(canTransition('cancelled', 'draft'), false);
 });
 

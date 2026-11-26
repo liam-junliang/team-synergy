@@ -3,13 +3,15 @@ import { z } from 'zod';
 import { and, eq } from 'drizzle-orm';
 import {
   createCodeUnderstandingUseCases, createMemberUseCases, createProjectMaterialQueryUseCases,
-  createProjectUseCases, createProjectUseCasesProject, createPublicCode, createTaskService, createTestingUseCases,
+  createProjectUseCases, createProjectUseCasesProject, createPublicCode, createTaskService, createTaskWebDelivery,
+  createTaskWebExecution, createTestingUseCases, createVerificationUseCases,
   findProjectByCode, findUserByCode, isProjectManager, resolveProjectAccess,
 } from '@team-synergy/application';
 import {
   ArtifactKindSchema, CodeGraphQuerySchema, MemoryBriefInput, MemoryDocumentReadInput, MemorySearchQuery, MemorySourcesInput,
   ProfileSchema, ProjectMaterialGlobInput, ProjectMaterialGrepInput, ProjectMaterialListInput,
-  ProjectMaterialReadInput, PublicCodeSchema, TaskSourceSchema, TaskStatusSchema,
+  ProjectMaterialReadInput, PublicCodeSchema, TaskCancelExecutionCommandSchema, TaskFinishReviewCommandSchema,
+  TaskSourceSchema, TaskStartReviewCommandSchema, TaskStatusSchema,
   agentWorkspaceActions, agentWorkspaceInputSchema, agentWorkspaceRoleAllows,
 } from '@team-synergy/contracts';
 import { DomainError } from '@team-synergy/domain';
@@ -27,6 +29,10 @@ const empty = z.strictObject({});
 const snapshot = z.int().min(0).max(2147483647);
 const taskCode = z.strictObject({ task_code: PublicCodeSchema });
 const taskAction = taskCode.extend({ base_snapshot: snapshot });
+const taskCancel = TaskCancelExecutionCommandSchema.omit({ action: true }).extend(taskCode.shape);
+const taskReviewStart = TaskStartReviewCommandSchema.omit({ action: true }).extend(taskCode.shape);
+const taskReviewFinish = TaskFinishReviewCommandSchema.omit({ action: true }).extend(taskCode.shape);
+const managerTaskTools = new Set(['assign_task', 'cancel_task', 'close_task']);
 const text = (max: number) => z.string().trim().min(1).max(max);
 const sha = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 const httpsUrl = z.url({ protocol: /^https$/ }).max(2048).refine(value => {
@@ -139,6 +145,9 @@ export function remoteMcpTools(db: Db, grant: RemoteMcpGrant, request: RemoteMcp
     return httpsUrl.safeParse(uri).success ? uri : null;
   }
   const tasks = createTaskService(db);
+  const execution = createTaskWebExecution(db);
+  const delivery = createTaskWebDelivery(db);
+  const verification = createVerificationUseCases(db);
   const projects = createProjectUseCases(db);
   const projectRegistry = createProjectUseCasesProject(db);
   const documents = createProjectMaterialQueryUseCases(db);
@@ -165,8 +174,8 @@ export function remoteMcpTools(db: Db, grant: RemoteMcpGrant, request: RemoteMcp
 
   function projectCapability<S extends z.ZodObject>(
     module: RemoteMcpToolModule, name: string, description: string, schema: S,
-    action: (args: z.output<S>, actor: ProjectActor) => Promise<unknown>,
-    write?: { idempotentHint: boolean },
+    action: (args: z.output<S>, actor: ProjectActor, allowTaskWrite: boolean) => Promise<unknown>,
+    write?: { idempotentHint: boolean; destructiveHint?: boolean },
   ) {
     const scoped = schema.safeExtend({ projectCode: accountScoped ? projectSelector : projectSelector.optional() });
     return capability(module, name, description, scoped, async (input) => {
@@ -175,11 +184,12 @@ export function remoteMcpTools(db: Db, grant: RemoteMcpGrant, request: RemoteMcp
       if (!target) throw new DomainError('connector_project_required', '请先确认项目，并在本次调用传入 projectCode');
       const principal = await currentPrincipal();
       const { project, role } = await projectAccess(target, principal);
-      if (write && (!grant.allowTaskWrite || role === 'viewer')) {
+      const allowTaskWrite = grant.allowTaskWrite && role !== 'viewer';
+      if (write && !allowTaskWrite) {
         throw new DomainError('project_forbidden', '当前项目权限不足，无法执行协作操作');
       }
       // The project parameter authorizes this call and never enters a downstream operation payload.
-      return action(params as z.output<S>, { projectCode: project.code, principalCode: principal.code });
+      return action(params as z.output<S>, { projectCode: project.code, principalCode: principal.code }, allowTaskWrite);
     }, write);
   }
 
@@ -320,6 +330,23 @@ export function remoteMcpTools(db: Db, grant: RemoteMcpGrant, request: RemoteMcp
           ({ artifact_code, run_code, kind, title, content_hash, uri: artifactUrl(actor.projectCode, uri) })),
       });
     }),
+    projectCapability('tasks', 'get_task_workflow', '查任务当前快照、Run、取消所需确认、交付版本与验收资格。用 get_task 核对验收项与证据。', taskCode, async ({ task_code }, actor, allowTaskWrite) => {
+      await assertProjectObject(actor.projectCode, 'task', task_code);
+      const [executionView, deliveryView] = await Promise.all([
+        execution.inspect(task_code, actor.principalCode), delivery.inspect(task_code, actor.principalCode),
+      ]);
+      return withTaskLink(actor.projectCode, {
+        task_code, status: executionView.status, base_snapshot: executionView.base_snapshot, allowTaskWrite,
+        execution: allowTaskWrite ? executionView : {
+          ...executionView, can_manage: false, can_release: false, can_recover: false, can_cancel: false, can_cancel_execution: false,
+          recovery_requires_confirmation: false, cancellation_requires_confirmation: false,
+        },
+        delivery: {
+          ...deliveryView, submission_uri: deliveryView.submission_uri && artifactUrl(actor.projectCode, deliveryView.submission_uri),
+          ...(allowTaskWrite ? {} : { can_record_delivery: false, can_assign_review: false, can_start_review: false, can_finish_review: false }),
+        },
+      });
+    }),
     projectCapability('projects', 'list_project_members', '查当前项目成员编码、显示名称和角色，供分派时匹配对象。', empty, async (_, actor) => {
       const members = await createMemberUseCases(db).listMembers(actor.projectCode, actor.principalCode);
       return members.map(({ user_code, display_name, role }) => ({ user_code, display_name, role }));
@@ -368,6 +395,28 @@ export function remoteMcpTools(db: Db, grant: RemoteMcpGrant, request: RemoteMcp
             command: evidence.command, summary: evidence.summary },
         })));
       }, { idempotentHint: false }),
+    projectCapability('tasks', 'cancel_task', '项目负责人或管理员取消未交付任务，包括执行中任务。先查 get_task_workflow，提供最新快照与原因；可能仍在运行时，在操作者确认中止后传 confirm_active。', taskCancel,
+      async ({ task_code, ...args }, actor) => {
+        await assertProjectObject(actor.projectCode, 'task', task_code);
+        return withTaskLink(actor.projectCode, await execution.apply(task_code, actor.principalCode, { action: 'cancel_execution', ...args }, 'mcp'));
+      }, { idempotentHint: false, destructiveHint: true }),
+    projectCapability('tasks', 'start_task_review', '非成果作者开始独立验收。先确认 get_task_workflow 的交付与验收人，提供最新任务快照。', taskReviewStart,
+      async ({ task_code, ...args }, actor) => {
+        await assertProjectObject(actor.projectCode, 'task', task_code);
+        return withTaskLink(actor.projectCode, await delivery.apply(task_code, actor.principalCode, { action: 'start_review', ...args }, 'mcp'));
+      }, { idempotentHint: false }),
+    projectCapability('tasks', 'finish_task_review', '对当前提交登记验收通过、退回或要求补证。传交付编码、最新快照与实际结论，通过须覆盖全部验收项。', taskReviewFinish,
+      async ({ task_code, ...args }, actor) => {
+        await assertProjectObject(actor.projectCode, 'task', task_code);
+        return withTaskLink(actor.projectCode, await delivery.apply(task_code, actor.principalCode, { action: 'finish_review', ...args }, 'mcp'));
+      }, { idempotentHint: false }),
+    projectCapability('tasks', 'close_task', '项目负责人或管理员关闭已独立验收通过的任务。使用最新快照。', taskAction,
+      async ({ task_code, base_snapshot }, actor) => {
+        await assertProjectObject(actor.projectCode, 'task', task_code);
+        return withTaskLink(actor.projectCode, dataOf<{ task_code: string; status: 'closed'; base_snapshot: number }>(await verification.closeTask({
+          taskCode: task_code, principalCode: actor.principalCode, baseSnapshot: base_snapshot,
+        })));
+      }, { idempotentHint: false }),
     projectCapability('testing', 'record_test_execution', '登记项目已有用例的实际测试结果、执行环境、版本和证据链接，关联到对应任务。用于登记已验证事实，任务状态由执行流程更新。', testRun,
       async (args, actor) => {
         await assertProjectObject(actor.projectCode, 'task', args.task_code);
@@ -385,7 +434,7 @@ export function remoteMcpTools(db: Db, grant: RemoteMcpGrant, request: RemoteMcp
       const target = input.projectCode ?? grant.projectCode;
       if (target) {
         const { role } = await projectAccess(target, await currentPrincipal());
-        visibleWrites = role === 'viewer' ? [] : write.filter(tool => tool.name !== 'assign_task' || isProjectManager(role));
+        visibleWrites = role === 'viewer' ? [] : write.filter(tool => !managerTaskTools.has(tool.name) || isProjectManager(role));
         visibleWorkspace = workspace.filter(({ action }) => action.scope === 'account' || agentWorkspaceRoleAllows(action, role));
       }
       return searchRemoteMcpTools([search, ...read, ...visibleWrites, ...visibleWorkspace.map(({ tool }) => tool)], input);

@@ -16,6 +16,7 @@ type Actor = typeof users.$inferSelect;
 type Review = typeof taskWebReviews.$inferSelect;
 type DeliveryCommand = Extract<TaskWebDeliveryCommand, { action: 'record_delivery' }>;
 type ReviewAction = Exclude<TaskWebDeliveryCommand, DeliveryCommand>;
+type ActionSource = 'web' | 'mcp' | 'cli';
 const liveStatuses = ['active', 'suspended', 'preparing'] as const;
 const manualDeliveryStates: ReadonlySet<Task['status']> = new Set(['assigned', 'running', 'self_tested']);
 type Submission = {
@@ -147,7 +148,7 @@ async function recordChange(tx: Tx, task: Task, actor: Actor, action: string, st
     .where(eq(tasks.id, task.id));
   const audit = { entity_type: 'task', entity_id: task.id, legacy_entity_code: task.legacy_code ?? undefined,
     principal_id: actor.id, from: task.status, to: status, base_snapshot: task.base_snapshot, action,
-    payload: { source: 'web', ...payload } };
+    payload };
   assertAuditedChange(audit);
   await insertAudit(tx, toAuditEvent(audit, createPublicCode(), new Date().toISOString()));
   return { task_code: task.code, status, base_snapshot: nextSnapshot };
@@ -159,7 +160,7 @@ function requireIndependence(submission: Submission, reviewerId: bigint) {
   }
 }
 
-async function recordDelivery(tx: Tx, task: Task, actor: Actor, projectId: bigint, manager: boolean, command: DeliveryCommand) {
+async function recordDelivery(tx: Tx, task: Task, actor: Actor, projectId: bigint, manager: boolean, command: DeliveryCommand, source: ActionSource) {
   if (!manager && task.assignee_principal_id !== actor.id) throw new DomainError('task_delivery_forbidden', '只有当前执行人或项目管理者可以登记交付');
   const { refs } = checkedRefs(task, command.acceptance_refs, true);
   if (task.status === 'assigned' && await hasUnfinishedDependencies(tx, task.id)) {
@@ -182,7 +183,7 @@ async function recordDelivery(tx: Tx, task: Task, actor: Actor, projectId: bigin
     await tx.update(taskWebReviews).set({ status: 'assigned', started_at: null, reason: null, updated_at: evidence.recorded_at })
       .where(eq(taskWebReviews.id, review.id));
     return recordChange(tx, task, actor, 'task.web_evidence_supplemented', 'submitted',
-      { artifact_code: submission.artifact.code, evidence_code: evidence.evidence_code });
+      { source, artifact_code: submission.artifact.code, evidence_code: evidence.evidence_code });
   }
 
   if (!manualDeliveryStates.has(task.status)) throw new DomainError('task_delivery_state_invalid', '任务当前阶段不能登记交付');
@@ -200,16 +201,16 @@ async function recordDelivery(tx: Tx, task: Task, actor: Actor, projectId: bigin
   await tx.insert(taskWebSubmissions).values({ task_id: task.id, artifact_id: artifact.id, evidence_id: evidenceId,
     author_principal_id: author.id, registrar_principal_id: actor.id, submission_snapshot: task.base_snapshot + 1 });
   return recordChange(tx, task, actor, 'task.submitted', 'submitted',
-    { artifact_code: artifact.code, evidence_code: evidence.evidence_code, author_code: author.code, registrar_code: actor.code });
+    { source, artifact_code: artifact.code, evidence_code: evidence.evidence_code, author_code: author.code, registrar_code: actor.code });
 }
 
-async function applyReview(tx: Tx, task: Task, actor: Actor, manager: boolean, projectId: bigint, command: ReviewAction) {
+async function applyReview(tx: Tx, task: Task, actor: Actor, manager: boolean, projectId: bigint, command: ReviewAction, source: ActionSource) {
   if (task.status !== 'submitted') throw new DomainError('task_review_state_invalid', '只有已提交的任务可以发起验收');
   const submission = await currentSubmission(tx, task.id);
   if (!submission) throw new DomainError('task_review_submission_missing', '当前提交缺少可核验的产物和自测记录');
   const review = await currentReview(tx, task.id, submission);
   const outstanding = await outstandingRuns(tx, task.id);
-  const artifact = { artifact_code: submission.artifact.code };
+  const audit = { source, artifact_code: submission.artifact.code };
 
   if (command.action === 'assign_review') {
     if (!manager) throw new DomainError('task_review_manage_forbidden', '只有项目管理者可以指派验收人');
@@ -238,7 +239,7 @@ async function applyReview(tx: Tx, task: Task, actor: Actor, manager: boolean, p
     await tx.insert(taskWebReviews).values({ task_id: task.id, artifact_id: submission.artifact.id, submission_event_id: submission.eventId,
       reviewer_principal_id: reviewer.id, status: 'assigned', reason: command.reason });
     return recordChange(tx, task, actor, 'task.web_review_assigned', 'submitted',
-      { ...artifact, reviewer_code: reviewer.code, reason: command.reason, cancelled_run_codes: outstanding.map(run => run.code) }, outstanding.length > 0);
+      { ...audit, reviewer_code: reviewer.code, reason: command.reason, cancelled_run_codes: outstanding.map(run => run.code) }, outstanding.length > 0);
   }
 
   requireIndependence(submission, actor.id);
@@ -251,7 +252,7 @@ async function applyReview(tx: Tx, task: Task, actor: Actor, manager: boolean, p
     if (review) await tx.update(taskWebReviews).set({ status: 'in_progress', started_at: now, updated_at: now }).where(eq(taskWebReviews.id, review.id));
     else await tx.insert(taskWebReviews).values({ task_id: task.id, artifact_id: submission.artifact.id, submission_event_id: submission.eventId,
       reviewer_principal_id: actor.id, status: 'in_progress', started_at: now, updated_at: now });
-    return recordChange(tx, task, actor, 'task.web_review_started', 'submitted', { ...artifact, reviewer_code: actor.code });
+    return recordChange(tx, task, actor, 'task.web_review_started', 'submitted', { ...audit, reviewer_code: actor.code });
   }
 
   if (command.submission_code !== submission.artifact.code) {
@@ -271,7 +272,7 @@ async function applyReview(tx: Tx, task: Task, actor: Actor, manager: boolean, p
     evidence_id: evidenceId, reason: command.summary, updated_at: evidence.recorded_at }).where(eq(taskWebReviews.id, review.id));
   const action = next === 'verified' ? 'task.verified' : next === 'failed' ? 'task.verification_failed' : 'task.web_evidence_requested';
   return recordChange(tx, task, actor, action, next,
-    { ...artifact, evidence_code: evidence.evidence_code, reviewer_code: actor.code, reason: command.summary });
+    { ...audit, evidence_code: evidence.evidence_code, reviewer_code: actor.code, reason: command.summary });
 }
 
 export function createTaskWebDelivery(db: Db) {
@@ -329,7 +330,7 @@ export function createTaskWebDelivery(db: Db) {
         ...(reason ? { reason } : {}),
       };
     },
-    async apply(taskCode: string, principalCode: string, command: TaskWebDeliveryCommand) {
+    async apply(taskCode: string, principalCode: string, command: TaskWebDeliveryCommand, source: ActionSource = 'web') {
       return db.transaction(async (tx) => {
         await lockTaskProject(tx, taskCode);
         const { actor, task, projectId, role } = await scope(tx, taskCode, principalCode, true);
@@ -338,11 +339,11 @@ export function createTaskWebDelivery(db: Db) {
         }
         await assertNoPendingHandover(tx, task.id);
         const manager = isProjectManager(role);
-        if (command.action !== 'record_delivery') return applyReview(tx, task, actor, manager, projectId, command);
+        if (command.action !== 'record_delivery') return applyReview(tx, task, actor, manager, projectId, command, source);
         if ((await outstandingRuns(tx, task.id)).length > 0) {
           throw new DomainError('task_run_active', '当前还有 Run，请先处理执行或验收');
         }
-        return recordDelivery(tx, task, actor, projectId, manager, command);
+        return recordDelivery(tx, task, actor, projectId, manager, command, source);
       });
     },
   };

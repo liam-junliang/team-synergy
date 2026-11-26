@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type { TaskWebExecutionCommand } from '@team-synergy/contracts';
-import { DomainError, toAuditEvent } from '@team-synergy/domain';
+import { canCancelTaskExecution, canTransition, DomainError, toAuditEvent, transitionOrThrow } from '@team-synergy/domain';
 import { schema, type Db } from '@team-synergy/persistence';
 import { lockAggregate } from './aggregate-lock.js';
 import { assertNoPendingHandover, UNRESOLVED_HANDOVER_STATUSES } from './execution-guard.js';
@@ -19,7 +19,7 @@ const liveRunStatuses = ['active', 'preparing', 'suspended'] as const;
 
 interface ExecutionResult {
   task_code: string;
-  status: 'draft' | 'ready' | 'assigned';
+  status: 'draft' | 'ready' | 'assigned' | 'cancelled';
   base_snapshot: number;
   assignee_principal_code: string | null;
   execution_epoch: number;
@@ -75,6 +75,21 @@ export function isTaskWebExecutionRecoverable(status: Task['status'], hasLiveRun
     || (hasLiveRun && (status === 'blocked' || status === 'failed' || status === 'assigned'));
 }
 
+function canCancelStartedTask(status: Task['status'], hasLiveRun: boolean): boolean {
+  return canCancelTaskExecution(status) && (status !== 'blocked' || hasLiveRun);
+}
+
+function needsCancellationConfirmation(run: ExecutionRun, task: Task, health: ExecutionHealth): boolean {
+  // assertExecutionWrite allows an active epoch-zero Run to write without a lease.
+  return health !== 'expired' || (run.status === 'active' && run.execution_epoch === 0 && task.execution_epoch === 0);
+}
+
+async function runRequiringCancellationConfirmation(db: ReadDb, task: Task, runs: ExecutionRun[]) {
+  for (const run of runs) {
+    if (needsCancellationConfirmation(run, task, (await leaseHealth(db, run, task)).health)) return run;
+  }
+}
+
 async function observedRun(db: ReadDb, run: ExecutionRun | undefined) {
   if (!run) return { lastHeartbeatAt: null, gitBase: null };
   const { agentSessions, auditEvents, workspaces } = schema;
@@ -109,16 +124,25 @@ export function createTaskWebExecution(db: Db) {
     const canManage = project.status === 'active' && isProjectManager(access.role);
     const canRecover = canManage && !pending && isTaskWebExecutionRecoverable(task.status, run !== undefined);
     const canRelease = canManage && !pending && task.status === 'assigned' && !run;
+    const canCancelExecution = canManage && !pending && canCancelStartedTask(task.status, run !== undefined);
+    const canCancel = canCancelExecution || (canManage && !pending && canTransition(task.status, 'cancelled'));
+    const cancellationRequiresConfirmation = canCancel && run !== undefined &&
+      (needsCancellationConfirmation(run, task, lease.health) ||
+        Boolean(await runRequiringCancellationConfirmation(db, task, runs.filter(item => item !== run))));
     const reason = project.status !== 'active' ? 'project_archived'
       : !canManage ? 'project_forbidden'
         : pending ? 'task_handover_pending'
           : !canRecover && !canRelease ? 'task_recovery_unavailable' : undefined;
     return {
+      status: task.status,
       base_snapshot: task.base_snapshot,
       can_manage: canManage,
       can_recover: canRecover,
       recovery_requires_confirmation: canRecover && active !== undefined && lease.health !== 'expired',
       can_release: canRelease,
+      can_cancel: canCancel,
+      can_cancel_execution: canCancelExecution,
+      cancellation_requires_confirmation: cancellationRequiresConfirmation,
       execution_health: lease.health,
       running_since: run?.started_at ?? null,
       run_code: run?.code ?? null,
@@ -129,7 +153,8 @@ export function createTaskWebExecution(db: Db) {
     };
   }
 
-  async function apply(taskCode: string, principalCode: string, command: TaskWebExecutionCommand): Promise<ExecutionResult> {
+  async function apply(taskCode: string, principalCode: string, command: TaskWebExecutionCommand,
+    source: 'web' | 'mcp' | 'cli' = 'web'): Promise<ExecutionResult> {
     const reason = command.reason.trim();
     if (!reason || reason.length > 2000) throw new DomainError('validation_failed', '请填写 1 至 2000 个字符的操作原因');
     if (!Number.isSafeInteger(command.base_snapshot) || command.base_snapshot < 0) {
@@ -140,7 +165,7 @@ export function createTaskWebExecution(db: Db) {
       loadTaskScope(db, taskCode), findUserByCode(db, principalCode), targetCode ? findUserByCode(db, targetCode) : undefined,
     ]);
     if (!actor) throw new DomainError('user_not_found', '操作账号不存在');
-    const confirmActive = command.action === 'recover_execution' && command.confirm_active === true;
+    const confirmActive = command.action !== 'release_assignment' && command.confirm_active === true;
     const requestHash = command.idempotency_key ? createHash('sha256').update(JSON.stringify({
       action: command.action, base_snapshot: command.base_snapshot, reason, targetCode, confirmActive,
     })).digest('hex') : null;
@@ -180,7 +205,17 @@ export function createTaskWebExecution(db: Db) {
 
       const runs = await liveRuns(tx, currentTask.id);
       const releasing = command.action === 'release_assignment';
-      if (releasing) {
+      const cancelling = command.action === 'cancel_execution';
+      const cancelStartedTask = cancelling && canCancelStartedTask(currentTask.status, runs.length > 0);
+      if (cancelling) {
+        if (!cancelStartedTask && !canTransition(currentTask.status, 'cancelled')) {
+          throw new DomainError('task_cancel_locked', '任务当前状态不能取消', { status: currentTask.status });
+        }
+        const run = confirmActive ? undefined : await runRequiringCancellationConfirmation(tx, currentTask, runs);
+        if (run) {
+          throw new DomainError('task_execution_confirmation_required', '当前执行仍可能在运行，请确认中止后再取消任务', { run_code: run.code });
+        }
+      } else if (releasing) {
         if (currentTask.status !== 'assigned') throw new DomainError('task_recovery_unavailable', '只有待领取的任务可以收回分派');
         if (runs.length) throw new DomainError('task_run_active', '任务仍有未结束的执行，请先处理该 Run');
       } else {
@@ -197,23 +232,30 @@ export function createTaskWebExecution(db: Db) {
       const acceptance = parseAcceptance(currentTask.acceptance);
       const hasAcceptance = Array.isArray(acceptance) && acceptance.length > 0;
       if (assignee && !hasAcceptance) throw new DomainError('acceptance_required', '请先收回到草稿，再补充验收标准并分派');
-      const status = assignee ? 'assigned' : hasAcceptance ? 'ready' : 'draft';
+      const status = cancelling ? 'cancelled' : assignee ? 'assigned' : hasAcceptance ? 'ready' : 'draft';
       const updatedAt = new Date().toISOString();
-      const executionEpoch = currentTask.execution_epoch + (releasing ? 0 : 1);
-      if (!releasing) {
+      const stopExecution = !releasing && (!cancelling || cancelStartedTask || runs.length > 0);
+      const executionEpoch = currentTask.execution_epoch + (stopExecution ? 1 : 0);
+      if (stopExecution) {
         const { agentSessions, runLeases, runs: runTable } = schema;
         const taskRunIds = tx.select({ id: runTable.id }).from(runTable).where(eq(runTable.task_id, currentTask.id));
         await tx.update(runLeases).set({ revoked_at: updatedAt })
           .where(and(inArray(runLeases.run_id, taskRunIds), isNull(runLeases.revoked_at)));
         await tx.update(agentSessions).set({
-          status: 'cancelled', finished_at: updatedAt, last_error: '旧执行已由项目负责人在网页收回',
+          status: 'cancelled', finished_at: updatedAt, last_error: cancelling ? '任务已由项目管理者取消' : '旧执行已由项目负责人在网页收回',
         }).where(and(inArray(agentSessions.run_id, taskRunIds), inArray(agentSessions.status, ['starting', 'running'])));
         await tx.update(runTable).set({ status: 'cancelled', finished_at: updatedAt })
           .where(and(eq(runTable.task_id, currentTask.id), inArray(runTable.status, liveRunStatuses)));
       }
 
+      if (cancelling) {
+        transitionOrThrow(currentTask.status, 'cancelled', {
+          task: { acceptance }, evidence: { selfTestEvidence: [], verifierEvidence: [], artifactCount: 0 },
+          profile: currentTask.profile, executionStopped: stopExecution,
+        });
+      }
       const [updated] = await tx.update(schema.tasks).set({
-        status, assignee_principal_id: assignee?.id ?? null,
+        status, assignee_principal_id: cancelling ? currentTask.assignee_principal_id : assignee?.id ?? null,
         execution_epoch: executionEpoch, base_snapshot: currentTask.base_snapshot + 1,
       }).where(and(eq(schema.tasks.id, currentTask.id), eq(schema.tasks.base_snapshot, currentTask.base_snapshot),
         eq(schema.tasks.status, currentTask.status))).returning({ snapshot: schema.tasks.base_snapshot });
@@ -225,16 +267,16 @@ export function createTaskWebExecution(db: Db) {
         : [];
       const result: ExecutionResult = {
         task_code: currentTask.code, status, base_snapshot: updated.snapshot,
-        assignee_principal_code: assignee?.code ?? null, execution_epoch: executionEpoch,
+        assignee_principal_code: (cancelling ? previousAssignee?.code : assignee?.code) ?? null, execution_epoch: executionEpoch,
         stopped_run_codes: runs.map(run => run.code),
       };
       await insertAudit(tx, toAuditEvent({
         entity_type: 'task', entity_id: currentTask.id, legacy_entity_code: currentTask.legacy_code ?? undefined,
         principal_id: actor.id, run_id: runs.find(run => run.status === 'active')?.id ?? runs[0]?.id,
-        action: releasing ? 'task.assignment_released' : 'task.execution_recovered',
+        action: cancelling ? 'task.cancelled' : releasing ? 'task.assignment_released' : 'task.execution_recovered',
         base_snapshot: currentTask.base_snapshot, from: currentTask.status, to: status,
         payload: {
-          source: 'web', reason, previous_assignee_code: previousAssignee?.code ?? null,
+          source, reason, previous_assignee_code: previousAssignee?.code ?? null,
           assignee_code: result.assignee_principal_code, stopped_run_codes: result.stopped_run_codes,
           execution_epoch: executionEpoch,
         },
