@@ -30,7 +30,9 @@ export function registerTaskWebWorkflowRoutes(app: FastifyInstance, db: Db): voi
       const [executionView, deliveryView] = await Promise.all([
         execution.inspect(code.data, actor), delivery.inspect(code.data, actor),
       ]);
-      return { ok: true as const, data: { execution: executionView, delivery: deliveryView } };
+      return { ok: true as const, data: {
+        status: executionView.status, base_snapshot: executionView.base_snapshot, execution: executionView, delivery: deliveryView,
+      } };
     } catch (error) { return fail(error); }
   });
   app.post<{ Params: { task_code: string }; Body: unknown }>('/tasks/:task_code/web-workflow', { bodyLimit: 32_768 }, async (request, reply) => {
@@ -40,10 +42,12 @@ export function registerTaskWebWorkflowRoutes(app: FastifyInstance, db: Db): voi
     if (!code.success) return invalid('需要有效的任务编码');
     if (!command.success) return invalid('请核对任务版本、操作原因、成果链接与验收项');
     const actor = request.principal ?? '';
+    const source = request.authKind === 'bearer' ? 'cli' : 'web';
     try {
-      const data = command.data.action === 'recover_execution' || command.data.action === 'release_assignment'
-        ? await execution.apply(code.data, actor, command.data)
-        : await delivery.apply(code.data, actor, command.data);
+      const action = command.data.action;
+      const data = action === 'recover_execution' || action === 'release_assignment' || action === 'cancel_execution'
+        ? await execution.apply(code.data, actor, command.data, source)
+        : await delivery.apply(code.data, actor, command.data, source);
       return { ok: true as const, data };
     } catch (error) { return fail(error); }
   });

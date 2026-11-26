@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { and, eq } from 'drizzle-orm';
-import { createMemorySliceUseCases, hashPassword } from '@team-synergy/application';
+import { createAuthUseCases, createMemorySliceUseCases, hashPassword } from '@team-synergy/application';
 import { schema } from '@team-synergy/persistence';
 import { configuredRemoteMcpUrl } from '../dist/remote-mcp.js';
 import { remoteMcpRelease, serviceVersion } from '../dist/remote-mcp-release.js';
@@ -63,6 +63,174 @@ async function fixture(t) {
 
   return { app, db, owner, member, team, project, other, feature, otherFeature, grant, mcp };
 }
+
+async function claimFixtureTask({ owner, member, project, feature, grant, mcp }, acceptance) {
+  async function connect(actor) {
+    const { token } = await grant(actor, { projectCode: null, allowTaskWrite: true });
+    const invoke = async (name, args) => {
+      const response = await mcp(token, 'tools/call', { name, arguments: { projectCode: project.code, ...args } });
+      assert.equal(response.status, 200, JSON.stringify(response.body));
+      assert.ok(response.body.result, JSON.stringify(response.body));
+      return response.body.result;
+    };
+    return {
+      async call(name, args) {
+        const result = await invoke(name, args);
+        assert.equal(result.isError, false, JSON.stringify(result));
+        return result.structuredContent;
+      },
+      async rejects(name, args, code) {
+        const result = await invoke(name, args);
+        assert.equal(result.isError, true, JSON.stringify(result));
+        assert.equal(result.structuredContent.error.code, code, JSON.stringify(result));
+      },
+    };
+  }
+  const manager = await connect(owner);
+  const builder = await connect(member);
+  const created = await manager.call('create_task_draft', { feature_code: feature.code, title: 'Exercise task completion',
+    idempotency_key: 'fixture-task', acceptance });
+  const assigned = await manager.call('assign_task', { task_code: created.task_code,
+    base_snapshot: created.base_snapshot, assignee_principal_code: member.code });
+  const active = await builder.call('claim_task', { task_code: assigned.task_code, base_snapshot: assigned.base_snapshot,
+    workspace_url: 'https://executor.example.test/approval-fixture', git_base: 'a'.repeat(40) });
+  return { manager, builder, active };
+}
+
+test('HTTP MCP cancellation invalidates the old Run and preserves prior evidence', async t => {
+  const f = await fixture(t);
+  const { app, db, member, owner, project } = f;
+  const { manager, builder, active } = await claimFixtureTask(f, [{ id: 'AC-1', text: 'Open the report' }]);
+  const { task_code, run_code } = active;
+  const [task] = await db.select().from(schema.tasks).where(eq(schema.tasks.code, task_code));
+  const [run] = await db.select().from(schema.runs).where(eq(schema.runs.code, run_code));
+  const auth = await createAuthUseCases(db).loginWithPassword(member.account, password, 'Run fixture device');
+  assert.equal(auth.ok, true, JSON.stringify(auth.error));
+  const deviceCall = (url, payload) => app.inject({
+    method: 'POST', url, headers: { authorization: 'Bearer ' + auth.data.device_token }, payload,
+  }).then(response => response.json());
+  const issued = await deviceCall(`/runs/${run_code}/lease`, { execution_epoch: run.execution_epoch });
+  assert.equal(issued.ok, true, JSON.stringify(issued.error));
+  const execution = { lease_token: issued.data.lease_token, execution_epoch: issued.data.execution_epoch };
+  const started = await deviceCall(`/runs/${run_code}/sessions`, {
+    ...execution, start_key: 'cancel-fixture', agent_command: 'fixture command',
+  });
+  assert.equal(started.ok, true, JSON.stringify(started));
+  const stateUrl = `/agent-sessions/${started.data.session_code}/state`;
+  const heartbeat = await deviceCall(stateUrl, { ...execution, status: 'running', last_output: 'Retained output' });
+  assert.equal(heartbeat.ok, true, JSON.stringify(heartbeat));
+  const now = new Date().toISOString();
+  const [priorEvidence] = await db.insert(schema.evidences).values({
+    task_id: task.id, run_id: run.id, type: 'manual', result: 'pass', summary: 'Evidence from before cancellation', recorded_at: now,
+  }).returning();
+
+  const before = await manager.call('get_task_workflow', { task_code });
+  assert.equal(before.status, 'running');
+  assert.equal(before.base_snapshot, before.execution.base_snapshot);
+  assert.equal(before.url, origin + '/projects/' + project.code + '/board?task=' + task_code);
+  assert.equal(before.execution.run_code, run_code);
+  assert.equal(before.execution.can_cancel_execution, true);
+  assert.equal(before.execution.cancellation_requires_confirmation, true);
+  const cancel = { task_code, base_snapshot: before.execution.base_snapshot, reason: 'Work no longer required',
+    idempotency_key: 'cancel-old-run' };
+  await builder.rejects('cancel_task', { ...cancel, confirm_active: true }, 'project_forbidden');
+  await manager.rejects('cancel_task', { ...cancel, base_snapshot: cancel.base_snapshot - 1, confirm_active: true }, 'base_snapshot_mismatch');
+  await manager.rejects('cancel_task', cancel, 'task_execution_confirmation_required');
+  assert.equal((await manager.call('get_task', { task_code })).status, 'running');
+
+  assert.equal(run.execution_epoch, 0);
+  await db.update(schema.runLeases).set({ expires_at: new Date(Date.now() - 60_000).toISOString() })
+    .where(eq(schema.runLeases.run_id, run.id));
+  const expired = await manager.call('get_task_workflow', { task_code });
+  assert.equal(expired.execution.execution_health, 'expired');
+  assert.equal(expired.execution.cancellation_requires_confirmation, true);
+  await manager.rejects('cancel_task', cancel, 'task_execution_confirmation_required');
+
+  const request = { ...cancel, confirm_active: true };
+  const cancelled = await manager.call('cancel_task', request);
+  assert.equal(cancelled.status, 'cancelled');
+  assert.equal(cancelled.base_snapshot, before.execution.base_snapshot + 1);
+  assert.deepEqual(await manager.call('cancel_task', request), cancelled);
+
+  const after = await manager.call('get_task', { task_code });
+  assert.equal(after.status, 'cancelled');
+  assert.equal(after.runs.find(row => row.run_code === run_code)?.status, 'cancelled');
+  assert.deepEqual(after.evidences.map(row => row.evidence_code), [priorEvidence.code]);
+
+  await builder.rejects('submit_task_evidence', {
+    task_code, run_code, base_snapshot: after.base_snapshot,
+    artifact: { kind: 'report', uri: 'https://executor.example.test/approval-fixture/report', content_hash: 'a'.repeat(64) },
+    evidence: { result: 'pass', acceptance_refs: ['AC-1'], summary: 'Delayed result from the cancelled Run' },
+  }, 'run_inactive');
+  const lateHeartbeat = await deviceCall(stateUrl, { ...execution, status: 'finished', last_output: 'Late output' });
+  assert.equal(lateHeartbeat.ok, false);
+  assert.equal(lateHeartbeat.error.code, 'run_inactive');
+  const afterLateSubmit = await manager.call('get_task', { task_code });
+  assert.equal(afterLateSubmit.status, 'cancelled');
+  assert.equal(afterLateSubmit.base_snapshot, after.base_snapshot);
+  assert.deepEqual(afterLateSubmit.artifacts, []);
+  assert.deepEqual(afterLateSubmit.evidences.map(row => row.evidence_code), [priorEvidence.code]);
+
+  const [retainedTask] = await db.select().from(schema.tasks).where(eq(schema.tasks.id, task.id));
+  const [stoppedSession] = await db.select().from(schema.agentSessions).where(eq(schema.agentSessions.code, started.data.session_code));
+  const [revokedLease] = await db.select().from(schema.runLeases).where(eq(schema.runLeases.run_id, run.id));
+  assert.equal(retainedTask.execution_epoch, task.execution_epoch + 1);
+  assert.equal(stoppedSession.status, 'cancelled');
+  assert.equal(stoppedSession.last_output, 'Retained output');
+  assert.ok(revokedLease.revoked_at);
+  const audit = await db.select().from(schema.auditEvents).where(and(eq(schema.auditEvents.entity_type, 'task'),
+    eq(schema.auditEvents.entity_id, task.id), eq(schema.auditEvents.to_state, 'cancelled')));
+  assert.equal(audit.length, 1);
+  assert.equal(audit[0].principal_id, owner.id);
+});
+
+test('HTTP MCP review requires every acceptance criterion before the manager can close the task', async t => {
+  const f = await fixture(t);
+  const ids = ['AC-1', 'AC-2'];
+  const { manager, builder, active } = await claimFixtureTask(f, [
+    { id: ids[0], text: 'Open the report' }, { id: ids[1], text: 'Confirm the regression did not recur' },
+  ]);
+  const { task_code, run_code } = active;
+  const running = await builder.call('get_task', { task_code });
+  const submitted = await builder.call('submit_task_evidence', {
+    task_code, run_code, base_snapshot: running.base_snapshot,
+    artifact: { kind: 'report', uri: 'https://executor.example.test/approval-fixture/report', content_hash: 'a'.repeat(64) },
+    evidence: { result: 'pass', acceptance_refs: ids, summary: 'Builder checked both criteria' },
+  });
+  assert.equal(submitted.status, 'submitted');
+  const { delivery } = await manager.call('get_task_workflow', { task_code });
+  assert.equal(delivery.can_start_review, true);
+  assert.equal(delivery.submission_author_code, f.member.code);
+  assert.ok(delivery.submission_code);
+  const start = { task_code, base_snapshot: delivery.base_snapshot };
+  await builder.rejects('start_task_review', start, 'task_review_self');
+  const started = await manager.call('start_task_review', start);
+  const inReview = await manager.call('get_task_workflow', { task_code });
+  assert.equal(inReview.delivery.can_finish_review, true);
+  assert.equal(inReview.delivery.reviewer_code, f.owner.code);
+  const review = { task_code, base_snapshot: started.base_snapshot, submission_code: delivery.submission_code,
+    result: 'pass', acceptance_refs: ids, summary: 'Independent reviewer confirmed the report and regression result' };
+  await manager.rejects('finish_task_review', { ...review, base_snapshot: start.base_snapshot }, 'base_snapshot_mismatch');
+  await manager.rejects('finish_task_review', { ...review, submission_code: '0'.repeat(20) }, 'task_review_submission_changed');
+  await manager.rejects('finish_task_review', { ...review, acceptance_refs: [ids[0]] }, 'acceptance_coverage_incomplete');
+  await manager.rejects('finish_task_review', { ...review, acceptance_refs: [ids[0], ids[0]] }, 'acceptance_coverage_incomplete');
+  const incomplete = await manager.call('get_task', { task_code });
+  assert.equal(incomplete.status, 'submitted');
+  assert.equal(incomplete.base_snapshot, started.base_snapshot);
+  assert.equal(incomplete.evidences.filter(row => row.type === 'verifier_review').length, 0);
+  await manager.rejects('close_task', { task_code, base_snapshot: started.base_snapshot }, 'close_not_verified');
+
+  const verified = await manager.call('finish_task_review', review);
+  assert.equal(verified.status, 'verified');
+  const closed = await manager.call('close_task', { task_code, base_snapshot: verified.base_snapshot });
+  assert.equal(closed.status, 'closed');
+  const complete = await manager.call('get_task', { task_code });
+  assert.equal(complete.status, 'closed');
+  const independent = complete.evidences.filter(row => row.type === 'verifier_review');
+  assert.equal(independent.length, 1);
+  assert.equal(independent[0].result, 'pass');
+  assert.deepEqual(independent[0].acceptance_refs, ids);
+});
 
 test('only exposes a configured same-origin HTTPS resource outside local development', () => {
   assert.equal(configuredRemoteMcpUrl({}), undefined);

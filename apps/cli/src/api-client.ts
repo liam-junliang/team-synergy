@@ -8,6 +8,7 @@
 import { authDirectory, matchesLocalDeviceFingerprint, readAuthConfig } from './auth-store.js';
 import { DeviceSessionError, localDeviceSession } from '@team-synergy/contracts/device-session';
 import type { CliLoginResult } from './browser-auth.js';
+import type { TaskWebWorkflowCommand } from '@team-synergy/contracts';
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -195,6 +196,12 @@ export function createApiClient(opts: ApiClientOptions) {
     /** 读取任务当前快照（乐观并发：带 snapshot 提交） */
     async getTask(taskCode: string): Promise<ApiResult<Record<string, unknown>>> {
       return request('GET', `/tasks/${encodeURIComponent(taskCode)}`);
+    },
+    async getTaskWorkflow(taskCode: string): Promise<ApiResult<Record<string, unknown>>> {
+      return request('GET', `/tasks/${encodeURIComponent(taskCode)}/web-workflow`);
+    },
+    async applyTaskWorkflow(taskCode: string, command: TaskWebWorkflowCommand): Promise<ApiResult<Record<string, unknown>>> {
+      return request('POST', `/tasks/${encodeURIComponent(taskCode)}/web-workflow`, command);
     },
     async getProjectDocument(projectCode: string): Promise<ApiResult<Record<string, unknown>>> {
       return request('GET', `/projects/${encodeURIComponent(projectCode)}/document`);

@@ -234,7 +234,7 @@ tsp task status TASK_CODE
 
 ## 9. 独立验收并关闭
 
-通过 Connector 提交后的任务可用 `get_task` 追踪状态与证据。独立验收和关闭在平台对应页面或按以下本机工作流完成。
+用 `get_task` 查验收项与证据，`get_task_workflow` 查最新快照、交付编码及验收人。独立验收者用 `start_task_review` 开始，使用新快照和已核验交付编码调用 `finish_task_review`。通过须覆盖全部验收项。项目负责人或管理员用 `close_task` 关闭 `verified` 任务。CLI 可用 `tsp task workflow`、`tsp task review-start`、`tsp task review-finish` 完成同一流程。
 
 ### 在待审提交上单独复测
 
@@ -260,6 +260,8 @@ tsp task status TASK_CODE
 ### 先查状态与阻塞证据
 
 遇到依赖、权限、目标分支、验收冲突或已有活跃 Run，回读任务详情和审计。将当前项目、任务、Run 或提交 SHA、已尝试的操作、实际报错和下一项所需决定交给操作者。需要新增工作时，按授权关联需求或缺陷。修改失败后先回读最新状态与权限，再决定是否重试。
+
+明确要取消时，项目负责人或管理员读取 `get_task_workflow` 后按最新快照和实际原因调用 `cancel_task`。CLI 执行中取消使用 `tsp task cancel TASK_CODE --execution --base-snapshot SNAPSHOT --reason "REASON"`。Run 仍可能运行时，确认中止后使用 `confirm_active: true` 或 CLI 的 `--confirm-active`。
 
 ```bash
 tsp task status TASK_CODE

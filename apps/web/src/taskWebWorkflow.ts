@@ -1,6 +1,7 @@
 import { fetchEnvelope } from './api';
-import type { TaskWebWorkflowCommand } from '../../../packages/contracts/src/task-web-workflow';
-export type { TaskWebWorkflowCommand } from '../../../packages/contracts/src/task-web-workflow';
+import type { TaskWebWorkflowCommand as ApiTaskWorkflowCommand } from '../../../packages/contracts/src/task-web-workflow';
+
+export type TaskWebWorkflowCommand = Exclude<ApiTaskWorkflowCommand, { action: 'cancel_execution' }>;
 
 export type TaskExecutionHealth = 'active' | 'expired' | 'unknown' | 'none';
 export type TaskReviewStatus = 'waiting' | 'in_progress' | 'needs_evidence' | 'passed' | 'returned' | null;

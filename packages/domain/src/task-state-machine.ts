@@ -7,6 +7,7 @@ import type { TaskStatus, TaskContract, Profile, Evidence } from '@team-synergy/
  *                             ↘ blocked（可回到 ready）   ↘ failed（可回到 ready）
  * submitted --验证失败(fail/inconclusive)--> failed（可回到 ready 重新执行）
  * draft / ready / assigned → cancelled（执行前取消）
+ * running / self_tested / blocked → cancelled（在同一事务内终止旧执行）
  *
  * guards（单入口 transitionOrThrow 统一校验，防止只调邻接断言绕过规则）：
  * - ready 需验收标准（架构不变量 2）；
@@ -30,6 +31,10 @@ export const TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
 
 export function canTransition(from: TaskStatus, to: TaskStatus): boolean {
   return TRANSITIONS[from].includes(to);
+}
+
+export function canCancelTaskExecution(status: TaskStatus): boolean {
+  return status === 'running' || status === 'self_tested' || status === 'blocked';
 }
 
 /** 结构化拒绝原因：状态转换被拒绝时返回原因（不抛异常） */
@@ -62,6 +67,8 @@ export interface TransitionContext {
   activeRun?: boolean;
   /** running → blocked 必须提供 */
   blockReason?: string;
+  /** 取消已开始的任务前，调用方必须在同一事务内终止旧执行并提升执行代数 */
+  executionStopped?: boolean;
 }
 
 /**
@@ -69,7 +76,9 @@ export interface TransitionContext {
  * 调用方不得绕过本入口单独使用 assertTransition（review 重要项 2）。
  */
 export function transitionOrThrow(from: TaskStatus, to: TaskStatus, ctx: TransitionContext): void {
-  assertTransition(from, to);
+  if (!(to === 'cancelled' && ctx.executionStopped && canCancelTaskExecution(from))) {
+    assertTransition(from, to);
+  }
 
   // 架构不变量 2：没有验收标准的 Task 不能进入 ready
   if (to === 'ready' && ctx.task.acceptance.length === 0) {

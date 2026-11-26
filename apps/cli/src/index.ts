@@ -46,7 +46,9 @@ import {
   ProfileSchema,
   PUBLIC_CODE_BYTE_LENGTH,
   TaskSourceSchema,
+  TaskStartReviewCommandSchema,
   TaskStatusSchema,
+  TaskWebWorkflowCommandSchema,
   publicCodeFromBytes,
 } from '@team-synergy/contracts';
 import { z } from 'zod';
@@ -423,7 +425,7 @@ project
   });
 
 // ---- task 命令族 ----
-const task = program.command('task').description('任务闭环：create / assign / claim / attach / run / submit / verify / close / history');
+const task = program.command('task').description('查看任务并处理分派、执行、取消、验收与关闭');
 
 task
   .command('list')
@@ -1053,16 +1055,59 @@ task
   });
 
 task
-  .command('cancel')
-  .description('取消尚未开始执行的任务（draft / ready / assigned；仅 Owner）')
+  .command('workflow')
+  .description('查看任务当前快照、执行状态、交付版本和验收操作')
   .argument('<task_code>')
-  .option('--reason <reason>', '取消原因')
-  .action(async (taskCode: string, opts: { reason?: string }) => {
+  .action(async (taskCode: string) => {
+    const result = await requireApiClient().getTaskWorkflow(taskCode);
+    printResult(result);
+    if (!result.ok) process.exitCode = 1;
+  });
+
+function taskWorkflowSnapshot(value?: string): number {
+  const parsed = TaskStartReviewCommandSchema.shape.base_snapshot.safeParse(value && /^\d+$/u.test(value) ? Number(value) : undefined);
+  if (!parsed.success) throw new DomainError('base_snapshot_required', '请用 --base-snapshot 提供 task workflow 返回的有效任务快照');
+  return parsed.data;
+}
+
+async function applyTaskWorkflow(taskCode: string, command: unknown) {
+  const parsed = TaskWebWorkflowCommandSchema.safeParse(command);
+  if (!parsed.success) {
+    throw new DomainError('validation_failed', parsed.error.issues.map(issue => `${issue.path.join('.') || 'command'} ${issue.message}`).join('，'));
+  }
+  const result = await requireApiClient().applyTaskWorkflow(taskCode, parsed.data);
+  printResult(result);
+  if (!result.ok) process.exitCode = 1;
+}
+
+task
+  .command('cancel')
+  .description('取消任务（负责人或管理员），已开始执行时使用 --execution')
+  .argument('<task_code>')
+  .option('--reason <reason>', '取消原因，执行中取消时必填')
+  .option('--base-snapshot <version>', 'task workflow 返回的任务快照，执行中取消时必填')
+  .option('--execution', '取消任务及其尚未结束的执行')
+  .option('--confirm-active', '确认中止可能仍在运行的执行')
+  .option('--idempotency-key <key>', '执行中取消的重试幂等键')
+  .action(async (taskCode: string, opts: {
+    reason?: string; baseSnapshot?: string; execution?: boolean; confirmActive?: boolean; idempotencyKey?: string;
+  }) => {
+    if (opts.execution) {
+      return applyTaskWorkflow(taskCode, {
+        action: 'cancel_execution', base_snapshot: taskWorkflowSnapshot(opts.baseSnapshot), reason: opts.reason,
+        confirm_active: opts.confirmActive, idempotency_key: opts.idempotencyKey,
+      });
+    }
+    if (opts.confirmActive || opts.idempotencyKey !== undefined) {
+      throw new DomainError('validation_failed', '使用 --confirm-active 或 --idempotency-key 时需要 --execution');
+    }
     try {
       const api = requireApiClient();
-      const current = unwrapApiResult(await api.getTask(taskCode));
+      const baseSnapshot = opts.baseSnapshot === undefined
+        ? unwrapApiResult(await api.getTask(taskCode)).base_snapshot
+        : taskWorkflowSnapshot(opts.baseSnapshot);
       const result = await api.cancelTask(taskCode, {
-        base_snapshot: typeof current.base_snapshot === 'number' ? current.base_snapshot : 0,
+        base_snapshot: typeof baseSnapshot === 'number' ? baseSnapshot : 0,
         reason: opts.reason,
       });
       printResult(result);
@@ -1072,6 +1117,33 @@ task
       process.exitCode = 1;
     }
   });
+
+task
+  .command('review-start')
+  .description('开始独立人工验收当前提交')
+  .argument('<task_code>')
+  .requiredOption('--base-snapshot <version>', 'task workflow 返回的当前任务快照')
+  .action((taskCode: string, opts: { baseSnapshot: string }) => applyTaskWorkflow(taskCode, {
+    action: 'start_review', base_snapshot: taskWorkflowSnapshot(opts.baseSnapshot),
+  }));
+
+task
+  .command('review-finish')
+  .description('记录人工验收结论，通过时覆盖全部验收项')
+  .argument('<task_code>')
+  .requiredOption('--base-snapshot <version>', '验收开始后的当前任务快照')
+  .requiredOption('--submission-code <code>', 'task workflow 返回的交付编码')
+  .requiredOption('--result <result>', 'pass / return / request_evidence')
+  .requiredOption('--summary <text>', '验收观察与结论')
+  .option('--acceptance-refs <ids>', '覆盖的验收标准 ID，逗号分隔，提出补证时可省略')
+  .option('--report-uri <url>', '验收报告的 HTTPS 链接')
+  .action((taskCode: string, opts: {
+    baseSnapshot: string; submissionCode: string; result: string; summary: string; acceptanceRefs?: string; reportUri?: string;
+  }) => applyTaskWorkflow(taskCode, {
+    action: 'finish_review', base_snapshot: taskWorkflowSnapshot(opts.baseSnapshot), submission_code: opts.submissionCode,
+    result: opts.result, acceptance_refs: opts.acceptanceRefs?.split(',').map(id => id.trim()) ?? [],
+    summary: opts.summary, report_uri: opts.reportUri,
+  }));
 
 task
   .command('verify')
@@ -1113,14 +1185,17 @@ task
 
 task
   .command('close')
-  .description('关闭任务（verified → closed；仅 Owner，docs/11 交付确认）')
+  .description('关闭已验收通过的任务（verified → closed，负责人或管理员）')
   .argument('<task_code>')
-  .action(async (taskId: string) => {
+  .option('--base-snapshot <version>', '验收后的任务快照，省略时查询当前快照')
+  .action(async (taskId: string, opts: { baseSnapshot?: string }) => {
     try {
       const api = requireApiClient();
-      const current = unwrapApiResult(await api.getTask(taskId));
+      const baseSnapshot = opts.baseSnapshot === undefined
+        ? unwrapApiResult(await api.getTask(taskId)).base_snapshot
+        : taskWorkflowSnapshot(opts.baseSnapshot);
       const result = await api.closeTask(taskId, {
-        base_snapshot: typeof current.base_snapshot === 'number' ? current.base_snapshot : 0,
+        base_snapshot: typeof baseSnapshot === 'number' ? baseSnapshot : 0,
       });
       printResult(result);
       if (!result.ok) process.exitCode = 1;
