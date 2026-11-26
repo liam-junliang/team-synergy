@@ -5,7 +5,9 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { deploymentGate } from '../../deploy/containers/workflow-gate.mjs';
+import { resolvePublishedImage } from '../../deploy/containers/resolve-published-image.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const sha = 'a'.repeat(40), other = 'b'.repeat(40), repository = 'owner/team-synergy';
@@ -46,6 +48,96 @@ test('current successful main CI produces only its verified immutable source', a
   assert.deepEqual(await deploymentGate(request({ api: verifiedApi })), { build: true, publish: true, sha });
   await assert.rejects(deploymentGate(request({ event: { workflow_run: { ...run, head_sha: 'main;echo unsafe' } }, api: verifiedApi })), /Invalid source/);
   await assert.rejects(deploymentGate(request({ api: async () => { throw Error('API unavailable'); } })), /API unavailable/);
+});
+
+function publicationFixture(role = 'postgres', index = false) {
+  const sourceId = `sha256:${'1'.repeat(64)}`, configId = `sha256:${'2'.repeat(64)}`;
+  const source = { Id: sourceId, Os: 'linux', Architecture: 'amd64', Config: {
+    Env: ['EXAMPLE=verified'], Cmd: ['entrypoint'], Healthcheck: { Test: ['CMD', 'check'] },
+    Labels: { 'org.opencontainers.image.revision': sha, 'org.opencontainers.image.source': `https://github.com/${repository}` },
+  }, RootFS: { Type: 'layers', Layers: [`sha256:${'3'.repeat(64)}`] }, RepoDigests: [`ghcr.io/${repository}-${role}@${sourceId}`] };
+  const imageManifest = { schemaVersion: 2, mediaType: 'application/vnd.oci.image.manifest.v1+json',
+    config: { digest: configId }, layers: [{ digest: `sha256:${'4'.repeat(64)}` }] };
+  const remote = index ? { schemaVersion: 2, mediaType: 'application/vnd.oci.image.index.v1+json', manifests: [
+    { digest: `sha256:${'5'.repeat(64)}`, mediaType: imageManifest.mediaType, platform: { os: 'linux', architecture: 'amd64' } },
+    { digest: `sha256:${'6'.repeat(64)}`, mediaType: imageManifest.mediaType, platform: { os: 'linux', architecture: 'arm64' } },
+  ] } : imageManifest;
+  const raw = JSON.stringify(remote), ref = `ghcr.io/${repository}-${role}@sha256:${createHash('sha256').update(raw).digest('hex')}`;
+  const published = { ...structuredClone(source), Id: `sha256:${'7'.repeat(64)}`, RepoDigests: [ref] };
+  const manifest = { schema_version: 1, source_revision: sha, images: { [role]: { image_id: sourceId, tag: `tsp-${role}:${sha}` } } };
+  const calls = [];
+  const runDocker = args => {
+    calls.push(args);
+    if (args[0] === 'buildx') return raw;
+    if (args[0] === 'pull') return 'Verified immutable pull';
+    if (args[0] === 'image' && args[1] === 'inspect') return JSON.stringify([args[2] === sourceId ? source : published]);
+    throw Error('Unexpected Docker command');
+  };
+  return { input: { manifest, revision: sha, repository, role }, source, published, remote, ref, raw, calls, runDocker };
+}
+
+test('published digest comes from the actual remote single manifest after an index transformation', () => {
+  const fixture = publicationFixture();
+  assert.equal(resolvePublishedImage(fixture.input, fixture.runDocker), fixture.ref);
+  assert.notEqual(fixture.ref, fixture.source.RepoDigests[0]);
+  assert.deepEqual(fixture.calls, [
+    ['image', 'inspect', fixture.source.Id],
+    ['buildx', 'imagetools', 'inspect', '--raw', `ghcr.io/${repository}-postgres:${sha}`],
+    ['pull', '--platform', 'linux/amd64', fixture.ref], ['image', 'inspect', fixture.ref],
+  ]);
+});
+
+test('API, Web and indexed publication all emit verified remote references in their own namespace', () => {
+  for (const [role, index] of [['api', false], ['web', false], ['postgres', true]]) {
+    const fixture = publicationFixture(role, index);
+    assert.equal(resolvePublishedImage(fixture.input, fixture.runDocker), fixture.ref);
+  }
+});
+
+test('publication rejects mismatched source revision, repository, role and loaded image before registry access', () => {
+  for (const mutate of [
+    f => { f.input.repository = '../attacker'; },
+    f => { f.input.role = 'api;echo unsafe'; },
+    f => { f.input.manifest.source_revision = other; },
+    f => { f.source.Id = `sha256:${'8'.repeat(64)}`; },
+    f => { f.source.Architecture = 'arm64'; },
+    f => { f.source.Config.Labels['org.opencontainers.image.revision'] = other; },
+    f => { f.source.Config.Labels['org.opencontainers.image.source'] = 'https://github.com/attacker/repo'; },
+  ]) {
+    const fixture = publicationFixture('api'); mutate(fixture);
+    assert.throws(() => resolvePublishedImage(fixture.input, fixture.runDocker));
+    assert.equal(fixture.calls.some(args => args[0] === 'buildx' || args[0] === 'pull'), false);
+  }
+});
+
+test('publication fails closed for registry errors or changed platform, layers, configuration and digest membership', () => {
+  for (const mutate of [
+    f => { const previous = f.runDocker; f.runDocker = args => { if (args[0] === 'buildx') throw Error('Registry unavailable'); return previous(args); }; },
+    f => { const previous = f.runDocker; f.runDocker = args => { if (args[0] === 'pull') throw Error('Immutable pull failed'); return previous(args); }; },
+    f => { f.published.Os = 'windows'; },
+    f => { f.published.Architecture = 'arm64'; },
+    f => { f.published.RootFS.Layers = [`sha256:${'9'.repeat(64)}`]; },
+    f => { f.published.Config.Healthcheck.Test = ['CMD', 'different']; },
+    f => { f.published.RepoDigests = [`ghcr.io/attacker/repo@sha256:${'9'.repeat(64)}`]; },
+  ]) {
+    const fixture = publicationFixture(); mutate(fixture);
+    assert.throws(() => resolvePublishedImage(fixture.input, fixture.runDocker));
+  }
+  const fixture = publicationFixture();
+  for (const raw of ['not JSON', JSON.stringify({ schemaVersion: 2, mediaType: 'unsupported' }), JSON.stringify({ schemaVersion: 2,
+    mediaType: 'application/vnd.oci.image.index.v1+json', manifests: [] })]) {
+    const calls = [];
+    assert.throws(() => resolvePublishedImage(fixture.input, args => {
+      calls.push(args); return args[0] === 'buildx' ? raw : fixture.runDocker(args);
+    }));
+    assert.equal(calls.some(args => args[0] === 'pull'), false);
+  }
+});
+
+test('publishing uses remote resolution rather than the first cached repository digest', () => {
+  const workflow = readFileSync(path.join(root, '.github/workflows/deploy.yml'), 'utf8');
+  assert.match(workflow, /ref=\$\(node deploy\/containers\/resolve-published-image\.mjs bundle\/release\.json "\$SOURCE_SHA" "\$GITHUB_REPOSITORY" "\$role"\)/);
+  assert.doesNotMatch(workflow, /RepoDigests/);
 });
 
 function fixture() {
