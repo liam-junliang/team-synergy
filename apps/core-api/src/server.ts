@@ -246,7 +246,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
       onError: () => app.log.warn('Project material index maintenance unavailable'),
     });
   }
-  if (memoryEnabled || remoteMcpUrl) registerMemoryRoutes(app, db, memoryEngines, memoryEnabled);
+  registerMemoryRoutes(app, db, { engines: memoryEngines, captureEnabled: memoryEnabled, readEnabled: memoryEnabled || Boolean(remoteMcpUrl) });
   if (memoryEnabled) {
     if (ownsDb) {
       registerBackgroundLoop(app, {

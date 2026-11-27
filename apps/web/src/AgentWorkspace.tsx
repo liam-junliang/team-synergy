@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { listProjects, listTeams, type AuthUser, type ProjectSummary } from './api';
-import { agentWorkspacePath, type WorkspaceRoute } from './workspaceRouting';
+import { fetchEnvelope, listProjects, listTeams, type AuthUser, type ProjectSummary } from './api';
+import { agentWorkspacePath, personalMemoryWorkspacePath, type WorkspaceRoute } from './workspaceRouting';
 import { navigateWorkspace } from './workspaceNavigation';
 import { t } from './i18n';
 import { useLocale } from './useLocale';
@@ -15,7 +15,7 @@ import { RemoteMcpConnectionGuide } from './RemoteMcpConnectionGuide';
 import { McpConsentWorkspace } from './McpConsentWorkspace';
 
 export function AgentConnectionWorkspace({ user, project, projects }: { user: AuthUser; project?: ProjectSummary; projects?: ProjectSummary[] }) {
-  const [mode, setMode] = useState<'remote' | 'local'>('remote');
+  const [mode, setMode] = useState<'remote' | 'local'>(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('setup') === 'capture' ? 'local' : 'remote');
 
   return <>
     <div aria-label={t('Agent 接入方式')} role="group" className="mb-5 inline-flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1">
@@ -56,7 +56,7 @@ export function CliConnectionGuide({ user, project }: { user: AuthUser; project?
           {projectCode ? <CopyCommand command={`tsp project bind ${projectCode}\ntsp project current\ntsp docs index --limit 10`} /> : <p className="text-xs text-slate-500">{t('先在右上角选择项目，再复制对应的绑定命令。')}</p>}
         </details>
       </section>
-      <LocalAgentSetup key={projectCode ?? ''} projectCode={project?.status === 'active' ? projectCode : undefined} />
+      <LocalAgentSetup key={`${user.code}:${projectCode ?? ''}`} accountCode={user.code} projectCode={project?.status === 'active' ? projectCode : undefined} />
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" aria-label={t('CLI 使用说明')}>
         <h2 className="text-base font-bold">{t('通过 CLI 调用工具')}</h2>
         <p className="mb-3 mt-2 text-sm leading-6 text-slate-500">{t('先查看工具目录和检索说明，再用 --project 或输入中的 projectCode 指定项目；已有工作区绑定时也可沿用默认项目。')}</p>
@@ -91,11 +91,27 @@ const localHarnesses = [
   { value: 'claudecode', label: 'Claude Code' },
 ] as const;
 
-function LocalAgentSetup({ projectCode }: { projectCode?: string }) {
+type CapturePreflight = { serviceEnabled: boolean; allowed: boolean; reason: 'memory_capture_disabled' | 'memory_forbidden' | null };
+
+function LocalAgentSetup({ accountCode, projectCode }: { accountCode: string; projectCode?: string }) {
   const [harness, setHarness] = useState<(typeof localHarnesses)[number]['value']>('codex');
   const [capture, setCapture] = useState(false);
   const captureAvailable = harness !== 'claudecode';
-  const install = projectCode && capture && captureAvailable ? `tsp project current\ntsp memory native install --harness ${harness}\ntsp memory native doctor --harness ${harness}` : null;
+  const checkRequested = Boolean(projectCode && capture && captureAvailable);
+  const preflight = useQuery({
+    queryKey: ['memory-capture-preflight', accountCode, projectCode],
+    queryFn: ({ signal }) => fetchEnvelope<CapturePreflight>(`/projects/${encodeURIComponent(projectCode ?? '')}/memory/capture-preflight`, { signal }),
+    enabled: checkRequested,
+    retry: false,
+  });
+  const checking = preflight.isPending || preflight.isFetching;
+  const ready = checkRequested && !checking && preflight.isSuccess &&
+    preflight.data?.serviceEnabled === true && preflight.data.allowed === true && preflight.data.reason === null;
+  let checkMessage = t('暂时无法核对采集条件，请重试。');
+  if (checking) checkMessage = t('正在检查采集服务与项目权限…');
+  else if (ready) checkMessage = t('服务与项目权限检查通过。请在本机继续安装。');
+  else if (preflight.isSuccess && preflight.data?.reason === 'memory_capture_disabled') checkMessage = t('平台尚未开启会话采集服务。');
+  else if (preflight.isSuccess && preflight.data?.reason === 'memory_forbidden') checkMessage = t('当前账号没有此项目的会话采集权限。');
 
   return <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="local-agent-setup-title">
     <h2 id="local-agent-setup-title" className="text-base font-bold">4. {t('可选：配置会话采集')}</h2>
@@ -108,11 +124,29 @@ function LocalAgentSetup({ projectCode }: { projectCode?: string }) {
     </label>
     {captureAvailable ? <label className="mt-3 flex items-start gap-2 text-sm text-slate-700">
       <input type="checkbox" className="mt-1 accent-cyan-700" checked={capture} disabled={!projectCode} onChange={event => setCapture(event.target.checked)} />
-      <span>{t('启用当前工作区的新会话采集')}</span>
+      <span>{t('检查当前工作区的采集接入条件')}</span>
     </label> : <p className="mt-3 text-sm text-slate-600">{t('Claude Code 可使用 HTTP Connector；会话采集暂未开放。')}</p>}
-    {capture && captureAvailable && <p className="mt-2 text-xs leading-5 text-slate-600">{t('安装并授权 CLI 后，在项目工作区根目录执行。先确认 tsp project current 返回所选项目；未绑定时先绑定，绑定不符时停止并核对。配置后重开宿主，用新会话验证。')}
-      {harness === 'codex' && <> {t('Codex 需在 /hooks 中审阅并信任采集定义。')}</>}</p>}
-    {install && <div className="mt-3"><CopyCommand command={install} /><details className="mt-3 text-sm"><summary className="cursor-pointer font-semibold">{t('停止当前工作区的采集')}</summary><div className="mt-2"><CopyCommand command={`tsp memory native uninstall --harness ${harness}`} /></div></details></div>}
+    {checkRequested && <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+      <p role="status">{checkMessage}</p>
+      {!checking && !ready && <button type="button" className="ui-context-action" onClick={() => void preflight.refetch()}>{t('重新检查采集条件')}</button>}
+    </div>}
+    {ready && <div className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
+      <p>{t('在工作区根目录核对 CLI 登录账号与绑定项目 {project}。两项相符后再执行安装。', { project: projectCode ?? '' })}</p>
+      <CopyCommand command={'tsp auth whoami\ntsp project current'} />
+      <p>{t('重开宿主并开启新会话。采集会把该工作区中受支持的操作者输入发送到平台整理。')}
+        {harness === 'codex' && <> {t('Codex 需在 /hooks 中审阅并信任采集定义。')}</>}</p>
+      <CopyCommand command={`tsp memory native install --harness ${harness}`} />
+    </div>}
+    {projectCode && captureAvailable && <details className="mt-3 text-sm">
+      <summary className="cursor-pointer font-semibold">{t('诊断或停止本机采集')}</summary>
+      <div className="mt-2 space-y-2 text-slate-600">
+        <p>{t('在对应设备的工作区根目录运行诊断。在记忆中心用采集编号核对服务回执。')}</p>
+        <CopyCommand command={`tsp memory native doctor --harness ${harness}`} />
+        <p>{t('停止当前工作区的采集')}</p>
+        <CopyCommand command={`tsp memory native uninstall --harness ${harness}`} />
+      </div>
+    </details>}
+    <a className="ui-context-action mt-3 inline-block" href={`${personalMemoryWorkspacePath()}?view=processing`}>{t('在记忆中心查看采集结果')}</a>
     {!projectCode && <p className="mt-3 text-sm text-slate-600">{t('先在页首选择一个已启用项目，再配置会话采集。')}</p>}
   </section>;
 }

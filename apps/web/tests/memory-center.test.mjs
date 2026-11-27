@@ -56,8 +56,24 @@ test('actual workbench switches tabs to processing metadata while account cache 
   try {
     const html = renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(Probe)));
     assert.equal(stage, 2); assert.match(html, /模型整理与观测/); assert.match(html, /尚无事件/);
+    assert.match(html, /href="\/agent\/connect\?setup=capture"/);
+    assert.doesNotMatch(html, /整理回执|Hook 已信任/);
+    const captures = view().captures;
+    client.setQueryData(api.memoryCenterKey('ALICE'), view({ serviceEnabled: false, captures: {
+      ...captures, total: 2, counts: { ...captures.counts, completed: 1, pending: 1 }, recent: [
+        { code: 'DONE-123', receiptCode: 'RECEIPT-456', projectName: '可见项目', status: 'completed', sessionId: 'SESSION-A', eventId: 'EVENT-A', attempts: 1 },
+        { code: 'QUEUED-789', projectName: '可见项目', status: 'pending', sessionId: 'SESSION-B', eventId: 'EVENT-B', attempts: 0 },
+      ],
+    } }));
+    stage = 0;
+    const withReceipts = renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(Probe)));
+    assert.match(withReceipts, /服务接收开关未开启，已有记录仍可查阅/);
+    assert.match(withReceipts, /采集编号 <code[^>]*>DONE-123<\/code>/);
+    assert.match(withReceipts, /整理回执 <code[^>]*>RECEIPT-456<\/code>/);
+    assert.match(withReceipts, /采集编号 <code[^>]*>QUEUED-789<\/code>/);
+    assert.equal((withReceipts.match(/整理回执/g) ?? []).length, 1);
     const foreign = renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(ui.MemoryCenterWorkbench, { ownerCode: 'BOB' })));
-    assert.doesNotMatch(foreign, /可见项目|officeace|>31<\/p>/); assert.match(foreign, /正在读取记忆中心/);
+    assert.doesNotMatch(foreign, /可见项目|officeace|>31<\/p>|DONE-123|RECEIPT-456/); assert.match(foreign, /正在读取记忆中心/);
     assert.notDeepEqual(api.memoryCenterKey('ALICE'), api.memoryCenterKey('BOB'));
     assert.notDeepEqual(personalApi.personalMemoryListKey('ALICE', 'all'), personalApi.personalMemoryListKey('BOB', 'all'));
   } finally { client.clear(); }

@@ -43,15 +43,28 @@ async function nativeEnqueueProcess(t,f,event,onBusy=()=>{}) {
   assert.equal((await done)[0],0);assert.ok(result);
   return {...result,sqliteErrors};
 }
-async function fixture(t,harness='dsh') {
+async function fixture(t,harness='dsh',renewable=false) {
   const directory = mkdtempSync(path.join(tmpdir(),'tsp-native-outbox-'));
   const cwd = path.join(directory,'repo'),memberHome=path.join(directory,'member');
   mkdirSync(path.join(cwd,'.agent'),{recursive:true}); mkdirSync(memberHome);
-  const posts=[],jobs=new Map(); let loseAck=false;
+  const posts=[],renewals=[],jobs=new Map(); let loseAck=false;
+  const access=renewable?'a'.repeat(64):'fixture-native-device',successor='b'.repeat(64),refresh='c'.repeat(64);
+  const deviceCode='0'.repeat(19)+'1',sessionCode='0'.repeat(19)+'2';
+  const expiresIn=ms=>new Date(Date.now()+ms).toISOString();
+  const identity={installation_id:'bb45c98f-994c-4f32-a744-92dd0a567a0d',installation_secret:'p'.repeat(43),
+    client_type:'cli',platform:process.platform};
   const server=createServer(async(req,res)=>{
-    assert.equal(req.headers.authorization,'Bearer fixture-native-device');
+    const refreshing=renewable&&req.url==='/auth/device/refresh';
+    assert.equal(req.headers.authorization,refreshing?undefined:'Bearer '+(renewals.length?successor:access));
     let result;
-    if(req.url==='/auth/whoami') result={user_code:'member-A'};
+    if(refreshing) {
+      let raw='';for await(const b of req)raw+=b;const body=JSON.parse(raw);
+      assert.equal(body.refresh_token,refresh);assert.deepEqual(body.device_identity,identity);
+      assert.match(body.request_id,/^[0-9a-f]{64}$/);
+      renewals.push(body.request_id);
+      result={device_token:successor,refresh_token:'d'.repeat(64),session_code:sessionCode,
+        access_expires_at:expiresIn(3600000),session_expires_at:expiresIn(86400000)};
+    }else if(req.url==='/auth/whoami') result={user_code:'member-A'};
     else if(req.url==='/projects/P/memory/binding') result={};
     else if(req.url==='/projects/P/memory/capture-events') {
       let raw='';for await(const b of req)raw+=b;const body=JSON.parse(raw);posts.push(body);
@@ -65,18 +78,29 @@ async function fixture(t,harness='dsh') {
   });
   server.listen(0,'127.0.0.1');await once(server,'listening');
   const api=`http://127.0.0.1:${server.address().port}`,authFile=path.join(memberHome,'auth.json');
-  writeFileSync(authFile,JSON.stringify({api_url:api,user_code:'member-A',device_token:'fixture-native-device',device_name:'native fixture'}));
+  const auth={api_url:api,user_code:'member-A',device_token:access,device_name:'native fixture'};
+  if(renewable) {
+    const devices=path.join(memberHome,'devices');mkdirSync(devices);
+    writeFileSync(path.join(devices,createHash('sha256').update(api).digest('hex')+'.json'),JSON.stringify(identity));
+    Object.assign(auth,{device_code:deviceCode,session_code:sessionCode,refresh_token:refresh,
+      access_expires_at:expiresIn(3600000),session_expires_at:expiresIn(86400000)});
+  }
+  writeFileSync(authFile,JSON.stringify(auth));
   const binding=path.join(cwd,'.agent','bound-project.yaml');
   writeFileSync(binding,`project_code: P\napi_url: ${api}\nbound_at: now\n`);
   t.after(async()=>{await new Promise(resolve=>server.close(resolve));assert.equal(path.dirname(directory),path.resolve(tmpdir()));rmSync(directory,{recursive:true,force:true});});
-  const child=spawn(process.execPath,[cliPath,'memory','native','config','--harness',harness,'--host-session','native-host'],{
-    cwd,env:{...process.env,AGENTCTL_HOME:memberHome},windowsHide:true,stdio:['ignore','pipe','ignore']});
-  const finished=once(child,'close');let output='';child.stdout.setEncoding('utf8').on('data',b=>output+=b);
-  assert.equal((await finished)[0],0);const parsed=JSON.parse(output);assert.equal(parsed.ok,true);
-  const config=parsed.data,bridge=createNativeCaptureBridge(config);
+  async function loadConfig() {
+    const child=spawn(process.execPath,[cliPath,'memory','native','config','--harness',harness,'--host-session','native-host'],{
+      cwd,env:{...process.env,AGENTCTL_HOME:memberHome,...(renewable?{ACP_DEVICE_TOKEN:'other-token',ACP_TOKEN:'other-principal'}:{})},
+      windowsHide:true,stdio:['ignore','pipe','ignore']});
+    const finished=once(child,'close');let output='';child.stdout.setEncoding('utf8').on('data',b=>output+=b);
+    assert.equal((await finished)[0],0);const parsed=JSON.parse(output);assert.equal(parsed.ok,true);
+    return parsed.data;
+  }
+  const config=await loadConfig(),bridge=createNativeCaptureBridge(config);
   const event=(message='message-1',text='在所有项目中我习惯先列出验证结果。')=>({
     eventId:nativeCaptureEventId(harness,config.hostSessionId,message),nativeMessageId:message,nativeSeq:1,sourceText:text});
-  return {config,bridge,event,posts,jobs,authFile,binding,loseAck:()=>{loseAck=true;},directory};
+  return {config,bridge,event,posts,renewals,jobs,authFile,binding,loadConfig,successor,loseAck:()=>{loseAck=true;},directory};
 }
 
 test('OpenCode candidate remains local until exact native persisted text is confirmed',async t=>{
@@ -113,6 +137,25 @@ test('switching accounts or projects fails before exposing or delivering an old 
   await assert.rejects(f.bridge.pending(),{code:'memory_binding_changed'});assert.equal(f.posts.length,0);
   writeFileSync(f.authFile,JSON.stringify(auth));writeFileSync(f.binding,readFileSync(f.binding,'utf8').replace('project_code: P','project_code: OTHER'));
   await assert.rejects(f.bridge.drain(),{code:'memory_binding_changed'});assert.equal(f.posts.length,0);
+});
+
+test('native capture renews the stored device session and rejects a new login on the same device',async t=>{
+  const f=await fixture(t,'dsh',true);
+  await f.bridge.enqueue(f.event());
+  const original=JSON.parse(readFileSync(f.authFile,'utf8'));
+  writeFileSync(f.authFile,JSON.stringify({...original,access_expires_at:new Date(Date.now()-1000).toISOString()}));
+  assert.equal((await f.bridge.drain()).accepted,1);
+  assert.equal(f.renewals.length,1);
+  const renewed=JSON.parse(readFileSync(f.authFile,'utf8'));
+  assert.equal(renewed.device_token,f.successor);
+  assert.equal(renewed.session_code,original.session_code);
+  assert.equal((await f.loadConfig()).owner,f.config.owner);
+
+  await f.bridge.enqueue(f.event('message-2'));
+  writeFileSync(f.authFile,JSON.stringify({...renewed,session_code:'0'.repeat(19)+'3',device_token:'e'.repeat(64)}));
+  await assert.rejects(f.bridge.pending(),{code:'memory_binding_changed'});
+  await assert.rejects(f.bridge.drain(),{code:'memory_binding_changed'});
+  assert.equal(f.posts.length,1);
 });
 
 test('parallel native notifications and drains preserve one durable event',async t=>{

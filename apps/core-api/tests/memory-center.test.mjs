@@ -34,6 +34,47 @@ async function fixture(db) {
 }
 function data(response) { assert.equal(response.statusCode, 200, response.body); assert.equal(response.headers['cache-control'], 'no-store'); return response.json().data; }
 
+test('capture preflight uses project write permission and remains available while capture is disabled', { skip: !database }, async t => {
+  const previous = process.env.TSP_MEMORY_ENABLED;
+  t.after(() => {
+    if (previous === undefined) delete process.env.TSP_MEMORY_ENABLED;
+    else process.env.TSP_MEMORY_ENABLED = previous;
+  });
+
+  await withIntegrityFixture(database, 'memorycapturepreflight', async db => {
+    process.env.TSP_MEMORY_ENABLED = '1';
+    const f = await fixture(db);
+    const [project, foreign] = f.projects;
+    const preflight = (app, user, code = project.code) => app.inject({ method: 'GET',
+      url: `/projects/${code}/memory/capture-preflight`, headers: user && f.headers.get(user.code) });
+    try {
+      assert.equal((await preflight(f.app)).statusCode, 401);
+      assert.equal((await preflight(f.app, f.owner, 'invalid')).statusCode, 422);
+      assert.equal((await preflight(f.app, f.outsider)).statusCode, 403);
+      assert.equal((await preflight(f.app, f.member, foreign.code)).statusCode, 403);
+      assert.deepEqual(data(await preflight(f.app, f.owner)), { serviceEnabled: true, allowed: true, reason: null });
+      assert.deepEqual(data(await preflight(f.app, f.member)), { serviceEnabled: true, allowed: false, reason: 'memory_forbidden' });
+      const capture = await f.app.inject({ method: 'POST', url: `/projects/${project.code}/memory/capture-events`,
+        headers: f.headers.get(f.member.code), payload: { sessionId: 'fixture', eventId: 'fixture', sourceText: 'fixture' } });
+      assert.equal(capture.statusCode, 403);
+      await f.q("update projects set status='archived' where id=$1", [project.id]);
+      const archived = await preflight(f.app, f.owner);
+      assert.equal(archived.statusCode, 403);
+      assert.equal(archived.json().error.code, 'project_archived');
+      await f.q("update projects set status='active' where id=$1", [project.id]);
+      assert.deepEqual(await f.q('select id from memory_capture_jobs'), []);
+      assert.deepEqual(await f.q('select id from memory_capture_receipts'), []);
+    } finally { await f.app.close(); }
+
+    process.env.TSP_MEMORY_ENABLED = '0';
+    const paused = await buildServer({ db, logger: false });
+    try {
+      assert.deepEqual(data(await preflight(paused, f.owner)), { serviceEnabled: false, allowed: false, reason: 'memory_capture_disabled' });
+      assert.deepEqual(data(await preflight(paused, f.member)), { serviceEnabled: false, allowed: false, reason: 'memory_forbidden' });
+    } finally { await paused.close(); }
+  });
+});
+
 test('memory center enforces account/project visibility and exposes real private capture states without payloads', { skip: !database }, async () =>
   withIntegrityFixture(database, 'memorycenteracl', async db => {
     const f = await fixture(db);

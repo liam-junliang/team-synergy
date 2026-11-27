@@ -5,7 +5,7 @@
  * 输出与本地模式相同 envelope：{ ok, data } / { ok: false, error }。
  */
 
-import { authDirectory, matchesLocalDeviceFingerprint, readAuthConfig } from './auth-store.js';
+import { authDirectory, matchesLocalDeviceFingerprint, readAuthConfig, type AuthConfig } from './auth-store.js';
 import { DeviceSessionError, localDeviceSession } from '@team-synergy/contracts/device-session';
 import type { CliLoginResult } from './browser-auth.js';
 import type { TaskWebWorkflowCommand } from '@team-synergy/contracts';
@@ -18,6 +18,8 @@ export interface ApiClientOptions {
   baseUrl?: string;
   principalCode?: string;
   deviceToken?: string;
+  /** Pin the exact stored profile used by the caller to resolve its local scope. */
+  storedDeviceProfile?: AuthConfig;
   skipAuth?: boolean;
   requestTimeoutMs?: number;
   redirect?: 'error';
@@ -36,16 +38,14 @@ function isApiEnvelope<T>(value: unknown): value is ApiResult<T> {
 }
 
 export function createApiClient(opts: ApiClientOptions) {
-  const storedAuth = readAuthConfig();
+  const storedAuth = opts.storedDeviceProfile ?? readAuthConfig();
   const baseUrl = (opts.baseUrl || storedAuth?.api_url || '').replace(/\/+$/, '');
   const storedApi = storedAuth?.api_url.replace(/\/+$/, '');
-  // 身份优先级（docs/23）：显式 principalCode（机器模式/编排者指定）> 显式 deviceToken > ACP_TOKEN > 本机 auth.json
+  // 固定的本机设备会话不允许被环境变量覆盖。其他调用保持 docs/23 的身份顺序。
   // 显式 principalCode 时不带 Bearer，避免本机登录的 device token 覆盖编排者指定的执行身份
-  const overrideToken = opts.skipAuth
+  const overrideToken = opts.skipAuth || opts.principalCode || opts.storedDeviceProfile
     ? undefined
-    : opts.principalCode
-      ? undefined
-      : opts.deviceToken || process.env.ACP_DEVICE_TOKEN || process.env.ACP_TOKEN;
+    : opts.deviceToken || process.env.ACP_DEVICE_TOKEN || process.env.ACP_TOKEN;
   const profile = !opts.skipAuth && !opts.principalCode && !overrideToken ? storedAuth : null;
   const session = profile && storedApi === baseUrl ? localDeviceSession(baseUrl, profile) : undefined;
   async function resolveDeviceToken() {

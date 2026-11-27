@@ -204,7 +204,9 @@ export async function connectAgent(options: Options) {
     } catch (error) {
       if (!(error instanceof DomainError) || error.code !== 'memory_harness_already_installed') throw error;
       const existing = await doctorHarness({ harness, workspace });
-      if (existing.installed !== true) throw new DomainError(existing.status, '现有会话采集配置需要检查，未覆盖');
+      if (existing.installed !== true || existing.capturePreflight?.allowed !== true) {
+        throw new DomainError(existing.status, '现有会话采集配置需要检查，未覆盖');
+      }
       capture = 'unchanged';
     }
   }

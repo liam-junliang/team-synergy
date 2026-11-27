@@ -199,6 +199,19 @@ async function proposedCriterion(tx: Tx, binding: Awaited<ReturnType<typeof reso
 }
 
 export function createMemorySliceUseCases(db: Db) {
+  async function canCapture(cmd: Actor) {
+    return db.transaction(async tx => {
+      const actor = await authorize(tx, cmd, 'read');
+      try {
+        await assertProjectAccess(tx, actor.projectId, actor.principalId, 'write');
+        return true;
+      } catch (error) {
+        if (error instanceof DomainError && error.code === 'project_forbidden') return false;
+        throw error;
+      }
+    });
+  }
+
   async function inspect(cmd: Actor & Partial<Pick<Binding, 'topicCode' | 'requirementCode'>>) {
     if ((cmd.topicCode === undefined) !== (cmd.requirementCode === undefined)) {
       reject('memory_invalid', '议题和需求必须同时提供或全部省略');
@@ -403,5 +416,5 @@ export function createMemorySliceUseCases(db: Db) {
       return result;
     });
   }
-  return { inspect, replay, capture, search, searchEvidence, readSources, readDocument, brief };
+  return { canCapture, inspect, replay, capture, search, searchEvidence, readSources, readDocument, brief };
 }

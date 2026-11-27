@@ -5,7 +5,7 @@ import { useLocale } from './useLocale';
 import { PersonalMemoryWorkbench } from './PersonalMemoryWorkbench';
 import { ProjectMemorySummary } from './ProjectMemoryPanel';
 import { getMemoryCenter, memoryCenterKey, type MemoryCenterView } from './memoryCenterApi';
-import { requirementWorkspacePath } from './workspaceRouting';
+import { agentWorkspacePath, requirementWorkspacePath } from './workspaceRouting';
 
 export type MemoryCenterTab = 'overview' | 'projects' | 'personal' | 'processing';
 const tabs: Array<{ id: MemoryCenterTab; label: string }> = [
@@ -74,7 +74,10 @@ export function MemoryCenterOverview({ value, onSelect }: { value: MemoryCenterV
 
 export function MemoryCenterWorkbench({ ownerCode, initialProject }: { ownerCode: string; initialProject?: string }) {
   useLocale();
-  const [tab, setTab] = useState<MemoryCenterTab>(initialProject ? 'personal' : 'overview');
+  const [tab, setTab] = useState<MemoryCenterTab>(() => {
+    if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('view') === 'processing') return 'processing';
+    return initialProject ? 'personal' : 'overview';
+  });
   const [project, setProject] = useState(initialProject ?? '');
   const [privateBusy, setPrivateBusy] = useState(false);
   const [projectExpanded, setProjectExpanded] = useState(true);
@@ -99,13 +102,23 @@ export function MemoryCenterWorkbench({ ownerCode, initialProject }: { ownerCode
             {selected.sharedTruncated && <p className="mt-2 text-xs text-amber-800">{t('仅显示最近一部分来源，请到项目中核对完整记录。')}</p>}</section>
         </>}
       </div> : <div className="space-y-4"><MemoryCaptureSummary value={value} />
-        <p className="text-xs leading-5 text-slate-500">{t(value.serviceEnabled ? '服务接收开关已开启，客户端是否安装、信任或启动仍未知。' : '服务接收开关未开启，已有记录仍可查阅。')}{' '}{t('本地队列状态需要在对应设备检查，服务端不能直接读取本地安装或待发送事件。')}</p>
+        <section className={card} aria-label={t('接入与诊断')}>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div><h2 className="text-sm font-semibold text-slate-900">{t('接入与诊断')}</h2>
+              <p className="mt-2 text-xs leading-5 text-slate-600">{t(value.serviceEnabled ? '服务接收开关已开启，客户端是否安装、信任或启动仍未知。' : '服务接收开关未开启，已有记录仍可查阅。')}</p>
+              <p className="mt-1 text-xs leading-5 text-slate-600">{t('在 Agent 接入查看本机诊断命令，再用终端返回的采集编号核对下方记录。')}</p>
+            </div>
+            <a className="ui-context-action" href={`${agentWorkspacePath('connect')}?setup=capture`}>{t('查看本机接入与诊断')}</a>
+          </div>
+        </section>
         <MemoryModelPanel value={value} />
         <section aria-label={t('最近本人事件')} className={card}><h2 className="text-sm font-semibold text-slate-900">{t('最近本人事件')}</h2>
           {value.captures.recent.length ? <ul className="mt-3 divide-y divide-slate-100">{value.captures.recent.map(row => <li key={row.code} className="space-y-2 py-3 text-xs text-slate-600"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium text-slate-800">{row.projectName}</span><span>{t(captureLabels[row.status])} · {t('尝试 {count} 次', { count: row.attempts })}</span></div>
-            <p className="break-all font-mono">{row.code}</p><p>{t('入队')} {date(row.receivedAt)} · {t('更新')} {date(row.updatedAt)}</p>
+            <p>{t('采集编号')} <code className="break-all">{row.code}</code></p>
+            {row.receiptCode && <p>{t('整理回执')} <code className="break-all">{row.receiptCode}</code></p>}
+            <p>{t('入队')} {date(row.receivedAt)} · {t('更新')} {date(row.updatedAt)}</p>
             {row.errorCode && <p className="text-amber-800">{t(safeErrorMessages[row.errorCode] ?? '请核对来源、权限或业务对象后重试。')} <code>{row.errorCode}</code></p>}
-            <details><summary className="cursor-pointer">{t('来源标识')}</summary><dl className="mt-2 space-y-1 break-all font-mono"><div><dt className="inline">session：</dt><dd className="inline">{row.sessionId}</dd></div><div><dt className="inline">event：</dt><dd className="inline">{row.eventId}</dd></div>{row.receiptCode && <div><dt className="inline">receipt：</dt><dd className="inline">{row.receiptCode}</dd></div>}</dl></details></li>)}</ul> : <p className="mt-3 text-sm text-slate-500">{t('尚无事件。请先核对设备接入，不需要为填满页面创建测试偏好。')}</p>}
+            <details><summary className="cursor-pointer">{t('来源标识')}</summary><dl className="mt-2 space-y-1 break-all font-mono"><div><dt className="inline">session：</dt><dd className="inline">{row.sessionId}</dd></div><div><dt className="inline">event：</dt><dd className="inline">{row.eventId}</dd></div></dl></details></li>)}</ul> : <p className="mt-3 text-sm text-slate-500">{t('尚无事件。请先核对设备接入，再用新会话验证。')}</p>}
           {value.captures.truncated && <p className="mt-3 text-xs text-slate-500">{t('仅显示最近 40 个本人事件。')}</p>}</section>
       </div>}
   </div></main>;
