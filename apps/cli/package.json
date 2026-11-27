@@ -1,6 +1,6 @@
 {
   "name": "@team-synergy/cli",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "Team Synergy tsp command-line client",
   "license": "MIT",
