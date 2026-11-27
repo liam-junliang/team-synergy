@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DomainError } from '@team-synergy/domain';
 import { PublicCodeSchema } from '@team-synergy/contracts';
 import { authDirectory } from './auth-store.js';
-import { memoryContext, valueOf, type MemoryContext } from './memory.js';
+import { nativeMemoryContext, valueOf, type MemoryContext } from './memory.js';
 import { isNativeCaptureStatus, nativeHarnessInstallationLocation, type NativeCaptureBridgeConfig } from './memory-native-capture.js';
 
 export type CaptureHarness = 'codex' | 'dsh' | 'opencode';
@@ -137,7 +137,19 @@ function changeEntries(data: HostConfig, installation: HarnessInstallation, remo
   return { ...data, plugin: update(data.plugin, installation.managed.plugin) };
 }
 function assertCurrentOwner(context: MemoryContext) {
-  if (memoryContext().owner !== context.owner) fail('memory_binding_changed', '检查期间账号或项目已变化。');
+  if (nativeMemoryContext(5000, context.owner).owner !== context.owner) fail('memory_binding_changed', '检查期间账号或项目已变化。');
+}
+
+function harnessScope(name: CaptureHarness) {
+  const context = nativeMemoryContext();
+  const location = nativeHarnessInstallationLocation(name, context.owner, context.root);
+  const file = path.join(location.directory, 'installation.json');
+  const legacy = nativeHarnessInstallationLocation(name, context.legacyOwner, context.root);
+  const legacyFile = path.join(legacy.directory, 'installation.json');
+  if (file === legacyFile || existsSync(file) || !existsSync(legacyFile)) return { context, ...location, file };
+  const legacyContext = nativeMemoryContext(5000, context.legacyOwner);
+  if (legacyContext.owner !== context.legacyOwner) fail('memory_binding_changed', '检查期间账号或项目已变化。');
+  return { context: legacyContext, ...legacy, file: legacyFile };
 }
 
 async function capturePreflight(context: MemoryContext): Promise<CapturePreflight> {
@@ -216,7 +228,7 @@ export function installedSessionConfig(installation: HarnessInstallation, sessio
     nodePath: installation.nodePath, auditFile: installation.auditFile };
 }
 export async function installHarness(input: InstallInput) {
-  const name = harness(input.harness), context = memoryContext(5000);
+  const name = harness(input.harness), context = nativeMemoryContext();
   if (input.workspace && !sameHarnessWorkspace(input.workspace, context.root) || !sameHarnessWorkspace(process.cwd(), context.root)) {
     fail('memory_harness_workspace_mismatch', '请在明确绑定项目的工作区根目录注册接入。');
   }
@@ -231,9 +243,11 @@ export async function installHarness(input: InstallInput) {
   if (name === 'opencode' && !input.config && existsSync(path.join(hostHome, 'opencode.jsonc'))) fail('memory_harness_config_unsupported', '已有 JSONC 配置，需要先明确兼容的 JSON 配置路径。');
   const { id, directory } = nativeHarnessInstallationLocation(name, context.owner, context.root);
   const installationFile = path.join(directory, 'installation.json');
-  if (existsSync(installationFile)) {
-    const existing = JSON.parse(text(installationFile)) as HarnessInstallation;
-    if (existing.enabled) fail('memory_harness_already_installed', '已存在接入记录，请先运行 doctor 或安全卸载。');
+  const legacyDirectory = nativeHarnessInstallationLocation(name, context.legacyOwner, context.root).directory;
+  for (const file of new Set([installationFile, path.join(legacyDirectory, 'installation.json')])) {
+    if (existsSync(file) && (JSON.parse(text(file)) as HarnessInstallation).enabled) {
+      fail('memory_harness_already_installed', '已存在接入记录，请先运行 doctor 或安全卸载。');
+    }
   }
   const before = text(configFile), data = readHarnessConfig(before, name, runtime);
   const installation: HarnessInstallation = { schema: 1, id, enabled: true, harness: name, hostVersion, runtime,
@@ -262,10 +276,9 @@ export async function doctorHarness(input: InstallInput) {
   const checkedAt = new Date().toISOString();
   let preflight: CapturePreflight | undefined;
   try {
-    const name = harness(input.harness), context = memoryContext(5000);
+    const name = harness(input.harness), { context, directory, file } = harnessScope(name);
     preflight = await capturePreflight(context);
-    const { directory } = nativeHarnessInstallationLocation(name, context.owner, context.root);
-    const installation = readHarnessInstallation(path.join(directory, 'installation.json'), name);
+    const installation = readHarnessInstallation(file, name);
     if (installation.owner !== context.owner || installation.actor !== context.actor || installation.projectCode !== context.projectCode ||
       !sameHarnessWorkspace(installation.workspace, context.root) || installation.auditFile !== path.join(directory, 'events.ndjson')) {
       fail('memory_binding_changed', '接入记录与当前账号或工作区不一致。');
@@ -296,9 +309,8 @@ export async function doctorHarness(input: InstallInput) {
   }
 }
 export async function uninstallHarness(input: InstallInput) {
-  const name = harness(input.harness), context = memoryContext();
-  const { directory } = nativeHarnessInstallationLocation(name, context.owner, context.root);
-  const installation = readHarnessInstallation(path.join(directory, 'installation.json'), name);
+  const name = harness(input.harness), { directory, file } = harnessScope(name);
+  const installation = readHarnessInstallation(file, name);
   const before = text(installation.configFile), data = readHarnessConfig(before, name, installation.runtime);
   const updated = changeEntries(data, installation, true);
   const backup = path.join(directory, 'config-before-uninstall-' + randomBytes(8).toString('hex') + '.bak');

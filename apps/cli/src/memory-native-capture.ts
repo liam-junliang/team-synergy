@@ -8,7 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { DomainError } from '@team-synergy/domain';
 import { PublicCodeSchema } from '@team-synergy/contracts';
 import { authDirectory } from './auth-store.js';
-import { memoryContext, valueOf } from './memory.js';
+import { nativeMemoryContext, valueOf } from './memory.js';
 
 export type NativeHarness = 'dsh' | 'opencode' | 'codex';
 export type NativeCaptureEvent = { eventId: string; sourceText: string; nativeMessageId: string; nativeSeq?: number };
@@ -44,7 +44,7 @@ export function nativeHarnessInstallationLocation(harness: NativeHarness, owner:
   return { id, directory: path.join(authDirectory(), 'memory-harness', id) };
 }
 
-function recordNativeDelivery(scope: NativeCaptureScope, context: ReturnType<typeof memoryContext>, record:
+function recordNativeDelivery(scope: NativeCaptureScope, context: ReturnType<typeof nativeMemoryContext>, record:
   { kind: 'native-server-received'; captureCode: string; status: CaptureStatus } |
   { kind: 'native-server-delivery-failed'; code: string }) {
   // Outbox state stays authoritative if supplemental diagnostics fail.
@@ -64,12 +64,12 @@ export function nativeCaptureEventId(harness: NativeHarness, hostSessionId: stri
 function scopeContext(scope: NativeCaptureScope) {
   if (!scope || !['dsh', 'opencode', 'codex'].includes(scope.harness) || !id(scope.hostSessionId) || !id(scope.memorySession)
     || typeof scope.owner !== 'string' || !/^[a-f0-9]{64}$/u.test(scope.owner)) throw invalid();
-  const context = memoryContext(5000);
+  const context = nativeMemoryContext(5000, scope.owner);
   if (scope.owner !== context.owner) throw new DomainError('memory_binding_changed', '账号、设备或项目已切换，请重新确认原生采集配置');
   return context;
 }
 
-export async function withNativeCaptureOutbox<T>(scope: NativeCaptureScope, work: (db: DatabaseSync, context: ReturnType<typeof memoryContext>) => T | Promise<T>) {
+export async function withNativeCaptureOutbox<T>(scope: NativeCaptureScope, work: (db: DatabaseSync, context: ReturnType<typeof nativeMemoryContext>) => T | Promise<T>) {
   const context = scopeContext(scope);
   const directory = path.join(authDirectory(), 'memory-native-outbox');
   mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -279,7 +279,7 @@ export async function nativeCaptureConfig(input: { harness: unknown; hostSession
   const harness=input.harness as NativeHarness,hostSessionId=input.hostSessionId;
   const memorySession=input.memorySession??harness+'.'+hash(hostSessionId).slice(0,32);
   if(!id(memorySession))throw invalid();
-  const context=memoryContext();
+  const context=nativeMemoryContext();
   if(valueOf(await context.client.whoami()).user_code!==context.actor)throw new DomainError('memory_actor_mismatch','设备登录身份与账号不匹配');
   valueOf(await context.client.request('GET',context.route+'/binding'));
   return {harness,hostSessionId,memorySession,owner:context.owner,cwd:realpathSync.native(process.cwd()),

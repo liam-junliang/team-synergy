@@ -14,7 +14,7 @@ export function valueOf<T>(result: ApiResult<T>): T {
   throw new DomainError(result.error.code, result.error.message);
 }
 
-export function memoryContext(requestTimeoutMs = 12000, explicitProjectCode?: string) {
+function resolveMemoryContext(requestTimeoutMs: number, explicitProjectCode?: string, nativeCapture?: { owner?: string }) {
   const auth = readAuthConfig();
   if (!auth?.device_token) throw new DomainError('login_required', '请先登录 tsp');
   if (explicitProjectCode !== undefined && !PublicCodeSchema.safeParse(explicitProjectCode).success) {
@@ -32,9 +32,24 @@ export function memoryContext(requestTimeoutMs = 12000, explicitProjectCode?: st
   const code = explicitProjectCode ?? project?.binding.project_code;
   if (!code) throw new DomainError('project_binding_required', '请先在工作区绑定项目');
   const device = localDeviceFingerprint(api, auth.device_token);
-  const owner = createHash('sha256').update(JSON.stringify([api, actor, device, auth.device_token, root, code])).digest('hex');
-  const client = createApiClient({ baseUrl: api, deviceToken: auth.device_token, redirect: 'error', requestTimeoutMs });
-  return { actor, root, owner, client, projectCode: code, route: '/projects/' + encodeURIComponent(code) + '/memory' };
+  const legacyOwner = createHash('sha256').update(JSON.stringify([api, actor, device, auth.device_token, root, code])).digest('hex');
+  const renewable = nativeCapture !== undefined && nativeCapture.owner !== legacyOwner &&
+    PublicCodeSchema.safeParse(auth.device_code).success && PublicCodeSchema.safeParse(auth.session_code).success;
+  const owner = renewable
+    ? createHash('sha256').update(JSON.stringify(['native-device-session', api, actor, auth.device_code, auth.session_code, root, code])).digest('hex')
+    : legacyOwner;
+  const client = createApiClient({ baseUrl: api, redirect: 'error', requestTimeoutMs,
+    ...(renewable ? { storedDeviceProfile: auth } : { deviceToken: auth.device_token }) });
+  return { actor, root, owner, legacyOwner, client, projectCode: code, route: '/projects/' + encodeURIComponent(code) + '/memory' };
+}
+
+export function memoryContext(requestTimeoutMs = 12000, explicitProjectCode?: string) {
+  return resolveMemoryContext(requestTimeoutMs, explicitProjectCode);
+}
+
+/** A new native registration is scoped to the stored login session, not its rotating access token. */
+export function nativeMemoryContext(requestTimeoutMs = 5000, existingOwner?: string) {
+  return resolveMemoryContext(requestTimeoutMs, undefined, { owner: existingOwner });
 }
 
 export type MemoryContext = ReturnType<typeof memoryContext>;
