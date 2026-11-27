@@ -15,6 +15,7 @@ import { memoryModelStatus } from '../memory-observability.js';
 
 type Request = FastifyRequest<{ Params: { projectCode: string } }>;
 type Actor = { principalCode: string; projectCode: string };
+type MemoryRouteOptions = { engines?: EngineConfig; captureEnabled: boolean; readEnabled: boolean };
 
 /** Read-only account entry remains available when capture/projection is disabled. */
 export function registerMemoryCenterRoutes(app: FastifyInstance, db: Db, engines?: EngineConfig) {
@@ -36,7 +37,7 @@ export function registerMemoryCenterRoutes(app: FastifyInstance, db: Db, engines
   });
 }
 
-export function registerMemoryRoutes(app: FastifyInstance, db: Db, engines?: EngineConfig, captureEnabled = true) {
+export function registerMemoryRoutes(app: FastifyInstance, db: Db, { engines, captureEnabled, readEnabled }: MemoryRouteOptions) {
   const memory = createMemorySliceUseCases(db);
   const base = '/projects/:projectCode/memory';
 
@@ -56,6 +57,16 @@ export function registerMemoryRoutes(app: FastifyInstance, db: Db, engines?: Eng
       return reply.code(500).send({ ok: false, error: { code: 'internal_error', message: '记忆请求失败。' } });
     }
   }
+
+  app.get(base + '/capture-preflight', { logLevel: 'silent' }, (request: Request, reply) => handle(request, reply, async actor => {
+    const canWrite = await memory.canCapture(actor);
+    return {
+      serviceEnabled: captureEnabled,
+      allowed: captureEnabled && canWrite,
+      reason: !canWrite ? 'memory_forbidden' : captureEnabled ? null : 'memory_capture_disabled',
+    };
+  }));
+  if (!readEnabled) return;
 
   const search = (request: Request, reply: FastifyReply) => handle(request, reply, async actor => {
     const input = MemorySearchQuery.safeParse(request.method === 'POST' ? request.body : request.query);

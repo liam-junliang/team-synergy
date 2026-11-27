@@ -80,6 +80,7 @@ async function fixture(t, { auth = true, bound } = {}) {
         answer({ project_code: code, repositories: [{ code: 'R'.repeat(20), name: code === projectA ? 'alpha-repo' : 'beta-repo' }], runs: [] }); return;
       }
       if (suffix === '/memory/binding') { answer({}); return; }
+      if (suffix === '/memory/capture-preflight') { answer({ serviceEnabled: true, allowed: true, reason: null }); return; }
       if (suffix === '/memory/brief') { answer(body.scope === 'personal' ? personalEvidence(code) : [rows[code]]); return; }
       if (suffix === '/memory/sources') { answer([rows[code], ...personalEvidence(code)].filter(row => body.sources.includes(row.source))); return; }
       if (suffix === '/materials/list') { answer({ project_code: code, items: [{ title: code === projectA ? 'Alpha guide' : 'Beta guide' }] }); return; }

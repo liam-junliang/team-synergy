@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { installedSessionConfig } from '../dist/memory-harness-install.js';
+import { nativeCaptureEventId } from '../dist/memory-native-capture.js';
 
 import {harnessFixture} from './memory-harness-fixture.mjs';
 
@@ -70,6 +71,47 @@ test('missing identity, unbound projects, unknown versions and revoked credentia
   assert.equal((await f.install()).value.error.code, 'project_binding_required'); assert.equal(existsSync(config), false);
 });
 
+test('persistent install fails closed on disabled, denied or malformed capture preflight', async t => {
+  const f = await harnessFixture(t), config = path.join(f.home, 'hooks.json');
+  for (const preflight of [{ serviceEnabled: false, allowed: false, reason: 'memory_capture_disabled' },
+    { serviceEnabled: true, allowed: false, reason: 'memory_forbidden' }]) {
+    f.setPreflight(preflight);
+    assert.equal((await f.install()).value.error.code, preflight.reason);
+    const { data } = (await f.run(['doctor', '--harness', 'codex'])).value;
+    assert.equal(data.status, preflight.reason);
+    assert.deepEqual(data.capturePreflight, preflight);
+    assert.equal(existsSync(config), false);
+  }
+  f.setPreflight({ serviceEnabled: false, allowed: true, reason: null });
+  assert.equal((await f.install()).value.error.code, 'api_bad_response');
+  assert.equal(existsSync(config), false);
+  assert.equal(f.posts.length, 0);
+});
+
+test('doctor distinguishes delivery failure from server receipt and clears it after retry', async t => {
+  const f = await harnessFixture(t), installed = (await f.install()).value.data;
+  const registration = JSON.parse(readFileSync(installed.installationFile, 'utf8'));
+  const scope = installedSessionConfig(registration, 'delivery-session');
+  const args = ['--harness', scope.harness, '--host-session', scope.hostSessionId, '--session', scope.memorySession, '--owner', scope.owner];
+  const eventId = nativeCaptureEventId('codex', scope.hostSessionId, 'operator-turn');
+  assert.equal((await f.run(['enqueue', ...args], { ready: true,
+    event: { eventId, nativeMessageId: 'operator-turn', sourceText: 'PRIVATE-OPERATOR-SOURCE' } })).code, 0);
+  f.setDeliveryFailure(true);
+  assert.equal((await f.run(['drain', ...args])).value.data.errorCode, 'fixture_delivery_unavailable');
+  const failed = (await f.run(['doctor', '--harness', 'codex'])).value.data;
+  assert.equal(failed.remoteDelivery, 'local_delivery_failed');
+  assert.equal(failed.deliveryErrorCode, 'fixture_delivery_unavailable');
+  assert.equal(failed.latestCapture, null);
+  assert.doesNotMatch(JSON.stringify(failed), /PRIVATE-/);
+  f.setDeliveryFailure(false);
+  assert.equal((await f.run(['drain', ...args])).value.data.accepted, 1);
+  assert.equal(f.posts.length, 1);
+  const recovered = (await f.run(['doctor', '--harness', 'codex'])).value.data;
+  assert.equal(recovered.remoteDelivery, 'verified_server_receipt');
+  assert.equal(recovered.deliveryErrorCode, null);
+  assert.equal(recovered.latestCapture.status, 'pending');
+});
+
 test('Codex digests stage without body, verified native turns span new sessions and replay exactly once', async t => {
   const f = await harnessFixture(t), installed = (await f.install()).value.data;
   const registration = JSON.parse(readFileSync(installed.installationFile, 'utf8'));
@@ -90,6 +132,19 @@ test('Codex digests stage without body, verified native turns span new sessions 
   assert.notEqual(f.posts[0].sessionId, f.posts[1].sessionId);
   assert.ok(f.posts.every(row => !row.sourceText.includes('HISTORICAL')));
   assert.doesNotMatch(readFileSync(registration.auditFile, 'utf8'), /Verified operator input|HISTORICAL-BODY/);
+  f.setCaptureStatus('skipped');
+  const { data } = (await f.run(['doctor', '--harness', 'codex'])).value;
+  assert.equal(data.remoteDelivery, 'verified_server_receipt');
+  assert.equal(data.latestCapture.captureCode, '2'.padStart(20, '0'));
+  assert.equal(data.latestCapture.status, 'skipped');
+  assert.equal(data.latestCapture.statusSource, 'server');
+  assert.equal(data.latestCapture.errorCode, 'memory_no_material');
+  assert.doesNotMatch(JSON.stringify(data), /PRIVATE-SERVER|Verified operator input/);
+  f.setCaptureStatus(null);
+  const offline = (await f.run(['doctor', '--harness', 'codex'])).value.data;
+  assert.equal(offline.remoteDelivery, 'acknowledged_status_unavailable');
+  assert.equal(offline.latestCapture.statusSource, 'delivery_receipt');
+  assert.equal(offline.latestCapture.refreshErrorCode, 'memory_capture_not_found');
 });
 
 test('Codex rejects subagents, unverified Desktop versions, mirrors, automatic continuations and account changes', async t => {
@@ -117,12 +172,13 @@ test('Codex rejects subagents, unverified Desktop versions, mirrors, automatic c
 
 test('verified Desktop alpha typed operator events require root turn attribution and ignore raw user mirrors', async t => {
   const f = await harnessFixture(t);
-  writeFileSync(f.runtime, "console.log('codex-cli 0.169.0-alpha.11.1');\n");
+  const version = '0.171.0-alpha.13';
+  writeFileSync(f.runtime, `console.log('codex-cli ${version}');\n`);
   const installed = (await f.install()).value.data, registration = JSON.parse(readFileSync(installed.installationFile, 'utf8'));
   const invoke = input => f.run(['event', '--installation', installed.installationFile], input);
   for (const [session, override] of [['desktop', {}], ['delegated', { initiating_agent_path: ['root', 'child'] }],
     ['continuation', { parent_turn_id: 'earlier-turn', turn_trigger: 'stop_hook' }]]) {
-    const transcript = nativeTranscript(f, session, { source: 'vscode', cli_version: '0.169.0-alpha.11.1' });
+    const transcript = nativeTranscript(f, session, { source: 'vscode', cli_version: version });
     const turn = 'native-turn', body = 'Native operator ' + session;
     // Verified real host order: task metadata exists before SessionStart, but
     // the typed user event appears only after UserPromptSubmit returns.
@@ -145,8 +201,8 @@ test('verified Desktop alpha typed operator events require root turn attribution
 });
 
 test('DSH patch arrays and OpenCode native plugin lists preserve foreign entries through install and uninstall', async t => {
-  for (const harness of ['dsh', 'opencode']) {
-    const f = await harnessFixture(t), version = harness === 'dsh' ? '0.2.1-rc.2' : '1.14.21';
+  for (const [harness, version] of [['dsh', '0.2.1-rc.2'], ['dsh', '0.2.2-rc.5'], ['opencode', '1.14.21']]) {
+    const f = await harnessFixture(t);
     writeFileSync(f.runtime, `console.log('${version}');\n`);
     const configFile = path.join(f.home, harness === 'dsh' ? 'cordis.patch.yml' : 'opencode.json');
     const foreign = harness === 'dsh' ? [{ insert: [{ id: 'existing-mcp', name: 'keep-me' }] }] : { plugin: ['file:///existing.mjs'], model: 'keep-me' };

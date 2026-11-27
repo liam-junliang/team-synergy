@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
@@ -32,6 +32,29 @@ type OutboxRow = { cursor?: number; event_id: string; source_text: string; nativ
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const id = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9._:-]{1,160}$/u.test(value);
 const invalid = () => new DomainError('memory_native_invalid', '原生采集配置或事件无效');
+const captureStatuses = ['pending', 'processing', 'completed', 'needs_clarification', 'skipped', 'failed'] as const;
+type CaptureStatus = typeof captureStatuses[number];
+
+export function isNativeCaptureStatus(value: unknown): value is CaptureStatus {
+  return captureStatuses.some(status => status === value);
+}
+
+export function nativeHarnessInstallationLocation(harness: NativeHarness, owner: string, workspace: string) {
+  const id = hash(JSON.stringify([harness, owner, workspace])).slice(0, 32);
+  return { id, directory: path.join(authDirectory(), 'memory-harness', id) };
+}
+
+function recordNativeDelivery(scope: NativeCaptureScope, context: ReturnType<typeof memoryContext>, record:
+  { kind: 'native-server-received'; captureCode: string; status: CaptureStatus } |
+  { kind: 'native-server-delivery-failed'; code: string }) {
+  // Outbox state stays authoritative if supplemental diagnostics fail.
+  try {
+    const { directory } = nativeHarnessInstallationLocation(scope.harness, scope.owner, context.root);
+    if (!existsSync(path.join(directory, 'installation.json'))) return;
+    appendFileSync(path.join(directory, 'events.ndjson'),
+      JSON.stringify({ at: new Date().toISOString(), ...record }) + '\n', { mode: 0o600 });
+  } catch { /* A diagnostics failure never changes delivery or retry. */ }
+}
 
 export function nativeCaptureEventId(harness: NativeHarness, hostSessionId: string, nativeMessageId: string) {
   if (!['dsh', 'opencode', 'codex'].includes(harness) || !id(hostSessionId) || !id(nativeMessageId)) throw invalid();
@@ -162,16 +185,20 @@ export async function drainNativeCapture(scope: NativeCaptureScope) {
           sessionId: scope.memorySession, eventId: row.event_id, sourceText: row.source_text,
         }));
         if (!PublicCodeSchema.safeParse(result?.captureCode).success ||
-          !['pending','processing','completed','needs_clarification','skipped','failed'].includes(result.status)) {
+          !isNativeCaptureStatus(result.status)) {
           throw new DomainError('api_bad_response', '平台未确认持久采集任务');
         }
         const changed = db.prepare("UPDATE events SET state='accepted',capture_code=?,claim=NULL,lease_until=NULL,last_error=NULL WHERE event_id=? AND claim=? AND state='sending'")
           .run(result.captureCode, row.event_id, claim);
-        if (changed.changes === 1) accepted++;
+        if (changed.changes === 1) {
+          accepted++;
+          recordNativeDelivery(scope, context, { kind: 'native-server-received', captureCode: result.captureCode, status: result.status });
+        }
       } catch (error) {
         const code = error instanceof DomainError && /^[a-z0-9_]{1,100}$/u.test(error.code) ? error.code : 'memory_native_delivery_failed';
-        db.prepare("UPDATE events SET state='ready',claim=NULL,lease_until=NULL,last_error=? WHERE event_id=? AND claim=? AND state='sending'")
+        const changed = db.prepare("UPDATE events SET state='ready',claim=NULL,lease_until=NULL,last_error=? WHERE event_id=? AND claim=? AND state='sending'")
           .run(code, row.event_id, claim);
+        if (changed.changes === 1) recordNativeDelivery(scope, context, { kind: 'native-server-delivery-failed', code });
         return { accepted, pending: true, errorCode: code };
       }
     }

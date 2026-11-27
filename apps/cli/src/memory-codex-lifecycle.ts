@@ -4,7 +4,7 @@ import path from 'node:path';
 import { DomainError } from '@team-synergy/domain';
 import { authDirectory } from './auth-store.js';
 import { createNativeCaptureBridge, enqueueNativeCapture, nativeCaptureEventId, withNativeCaptureOutbox } from './memory-native-capture.js';
-import { harnessRuntimeVersion, installedSessionConfig, readHarnessInstallation, sameHarnessWorkspace } from './memory-harness-install.js';
+import { harnessRuntimeVersion, installedSessionConfig, readHarnessInstallation, sameHarnessWorkspace, supportedHarnessVersions } from './memory-harness-install.js';
 
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -26,17 +26,18 @@ function transcript(event: Record<string, unknown>, hostHome: string, workspace:
   if (!object(meta) || meta.type !== 'session_meta' || !object(meta.payload)) fail('memory_codex_source_invalid');
   const payload = meta.payload;
   // This is a pinned, experimentally verified transcript fallback, not an official stable schema.
-  if (!['0.145.0', '0.169.0-alpha.11.1'].includes(String(payload.cli_version))) fail('memory_codex_version_unsupported');
-  const sources = payload.cli_version === '0.145.0' ? ['exec'] : ['exec', 'vscode'];
-  if (!sources.includes(String(payload.source)) || payload.id !== event.session_id ||
+  if (typeof payload.cli_version !== 'string' || !supportedHarnessVersions.codex.includes(payload.cli_version)) fail('memory_codex_version_unsupported');
+  const legacyEvents = payload.cli_version === '0.145.0';
+  const sources = legacyEvents ? ['exec'] : ['exec', 'vscode'];
+  if (typeof payload.source !== 'string' || !sources.includes(payload.source) || payload.id !== event.session_id ||
     !sameHarnessWorkspace(payload.cwd, workspace)) fail('memory_codex_source_not_operator');
-  return { file, size: statSync(file).size, version: payload.cli_version, source: payload.source };
+  return { file, size: statSync(file).size, legacyEvents, source: payload.source };
 }
 function rootAttribution(value: unknown, turn: string, source: unknown) {
   return object(value) && value.turn_id === turn && value.root_turn_id === turn && value.parent_turn_id === null &&
     value.initiating_agent_path === null && (source === 'exec' ? value.turn_trigger === 'exec' : source === 'vscode' && value.turn_trigger === null);
 }
-function promptMetadata(file: string, size: number, turn: string, version: unknown, source: unknown) {
+function promptMetadata(file: string, size: number, turn: string, legacyEvents: boolean, source: string) {
   // Native task_started/turn_context can precede SessionStart. Inspect only a
   // bounded tail for the matching turn's metadata; never import earlier text.
   const offset = Math.max(0, size - 131072), tail = boundedRead(file, offset, size - offset);
@@ -44,15 +45,15 @@ function promptMetadata(file: string, size: number, turn: string, version: unkno
   for (const line of lines) {
     let row: unknown; try { row = JSON.parse(line); } catch { continue; }
     if (!object(row) || !object(row.payload) || row.payload.turn_id !== turn) continue;
-    if (version === '0.145.0' && row.type === 'turn_context') return true;
-    if (version === '0.169.0-alpha.11.1' && row.type === 'event_msg' && row.payload.type === 'task_started') {
+    if (legacyEvents && row.type === 'turn_context') return true;
+    if (!legacyEvents && row.type === 'event_msg' && row.payload.type === 'task_started') {
       if (!rootAttribution(row.payload.turn_attribution, turn, source)) fail('memory_codex_source_not_operator');
       return true;
     }
   }
   return false;
 }
-function currentOperator(file: string, offset: number, size: number, turn: string, expectedDigest: string, version: unknown, source: unknown, verifiedMetadata: boolean) {
+function currentOperator(file: string, offset: number, size: number, turn: string, expectedDigest: string, legacyEvents: boolean, source: string, verifiedMetadata: boolean) {
   if (size < offset || size - offset > 2 * 1024 * 1024) fail('memory_codex_checkpoint_unavailable');
   const input = boundedRead(file, offset, size - offset);
   if (input && !input.endsWith('\n')) fail('memory_codex_source_incomplete');
@@ -62,13 +63,13 @@ function currentOperator(file: string, offset: number, size: number, turn: strin
     try { row = JSON.parse(line); } catch { return fail('memory_codex_source_invalid'); }
     if (!object(row) || !object(row.payload)) continue;
     const payload = row.payload;
-    if (version === '0.169.0-alpha.11.1' && row.type === 'event_msg' && payload.type === 'task_started' && payload.turn_id === turn) {
+    if (!legacyEvents && row.type === 'event_msg' && payload.type === 'task_started' && payload.turn_id === turn) {
       operatorTurn = rootAttribution(payload.turn_attribution, turn, source);
       if (!operatorTurn) fail('memory_codex_source_not_operator');
     }
     if (row.type === 'turn_context' || row.type === 'event_msg' && payload.type === 'task_started') activeTurn = payload.turn_id;
     let message: string | undefined;
-    if (version === '0.145.0') {
+    if (legacyEvents) {
       if (row.type !== 'event_msg' || payload.type !== 'user_message' || activeTurn !== turn) continue;
       if (typeof payload.message !== 'string' || payload.message.length > 4000 ||
         ['images', 'local_images', 'audio', 'local_audio', 'text_elements'].some(key => payload[key] !== undefined &&
@@ -125,7 +126,7 @@ export async function codexLifecycleEvent(installationFile: string, input: unkno
       if (input.hook_event_name === 'UserPromptSubmit') {
         if (typeof input.prompt !== 'string' || !input.prompt.trim() || input.prompt.length > 4000) fail('memory_codex_source_unsupported');
         const hash = digest(input.prompt);
-        const verifiedMetadata = promptMetadata(source.file, source.size, turn, source.version, source.source);
+        const verifiedMetadata = promptMetadata(source.file, source.size, turn, source.legacyEvents, source.source);
         db.exec('BEGIN IMMEDIATE');
         try {
           const previous = db.prepare('SELECT digest FROM codex_turns WHERE turn_id=?').get(turn);
@@ -145,7 +146,7 @@ export async function codexLifecycleEvent(installationFile: string, input: unkno
         audit('native-continuation-ignored', undefined, eventId);
         return { ignored: 'automatic_continuation' };
       }
-      const body = currentOperator(source.file, Number(checkpoint.offset), source.size, turn, String(pending.digest), source.version, source.source, pending.operator_turn === 1);
+      const body = currentOperator(source.file, Number(checkpoint.offset), source.size, turn, String(pending.digest), source.legacyEvents, source.source, pending.operator_turn === 1);
       const ack = await enqueueNativeCapture(config, { eventId, nativeMessageId: turn, sourceText: body });
       db.exec('BEGIN IMMEDIATE');
       try {

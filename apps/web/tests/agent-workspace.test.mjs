@@ -19,6 +19,7 @@ function render(Component, props, entries = []) {
   entries.forEach(([key, value]) => client.setQueryData(key, value));
   try { return renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(Component, props))); } finally { client.clear(); }
 }
+const elements = node => Array.isArray(node) ? node.flatMap(elements) : node?.props ? [node, ...elements(node.props.children)] : [];
 const project = { code: 'P', name: 'Product', team_code: 'T', status: 'active', role: 'admin', capabilities: { read: true, write: true, manage: true } };
 const skill = { code: 'S', name: 'review', description: 'Review changes', scope_type: 'team', scope_code: 'T', current_revision: 2, published_revision: 1, can_edit: true, can_manage: true, archived: false, available_revisions: [1], owner_user_code: 'U', updated_at: '2026-10-18T00:00:00Z', shares: [] };
 const file = (path, content) => ({ path, content_base64: Buffer.from(content).toString('base64'), sha256: 'a'.repeat(64), size_bytes: Buffer.byteLength(content) });
@@ -344,6 +345,39 @@ test('Agent connection defaults to HTTP Connector and offers local setup when th
   const noProject = render(agent.AgentConnectionWorkspace, { user, project: { ...project, status: 'archived' } }, entries);
   assert.match(noProject, /<button(?![^>]*disabled=)[^>]*>New connection<\/button>/);
   assert.match(noProject, /create a time-limited credential for this account/);
+});
+
+test('local capture install requires an explicit check for the active account and project', () => {
+  const user = { code: 'U', account: 'liam', display_name: 'Liam' };
+  const settings = [['platform-client-config'], { public_web_url: null, public_api_url: null }];
+  const allowed = { serviceEnabled: true, allowed: true, reason: null };
+  function RequestedCapture() {
+    const guide = agent.CliConnectionGuide({ user, project });
+    const setup = elements(guide).find(node => node.props.accountCode === user.code && node.props.projectCode === project.code);
+    const page = setup.type(setup.props);
+    const toggle = elements(page).find(node => node.type === 'input' && node.props.type === 'checkbox');
+    if (!toggle.props.checked) toggle.props.onChange({ target: { checked: true } });
+    return page;
+  }
+  const captureKey = (account, project) => ['memory-capture-preflight', account, project];
+  const pending = render(RequestedCapture, {}, [settings, [captureKey('ANOTHER-USER', 'P'), allowed], [captureKey('U', 'Q'), allowed]]);
+  assert.match(pending, /正在检查采集服务与项目权限/);
+  assert.doesNotMatch(pending, /tsp memory native install/);
+  for (const [response, message] of [
+    [{ serviceEnabled: false, allowed: false, reason: 'memory_capture_disabled' }, /平台尚未开启会话采集服务/],
+    [{ serviceEnabled: true, allowed: false, reason: 'memory_forbidden' }, /当前账号没有此项目的会话采集权限/],
+  ]) {
+    const blocked = render(RequestedCapture, {}, [settings, [captureKey('U', 'P'), response]]);
+    assert.match(blocked, message);
+    assert.match(blocked, /tsp memory native doctor --harness codex|重新检查采集条件/);
+    assert.match(blocked, /tsp memory native uninstall --harness codex/);
+    assert.doesNotMatch(blocked, /tsp memory native install/);
+  }
+  const clear = render(RequestedCapture, {}, [settings, [captureKey('U', 'P'), allowed]]);
+  assert.match(clear, /服务与项目权限检查通过/);
+  assert.match(clear, /tsp auth whoami\ntsp project current<\/code>/);
+  assert.match(clear, /<code>tsp memory native install --harness codex<\/code>/);
+  assert.match(clear, /href="\/account\/memory\?view=processing"/);
 });
 
 test('both manuals describe remote HTTP authorization and explicit local capture without legacy MCP setup', () => {

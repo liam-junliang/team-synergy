@@ -12,7 +12,9 @@ export async function harnessFixture(t) {
   const root = mkdtempSync(path.join(tmpdir(), 'tsp-persistent-harness-'));
   const cwd = path.join(root, 'workspace'), member = path.join(root, 'member'), home = path.join(root, 'host');
   for (const directory of [path.join(cwd, '.agent'), member, path.join(home, 'sessions')]) mkdirSync(directory, { recursive: true });
-  const posts = [], children = new Set(); let authorized = true;
+  const posts = [], children = new Set(), receipts = new Set(); let authorized = true;
+  let preflight = { serviceEnabled: true, allowed: true, reason: null };
+  let captureStatus = 'pending', deliveryFailure = false;
   const server = createServer(async (req, res) => {
     res.setHeader('content-type', 'application/json');
     if (!authorized || req.headers.authorization !== 'Bearer synthetic-device') {
@@ -21,10 +23,25 @@ export async function harnessFixture(t) {
     let data;
     if (req.url === '/auth/whoami') data = { user_code: 'fixture-owner' };
     else if (req.url === '/projects/P/memory/binding') data = {};
+    else if (req.url === '/projects/P/memory/capture-preflight') data = preflight;
     else if (req.url === '/projects/P/memory/capture-events') {
       let input = ''; for await (const chunk of req) input += chunk;
+      if (deliveryFailure) {
+        res.statusCode = 503;
+        res.end(JSON.stringify({ ok: false, error: { code: 'fixture_delivery_unavailable', message: 'PRIVATE-SERVER-ERROR' } })); return;
+      }
       const body = JSON.parse(input); posts.push(body);
-      data = { captureCode: '1'.repeat(20), status: 'pending' };
+      const captureCode = String(posts.length).padStart(20, '0');
+      receipts.add(captureCode);
+      data = { captureCode, status: 'pending' };
+    } else if (req.url?.startsWith('/projects/P/memory/captures/')) {
+      const captureCode = req.url.split('/').at(-1);
+      if (!captureStatus || !receipts.has(captureCode)) {
+        res.statusCode = 404;
+        res.end(JSON.stringify({ ok: false, error: { code: 'memory_capture_not_found', message: 'fixture' } })); return;
+      }
+      data = { captureCode, status: captureStatus, result: { text: 'PRIVATE-SERVER-RESULT' },
+        ...(captureStatus === 'skipped' ? { error: { code: 'memory_no_material', message: 'PRIVATE-SERVER-ERROR' } } : {}) };
     } else { res.statusCode = 404; res.end('{}'); return; }
     res.end(JSON.stringify({ ok: true, data }));
   });
@@ -54,5 +71,7 @@ export async function harnessFixture(t) {
     // Retry only Windows filesystem cleanup; assertions and capture never retry.
     await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
   });
-  return { root, cwd, home, member, runtime, env, auth, posts, install, run, setAuthorized: value => { authorized = value; } };
+  return { root, cwd, home, member, runtime, env, auth, posts, install, run, setAuthorized: value => { authorized = value; },
+    setPreflight: value => { preflight = value; }, setCaptureStatus: value => { captureStatus = value; },
+    setDeliveryFailure: value => { deliveryFailure = value; } };
 }

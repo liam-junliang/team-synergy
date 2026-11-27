@@ -207,7 +207,7 @@ export function registerMemoryCommands(program: Command, print: (result: { ok: t
       .option('--config <file>', '明确的宿主配置文件绝对路径')
       .option('--runtime <file>', '已安装宿主的绝对入口；只接受已验证版本')
       .description(action === 'install' ? '持久注册当前工作区与账号，备份配置且只管理自有条目' :
-        action === 'doctor' ? '读取当前时点的配置、账号、版本和本地采集线索，不推断服务端已收到事件' : '仅删除自有接入条目，保留其他插件与本地队列')
+        action === 'doctor' ? '检查采集权限、宿主配置、本地入队和最近的服务端采集编号' : '仅删除自有接入条目，保留其他插件与本地队列')
       .action(async opts => {
         const onboarding = await import('./memory-harness-install.js');
         const execute = action === 'install' ? onboarding.installHarness : action === 'doctor' ? onboarding.doctorHarness : onboarding.uninstallHarness;
